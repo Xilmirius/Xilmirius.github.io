@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/static/css/main.aa09bf54.css",
-    "main.js": "/static/js/main.e9245a90.js",
+    "main.css": "/static/css/main.7e454262.css",
+    "main.js": "/static/js/main.84d4636a.js",
     "static/js/787.40b5365c.chunk.js": "/static/js/787.40b5365c.chunk.js",
     "static/media/clouds.jpg": "/static/media/clouds.08fcd80007fae8fc7170.jpg",
     "static/media/envmap.hdr": "/static/media/envmap.f07529c7b1ea73b341b5.hdr",
@@ -13,13 +13,9 @@
     "static/media/venus.jpg": "/static/media/venus.4b03f2d64e23f1c2b6a0.jpg",
     "static/media/mercurio.jpg": "/static/media/mercurio.8f80953b60adac9859cd.jpg",
     "static/media/sun.jpg": "/static/media/sun.4b569137334e61081651.jpg",
-    "static/media/Rock_045_Height.png": "/static/media/Rock_045_Height.bb6414a244dc6828affd.png",
     "static/media/martes.jpg": "/static/media/martes.33960f5af615e67309e5.jpg",
     "static/media/jupiter.jpg": "/static/media/jupiter.3e84533e157949a99de4.jpg",
     "static/media/tierra.jpg": "/static/media/tierra.981cc3e3660e809249a3.jpg",
-    "static/media/Rock_045_Roughness.jpg": "/static/media/Rock_045_Roughness.fa05785c59f20a20288d.jpg",
-    "static/media/Rock_045_BaseColor.jpg": "/static/media/Rock_045_BaseColor.329f2a97c3823eb612e9.jpg",
-    "static/media/Rock_045_Normal.jpg": "/static/media/Rock_045_Normal.f6500ea26ab3f07de77f.jpg",
     "static/media/neptuno.jpg": "/static/media/neptuno.6dd112666aad0cd68958.jpg",
     "static/media/saturno.jpg": "/static/media/saturno.3b074d8e6087d14e4225.jpg",
     "static/media/water.jpg": "/static/media/water.5c9e1728b5b4f68dfee8.jpg",
@@ -30,12 +26,12 @@
     "static/media/grass.jpg": "/static/media/grass.ae09b4e25401e692f958.jpg",
     "static/media/saturno_ani.png": "/static/media/saturno_ani.fe76bbb008a07a864ada.png",
     "index.html": "/index.html",
-    "main.aa09bf54.css.map": "/static/css/main.aa09bf54.css.map",
-    "main.e9245a90.js.map": "/static/js/main.e9245a90.js.map",
+    "main.7e454262.css.map": "/static/css/main.7e454262.css.map",
+    "main.84d4636a.js.map": "/static/js/main.84d4636a.js.map",
     "787.40b5365c.chunk.js.map": "/static/js/787.40b5365c.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.aa09bf54.css",
-    "static/js/main.e9245a90.js"
+    "static/css/main.7e454262.css",
+    "static/js/main.84d4636a.js"
   ]
 }
