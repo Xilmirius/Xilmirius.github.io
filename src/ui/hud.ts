@@ -363,7 +363,7 @@ export class Hud {
     SLOTS.forEach((slot, i) => {
       const prev = this.prevCd[i] ?? 0;
       const cur = me.cd[i];
-      if (prev > 0.25 && cur <= 0 && slot !== 'basic' && slot !== 'push') {
+      if (prev > 0.25 && cur <= 0 && slot !== 'basic' && slot !== 'push' && !(slot === 'r' && this.rules.ultCharge)) {
         const el = this.slotEls.get(slot);
         if (el) { el.root.classList.remove('ready'); void el.root.offsetWidth; el.root.classList.add('ready'); }
         if (slot !== 'r') audio.play('ready', 0.5);

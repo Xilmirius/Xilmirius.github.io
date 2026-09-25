@@ -94,3 +94,25 @@ Donde el GDD dejaba una pregunta abierta, acá está la respuesta **provisoria**
 **DW-33 · Progreso entre partidas local y solo cosmético.** Nivel de cuenta, logros y sombreros en `localStorage`: sin login, sin pay-to-win (GDD §12). Los sombreros viajan por el lobby para que todos los vean.
 
 **DW-34 · Temas visuales separados de los mapas.** Un tema solo cambia cielo, luces, neón y decoración, así que cualquier mapa se ve en cualquier tema. El "casino visual" pedido se interpretó como espectáculo de luces (tema Neón, el default) y no como mecánica de casino.
+
+## Segunda ronda de pruebas (pedidos del jugador)
+
+**DW-35 · Reglas separadas de los modos.** Un "modo" es la suma de *cómo se gana* (`GameMode`) y *qué sistemas están prendidos* (`Ruleset`, `src/core/rules.ts`). La simulación pregunta por sistemas (`sim.rules.crafting`), nunca por el modo. Así el núcleo se puede "diseccionar" en varios modos (brawler, MOBA, battle royale, obstáculos) sin reescribir combate ni red. Plan completo: [PLATAFORMA_Y_MODOS.md](PLATAFORMA_Y_MODOS.md).
+
+**DW-36 · Brawler liviano por defecto.** Probado en partida: administrar materiales, forja, ítems activos y niveles no entra en una partida de brawler de pocos minutos. Las reglas **Brawler** apagan niveles, forja, ítems y reparación; todo está desbloqueado desde el inicio y la ulti **se carga pegando** (≈220 de heat), juntando trozos (+4% cada uno) y de a poco sola. Todo lo anterior sigue vivo en las reglas **Completo**, pensadas como base del MOBA. Reemplaza, para Brawler, a DW-13 a DW-18.
+
+**DW-37 · Dash en Shift.** Ráfaga de ≈4 m (24 m/s durante 0.17 s), enfriamiento 1.3 s, uno en el aire. Vive en el movimiento compartido (`movement.ts`), así el cliente lo predice igual que el salto (sin lag). **No cancela un lanzamiento**: para recuperarse hay que usar primero el segundo salto y después el dash. Así los ring-outs siguen pasando y recuperarse es una habilidad (salto → dash), no un botón de pánico.
+
+**DW-38 · Cámara fija.** La cámara solo sigue al personaje, con ángulo y distancia constantes. Se sacaron el Shift para mirar lejos (D-0013 queda reemplazada en la versión web), los sacudones, el zoom del KO, el "golpe" de FOV y la cámara lenta: desorientaban. El peso del golpe queda en un congelado de 20–80 ms (hitstop), solo si el golpe te involucra o pasa cerca.
+
+**DW-39 · Efectos: color, nunca blanco.** El bloom quedó contenido (fuerza 0.3, umbral 1.2) y los destellos de pantalla son un tinte de color **en los bordes** con tope, nunca pantalla completa. Los efectos usan mezcla normal (no aditiva: diez efectos aditivos superpuestos suman blanco), brillo HDR con tope (`GLOW_MAX`) y el color de quien los causa: los golpes cuerpo a cuerpo usan el color del héroe, el empujón el del equipo, los proyectiles el de su familia. Los textos grandes de peleas ajenas solo aparecen si pasan cerca tuyo.
+
+**DW-40 · Golpes de boxeador.** El básico cuerpo a cuerpo ya no es un cono: el puño (un guante con el color del héroe) hace un gancho en arco, alternando manos, y deja una estela curva del mismo color. Remache barre con la llave; el empujón son dos palmas con una onda en arco; los tiros son una estocada con una mano.
+
+**DW-41 · Mantener para apuntar, soltar para usar.** Las habilidades (y los ítems activos) salen al **soltar** la tecla; mientras se mantiene se dibuja en el piso qué va a hacer: área en el cursor, línea, cono, muro, punto o destello, con el rango máximo. Un toque rápido sale igual (un tick después). Cada habilidad declara su forma (`shape`) en sus datos, así una habilidad nueva trae su indicador gratis.
+
+**DW-42 · Tooltips en todo.** Un solo sistema (`src/ui/tooltip.ts`) con textos que salen de los datos reales (`src/ui/tips.ts`): si cambia el balance, el tooltip se actualiza solo. Cubre habilidades, básico, empujón, dash, ítems, materiales, tu cuerpo/etapas, niveles, ulti, rutas de mutación, héroes, reglas y modos.
+
+**DW-43 · Todo lo procedural es reemplazable de a una pieza.** Cada modelo, textura, ícono y sonido generado por código tiene un id en `src/assets/catalog.ts` con el archivo esperado y su especificación. Si el archivo está listado en `public/assets/manifest.json`, el juego lo usa; si no (o si falla), cae a lo procedural. La galería del menú (🧩 Assets) muestra cada pieza girando, su estado y qué archivo crear; la checklist [ASSETS_CATALOGO.md](ASSETS_CATALOGO.md) se genera del catálogo y un test avisa si quedó desactualizada.
+
+**DW-44 · El directorio de salas usa un solo canal por pestaña.** `supabase.channel(nombre)` devuelve el canal existente si ya hay uno con ese nombre; el menú y el host abrían cada uno el suyo sobre `rubble-lobby` y el segundo intentaba agregar listeners a un canal ya suscripto ("cannot add presence callbacks after subscribe"). Ahora hay un canal compartido con contador de usos y `freshChannel` limpia restos viejos antes de crear uno.

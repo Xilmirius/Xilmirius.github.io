@@ -6,12 +6,13 @@ Arena brawler isométrico para jugar **en el navegador con amigos**: sesiones co
 
 - 4 héroes, uno por familia de material: **Canto** (Piedra), **Prisma** (Cristal), **Gloop** (Goo), **Remache** (Metal).
 - Mapa que se rompe: cobertura destructible, pisos frágiles que dejan agujeros, materiales para farmear.
-- Ítems (3 pasivos + 3 activos), mutaciones de habilidad por nivel, reparación del cuerpo.
-- 3 modos sobre el mismo núcleo: **Vidas**, **Ring-outs** y **Control de zona**.
+- Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación: la base del futuro modo MOBA).
+- 3 modos de victoria: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
+- **Mantené la tecla para apuntar**: cada habilidad dibuja en el piso su área, línea, cono o muro antes de usarla. **Tooltips** en todo (habilidades, ítems, tu cuerpo, niveles, héroes, reglas).
 - Bots para practicar, completar equipos y reemplazar a quien se desconecta.
 - Multijugador **P2P por WebRTC** (host autoritativo en el navegador) con signaling en **Supabase Realtime**. Cero servidores propios.
-- **Cero assets externos**: modelos, texturas, sonidos y música son procedurales. No tenés que descargar nada.
-- **Espectáculo de feedback**: bloom y postproceso, luces dinámicas, explosiones, números de heat flotantes, "zoom de KO" con congelado y cámara lenta en golpes letales, pilares de luz en cada ring-out, combos con sonido ascendente, anuncios de rachas con locutor, monedas que vuelan al HUD, confeti, premios al final de cada partida.
+- **Cero assets externos**: modelos, texturas, sonidos y música son procedurales. Y **cada pieza es reemplazable por un archivo, de a una**: menú → 🧩 Assets y [docs/ASSETS_CATALOGO.md](docs/ASSETS_CATALOGO.md).
+- **Espectáculo de feedback sin marear**: cámara fija que solo te sigue, efectos de color (nunca blancos, nunca pantalla lavada), puños que golpean en arco como boxeadores, números de heat, pilares de color en cada ring-out, combos con sonido ascendente, anuncios de rachas con locutor, confeti y premios al final de cada partida.
 - **Gamificación**: nivel de cuenta, 17 logros y sombreros cosméticos que se desbloquean jugando (se guardan en tu navegador).
 - **Temas visuales** del mapa: Neón, Cantera, Atardecer y Noche (lo elige el host en el lobby).
 
@@ -90,14 +91,13 @@ WebRTC arranca con STUN (gratis). En algunas redes (algunas móviles o con CGNAT
 | **Espacio** | Saltar · en el aire: **segundo salto** (recuperación) |
 | **Clic izquierdo** | Ataque básico: **rompe** (suma heat). Mantener sigue pegando |
 | **Clic derecho** | **Empujón**: mantené para cargar, soltá para **sacar** |
-| **Q · E · F** | Habilidades (se desbloquean en nivel 1, 2 y 3) |
-| **R** | Ulti (nivel 5) |
-| **1 · 2 · 3** | Ítems activos |
-| **C** | Forja: fabricar ítems y mutaciones |
-| **V** (mantener) | Reparar tu cuerpo con tu material |
-| **Shift** | Correr la cámara hacia el cursor |
+| **Shift** | **Dash**: ráfaga corta (en el aire tenés uno, después del segundo salto) |
+| **Q · E · F · R** | Habilidades y ulti: **mantené** para ver el área, **soltá** para usarla. En Brawler la R se carga pegando |
 | **Tab** | Tabla de jugadores |
 | **Esc** | Pausa / salir |
+| *Solo reglas Completo:* | **1 · 2 · 3** ítems activos · **C** forja · **V** (mantener) reparar. Habilidades por nivel (Q 1, E 2, F 3, R 5) |
+
+Pasá el mouse por cualquier ícono del HUD para ver qué hace.
 
 ## 4. Cómo se juega (resumen)
 
@@ -105,8 +105,8 @@ WebRTC arranca con STUN (gratis). En algunas redes (algunas móviles o con CGNAT
 - **Ritmo:** romper (clic) → entrar → sacar (empujón cargado). El empujón cargado se telegrafía con un cono en el piso.
 - **El cuerpo lanzado es un proyectil:** rompe cobertura, se estampa contra paredes (suma heat) y voltea a otros (combos de billar).
 - **El que vuela no está indefenso:** corregís con WASD en el aire, tenés segundo salto (cancela el tumbo) y trepás bordes automáticamente si empujás hacia la cornisa.
-- **Materiales:** rompé rocas 🪨, chatarra 🔩, cristales 💎 y goo 🟢. Sirven para ítems, mutaciones (usan el material de tu familia) y reparación.
-- **Niveles 1–10:** XP por pegar, farmear y sacar gente. Mutaciones en niveles 3, 6 y 9 (Tanque / Carry / Support).
+- **Reglas Brawler:** todo desbloqueado; los trozos que sueltan las coberturas cargan la ulti.
+- **Reglas Completo:** los trozos son materiales (rocas 🪨, chatarra 🔩, cristales 💎, goo 🟢) para ítems, mutaciones y reparación; niveles 1–10 con mutaciones en 3, 6 y 9 (Tanque / Carry / Support).
 - **La arena se rompe:** las baldosas frágiles (con grietas) se destruyen con golpes fuertes y quedan agujeros para toda la partida.
 
 ## 5. Arquitectura
@@ -133,7 +133,8 @@ Detalle completo, flujo de mensajes y cómo escalar a servidor dedicado: [docs/a
 src/
   core/          Simulación pura (sin Three.js ni DOM): se puede correr en Node o en un server dedicado
     sim.ts         Simulación autoritativa: combate, knockback, proyectiles, zonas, materiales
-    movement.ts    Movimiento compartido (host y predicción del cliente usan el mismo código)
+    rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo)
+    movement.ts    Movimiento compartido (host y predicción del cliente usan el mismo código, dash incluido)
     terrain.ts     Terreno como grilla de alturas; baldosas frágiles
     collision.ts   Colisión terreno + obstáculos
     heroes/        Un archivo por héroe (kit de 4 habilidades + básico)
@@ -144,10 +145,11 @@ src/
     snapshot.ts    Frames de mundo, codificación de red e interpolación
     maps/          Mapas en ASCII
   net/           Signaling (Supabase / local), WebRTC, sesiones host y cliente
-  render/        Three.js: terreno, beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), temas (themes.ts)
+  render/        Three.js: terreno, beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), temas
+  assets/        Catálogo de piezas reemplazables (catalog.ts) y cargador con fallback a lo procedural (registry.ts)
   audio/         Síntesis de sonido y música generativa (WebAudio)
-  ui/            Menú, lobby, HUD, forja, estilos
-  game/          Bucle de partida (hitstop y cámara lenta visuales), input, ticker en Worker, menú animado, perfil y logros
+  ui/            Menú, lobby, HUD, forja, tooltips (tooltip.ts, tips.ts), galería de assets, estilos
+  game/          Bucle de partida (hitstop visual cortito), input, ticker en Worker, menú animado, perfil y logros
   db/            Persistencia en Postgres (historial)
 supabase/migrations/   SQL del esquema
 tests/                 Unit tests + partidas headless de bots + E2E con Playwright
@@ -155,15 +157,17 @@ tests/                 Unit tests + partidas headless de bots + E2E con Playwrig
 
 ## 7. Agregar contenido (escala sin tocar sistemas)
 
-- **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
+- **Modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (victoria en `modes.ts` + reglas en `rules.ts` + mapa).
+- **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
 - **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo). El test `mapas` valida que tenga spawns, zonas y frágiles.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
-- **Modo nuevo:** implementá `GameMode` en `core/modes.ts`.
+- **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
 
 ## 8. Tests
 
 ```bash
-npm test                 # unit tests + 4 partidas completas de bots en headless (≈2 s)
+npm test                 # unit tests + partidas completas de bots en headless (≈5 s)
+npm run assets:doc       # regenera docs/ASSETS_CATALOGO.md desde el catálogo
 npm run build
 npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente por WebRTC real en 2 pestañas
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
@@ -172,19 +176,22 @@ VITEST_TOOLS=1 npx vitest run # herramientas de balance (tabla de knockback, est
 
 Para Playwright se usa `playwright-core` con el Chromium del sistema (`CHROMIUM=/ruta/a/chrome` si no está en `/opt/pw-browsers`).
 
-## 9. Assets opcionales
+## 9. Assets opcionales (de a una pieza)
 
-Todo es procedural, pero se puede reemplazar sin tocar código:
-- Música: `public/audio/music.mp3` (partida) y `public/audio/menu.mp3` (menú).
-- Efectos: `public/audio/sfx/<nombre>.mp3` + `public/audio/sfx/manifest.json` con la lista de nombres.
-- Locutor: `public/audio/voice/<slug>.mp3` + `public/audio/voice/manifest.json`.
+Todo es procedural, pero **cada pieza tiene un id y se reemplaza sin tocar código**:
 
-El plan completo (modelos en Blender, íconos, arte, VFX) está en [docs/MEJORAS_CON_ASSETS.md](docs/MEJORAS_CON_ASSETS.md).
+1. Menú → **🧩 Assets**: lista las 159 piezas (modelos, texturas, íconos, sonidos), las muestra girando y dice qué archivo crear y con qué especificación.
+2. Poné el archivo en `public/assets/<ruta>` y agregá la ruta a `public/assets/manifest.json` → `{ "files": ["models/props/stone.glb"] }`.
+3. Recargá. Si el archivo falta o falla, vuelve solo a lo procedural. `npm run assets:doc` actualiza la checklist [docs/ASSETS_CATALOGO.md](docs/ASSETS_CATALOGO.md).
+
+Sonido: `public/audio/music.mp3` / `menu.mp3`, efectos en `public/audio/sfx/<nombre>.mp3` + `manifest.json`, locutor en `public/audio/voice/`.
+El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJORAS_CON_ASSETS.md](docs/MEJORAS_CON_ASSETS.md).
 
 **Ajustes de rendimiento** (⚙️ en el menú): sombras, brillos/postproceso, alta resolución y locutor. Si los FPS caen mucho durante una partida, el juego apaga los brillos solo.
 
 ## 10. Límites conocidos / próximos pasos
 
+- Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
 - Juego de teclado y mouse (no hay controles táctiles).

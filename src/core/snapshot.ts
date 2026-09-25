@@ -101,7 +101,7 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
     phaseT: sim.phaseT,
     chars: sim.chars.map((c) => ({
       id: c.id, x: c.pos.x, y: c.pos.y, z: c.pos.z, f: c.facing, vx: c.vel.x, vy: c.vel.y, vz: c.vel.z,
-      fl: charFlags(c, sim), heat: c.heat, st: c.stage, lv: c.level,
+      fl: charFlags(c, sim), heat: Math.round(c.heat), st: c.stage, lv: c.level,
       ac: c.action ? c.action.kind : '', ap: c.action ? Math.min(1, c.action.t / c.action.dur) : 0,
       ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : 0,
       sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT),

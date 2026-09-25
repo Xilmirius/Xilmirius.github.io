@@ -16,7 +16,7 @@ import { F_DASH, F_DEAD, F_TUMBLE, type CharFrame, type WorldFrame } from '../co
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
 import { BeanView } from './beanView';
-import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView, Waves } from './fx';
+import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView } from './fx';
 import { AimIndicator, type AimView } from './indicator';
 import { Floaters, GlowFX, LightPool } from './juice';
 import { PostFX } from './post';
@@ -75,7 +75,6 @@ export class GameView {
   private structs = new StructuresView();
   private particles = new Particles();
   private sparks = new Particles({ glow: true, hdr: 1.3, tetra: true });
-  private waves = new Waves();
   private glow = new GlowFX();
   private lights = new LightPool(4);
   private projs: ProjectilesView;
@@ -153,7 +152,7 @@ export class GameView {
     this.destructs = new DestructiblesView(this.terrain.destructs);
     this.projs = new ProjectilesView(this.sparks);
     this.scene.add(
-      this.terrainView.group, this.destructs.group, this.structs.group, this.particles.mesh, this.sparks.mesh, this.waves.group,
+      this.terrainView.group, this.destructs.group, this.structs.group, this.particles.mesh, this.sparks.mesh,
       this.glow.group, this.lights.group, this.projs.group, this.zones.group, this.teles.group, this.koth.group, this.aimInd.group,
     );
     if (!sky) this.scene.add(this.buildBackdrop(theme.fog ?? def.fog));
@@ -326,7 +325,6 @@ export class GameView {
     this.updatePickups(dt);
     this.particles.update(dt);
     this.sparks.update(dt);
-    this.waves.update(dt);
     this.glow.update(dt);
     this.lights.update(dt);
 

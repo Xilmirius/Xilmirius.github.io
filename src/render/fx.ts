@@ -1,4 +1,4 @@
-// Efectos: partículas (InstancedMesh), ondas expansivas, arcos de golpe, proyectiles, zonas y telegrafías.
+// Efectos: partículas (InstancedMesh), proyectiles, zonas y telegrafías. (Anillos y arcos de golpe: juice.ts)
 import * as THREE from 'three';
 import { assetModel } from '../assets/registry';
 import type { AreaFrame, ProjFrame } from '../core/snapshot';
@@ -85,56 +85,6 @@ export class Particles {
   }
 
   clear() { this.ps = []; this.mesh.count = 0; }
-}
-
-interface Wave { m: THREE.Mesh; t: number; dur: number; r: number }
-
-/** Anillos expansivos en el piso y arcos de golpe. */
-export class Waves {
-  group = new THREE.Group();
-  private list: Wave[] = [];
-  private geo = new THREE.PlaneGeometry(2, 2);
-  private tex = ringTexture();
-
-  ring(x: number, y: number, z: number, r: number, color: number, dur = 0.4) {
-    const m = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ map: this.tex, color, transparent: true, depthWrite: false }));
-    m.rotation.x = -Math.PI / 2;
-    m.position.set(x, y + 0.08, z);
-    m.renderOrder = 3;
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur, r });
-  }
-
-  arc(x: number, y: number, z: number, yaw: number, range: number, angleDeg: number, color: number) {
-    const a = (angleDeg * Math.PI) / 180;
-    const g = new THREE.RingGeometry(range * 0.35, range, 20, 1, Math.PI / 2 - a / 2, a);
-    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
-    m.rotation.x = -Math.PI / 2;
-    m.rotation.z = yaw + Math.PI;
-    m.position.set(x, y + 0.6, z);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur: 0.18, r: -1 });
-  }
-
-  update(dt: number) {
-    for (const w of this.list) {
-      w.t += dt;
-      const k = w.t / w.dur;
-      const mat = w.m.material as THREE.MeshBasicMaterial;
-      if (w.r > 0) {
-        w.m.scale.setScalar(Math.max(0.01, w.r * (0.2 + 0.8 * Math.sqrt(k))));
-        mat.opacity = 1 - k;
-      } else {
-        mat.opacity = 0.55 * (1 - k);
-        w.m.scale.setScalar(1 + k * 0.15);
-      }
-    }
-    const done = this.list.filter((w) => w.t >= w.dur);
-    for (const w of done) { w.m.removeFromParent(); w.m.geometry !== this.geo && w.m.geometry.dispose(); (w.m.material as THREE.Material).dispose(); }
-    this.list = this.list.filter((w) => w.t < w.dur);
-  }
-
-  clear() { for (const w of this.list) w.m.removeFromParent(); this.list = []; }
 }
 
 // ───────────── proyectiles ─────────────
