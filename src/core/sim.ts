@@ -6,7 +6,7 @@ import {
   LAUNCH_THRESHOLD, MAX_LEVEL, MAX_PICKUPS, MUTATION_LEVELS, PICKUP_COLLECT, PICKUP_MAGNET, PICKUP_TTL,
   PUSH_CD, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, REPAIR_TIME, RESPAWN_TIME, SPAWN_INVULN, STAGE_AT,
   STAGE_KB, TICK_RATE, TILE_CRUMBLE, WALL_SLAM_SPEED, XP_ASSIST, XP_DESTRUCT, XP_KILL, XP_PER_HEAT, XP_PICKUP,
-  XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H,
+  XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE,
 } from './constants';
 import {
   baseStats, Character, DESTRUCT_DEF, type BlastSpec, type Destructible, type HitSpec, type Pickup,
@@ -14,13 +14,14 @@ import {
 } from './entities';
 import type { SimEvent } from './events';
 import { HEROES } from './heroes';
-import { BTN, held, pressed, released } from './input';
+import { BTN, held, released } from './input';
 import { canAfford, ITEM_BY_ID, pay, refund } from './items';
 import { dirOf, norm2, type V3 } from './math';
 import { createMode, type GameMode, type ModeResult } from './modes';
-import { canAct, defaultMoveParams, newMoveOut, stepMove } from './movement';
+import { canAct, DASH_IDLE, defaultMoveParams, newMoveOut, stepMove } from './movement';
 import { MUTATION_COST, NO_MODS, ROUTE_MODS, SUPPORT_RADIUS, SUPPORT_SHIELD, type Mods } from './mutations';
 import { Rng } from './rng';
+import { getRules, unlockLevel, usesUltCharge, type Ruleset } from './rules';
 import { Terrain, TILE_CRUMBLING, TILE_GONE } from './terrain';
 import { FAMILIES, type AbilitySlot, type Family, type MatchSettings, type Route, type RosterEntry } from './types';
 
@@ -87,6 +88,7 @@ export class Simulation {
   readonly cw: CollisionWorld;
   readonly rng: Rng;
   readonly mode: GameMode;
+  readonly rules: Ruleset;
   readonly teamCount: number;
   chars: Character[] = [];
   charById = new Map<number, Character>();
@@ -110,6 +112,7 @@ export class Simulation {
 
   constructor(cfg: SimConfig) {
     this.settings = cfg.settings;
+    this.rules = getRules(cfg.settings.rules);
     this.rng = new Rng(cfg.seed);
     this.terrain = new Terrain(cfg.settings.map);
     this.cw = new CollisionWorld(this.terrain);
@@ -201,6 +204,21 @@ export class Simulation {
     return best;
   }
 
+  /** ¿La habilidad ya está disponible para este personaje? (sin progresión: siempre). */
+  abilityUnlocked(ch: Character, slot: AbilitySlot) {
+    return ch.level >= unlockLevel(this.rules, HEROES[ch.hero].abilities[slot]);
+  }
+
+  ultReady(ch: Character) {
+    if (!ch.alive) return false;
+    return usesUltCharge(this.rules, 'r') ? ch.ult >= 1 : this.abilityUnlocked(ch, 'r') && ch.cds.r <= 0;
+  }
+
+  addUlt(ch: Character, amount: number) {
+    if (!this.rules.ultCharge || this.phase !== 'play') return;
+    ch.ult = Math.min(1, ch.ult + amount);
+  }
+
   mutationSlots(ch: Character) {
     return MUTATION_LEVELS.filter((l) => ch.level >= l).length;
   }
@@ -238,7 +256,7 @@ export class Simulation {
   }
 
   addXp(ch: Character, amount: number) {
-    if (ch.level >= MAX_LEVEL) return;
+    if (!this.rules.progression || ch.level >= MAX_LEVEL) return;
     ch.xp += amount;
     let up = false;
     while (ch.level < MAX_LEVEL && ch.xp >= XP_TABLE[ch.level]) { ch.level++; up = true; }
@@ -310,7 +328,7 @@ export class Simulation {
     this.commands = [];
     for (const { pid, cmd } of cmds) {
       const ch = this.charByPid.get(pid);
-      if (!ch) continue;
+      if (!ch || !this.rules.crafting) continue;
       if (cmd.c === 'craft') this.craft(ch, cmd.id);
       else if (cmd.c === 'sell') this.sell(ch, cmd.id);
       else if (cmd.c === 'mutate') this.mutate(ch, cmd.slot, cmd.route);
@@ -407,6 +425,8 @@ export class Simulation {
     ch.tumble = ch.hitstun = ch.stun = 0;
     ch.invuln = SPAWN_INVULN;
     ch.shield = 0;
+    ch.dashT = 0;
+    ch.dashCd = 0;
     ch.crystalBurstUsed = false;
     ch.action = null;
     ch.lastHits.clear();
@@ -446,6 +466,7 @@ export class Simulation {
 
     if (this.phase === 'play') {
       this.addXp(ch, XP_TRICKLE * DT);
+      this.addUlt(ch, ULT_TRICKLE * DT);
       if (ch.stats.regen && ch.heat > 0 && this.tick - ch.lastHitTick > 4 * TICK_RATE) this.setHeat(ch, ch.heat - 2.5 * DT);
     }
 
@@ -454,8 +475,10 @@ export class Simulation {
     const playing = this.phase !== 'countdown';
     const act = playing && canAct(ch) && !(ch.action && ch.action.noCast);
     if (act) {
+      // Las habilidades salen al SOLTAR la tecla: mientras la mantenés, el cliente muestra el área (apuntar).
+      // Un toque rápido sale igual, un tick después.
       for (const slot of ['q', 'e', 'f', 'r'] as AbilitySlot[]) {
-        if (pressed(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
+        if (released(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
       }
       if (ch.buffered) {
         ch.buffered.t -= DT;
@@ -466,7 +489,7 @@ export class Simulation {
           if (s === 'q' || s === 'e' || s === 'f' || s === 'r') this.tryAbility(ch, s, false);
         }
       }
-      for (let i = 0; i < 3; i++) if (pressed(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
+      if (this.rules.crafting) for (let i = 0; i < 3; i++) if (released(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
 
       // Empujón: mantener carga, soltar empuja (D-0028).
       if (held(inp.b, BTN.PUSH) && ch.cds.push <= 0) {
@@ -482,7 +505,7 @@ export class Simulation {
         ch.cdMax.basic = b.cd;
       }
 
-      if (held(inp.b, BTN.REPAIR) && ch.heat > 0 && ch.mats[ch.family] >= REPAIR_COST) {
+      if (this.rules.repair && held(inp.b, BTN.REPAIR) && ch.heat > 0 && ch.mats[ch.family] >= REPAIR_COST) {
         ch.repairT += DT;
         if (ch.repairT >= REPAIR_TIME) {
           ch.repairT = 0;
@@ -510,12 +533,14 @@ export class Simulation {
     mp.restitution = ch.stats.restitution;
     mp.maxAirJumps = ch.stats.maxAirJumps;
     mp.jumpMul = ch.stats.jumpMul;
+    mp.dash = this.rules.dash && playing;
     if (!playing) { ch.vel.x = 0; ch.vel.z = 0; }
     const wasTumble = ch.tumble > 0;
     const out = this.mo;
     stepMove(ch, inp, mp, this.cw, DT, out);
 
     if (out.jumped || out.airJumped) this.emit({ k: 'jump', id: ch.id, air: out.airJumped ? 1 : 0 });
+    if (out.dashed) this.emit({ k: 'dash', id: ch.id, dx: Math.round(ch.dashX * 100) / 100, dz: Math.round(ch.dashZ * 100) / 100 });
     if (out.landed > 8) {
       this.emit({ k: 'land', id: ch.id, p: out.landed });
       if (wasTumble && out.landed > 14) this.damageTilesAround(ch.pos.x, ch.pos.z, 1.0, out.landed * 1.2);
@@ -686,6 +711,7 @@ export class Simulation {
       t.lastHits.set(attacker.id, this.tick);
       attacker.heatDealt += heat;
       this.addXp(attacker, heat * XP_PER_HEAT);
+      this.addUlt(attacker, heat * ULT_PER_HEAT);
     }
     return heat;
   }
@@ -756,7 +782,7 @@ export class Simulation {
   private predictLethal(t: Character): boolean {
     const s = {
       pos: { ...t.pos }, vel: { ...t.vel }, facing: t.facing, grounded: false, airJumps: 0, coyote: 0, prevB: 0,
-      tumble: t.tumble, hitstun: t.hitstun, stun: t.stun, hitSlide: 0,
+      tumble: t.tumble, hitstun: t.hitstun, stun: t.stun, hitSlide: 0, ...DASH_IDLE, airDashes: 0,
     };
     const mp = defaultMoveParams();
     mp.speed = 0;
@@ -857,8 +883,13 @@ export class Simulation {
 
   private tryAbility(ch: Character, slot: AbilitySlot, fresh: boolean): boolean {
     const def = HEROES[ch.hero].abilities[slot];
-    if (ch.level < def.unlock) {
+    if (!this.abilityUnlocked(ch, slot)) {
       if (fresh) this.deny(ch, `${def.name}: se desbloquea en nivel ${def.unlock}`);
+      return false;
+    }
+    const ultCharge = usesUltCharge(this.rules, slot);
+    if (ultCharge && ch.ult < 1) {
+      if (fresh) this.deny(ch, `${def.name}: la ulti se carga pegando (${Math.floor(ch.ult * 100)}%)`);
       return false;
     }
     if (ch.cds[slot] > 0) {
@@ -872,7 +903,8 @@ export class Simulation {
     const m = this.modsFor(ch, slot);
     const ok = def.cast(this, ch, ch.input.ax, ch.input.az, m);
     if (ok === false) return false;
-    const cd = def.cd * m.cd * ch.stats.cdMul;
+    const cd = ultCharge ? 0.5 : def.cd * m.cd * ch.stats.cdMul;
+    if (ultCharge) ch.ult = 0;
     ch.cds[slot] = cd;
     ch.cdMax[slot] = cd;
     ch.charging = false;
@@ -1416,6 +1448,7 @@ export class Simulation {
   }
 
   private dropMaterials(kind: Family, x: number, y: number, z: number, n: number) {
+    if (this.rules.pickups === 'none') return;
     const mat = FAMILIES.indexOf(kind);
     for (let i = 0; i < n; i++) {
       if (this.pickups.length >= MAX_PICKUPS) {
@@ -1445,7 +1478,8 @@ export class Simulation {
       }
       if (target) {
         if (bd < PICKUP_COLLECT) {
-          target.mats[FAMILIES[p.mat]]++;
+          if (this.rules.pickups === 'ult') this.addUlt(target, ULT_PER_PICKUP);
+          else target.mats[FAMILIES[p.mat]]++;
           target.pickups++;
           this.addXp(target, XP_PICKUP);
           this.emit({ k: 'pick', i: p.id, id: target.id, m: p.mat });

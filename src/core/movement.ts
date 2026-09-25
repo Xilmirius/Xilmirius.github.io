@@ -1,8 +1,8 @@
 // Movimiento del personaje. Código compartido: el host lo usa para simular a todos y el cliente
 // para predecir su propio personaje (misma función = misma respuesta, menos correcciones).
 import {
-  AIR_ACCEL, AIR_JUMP_V, CHAR_RADIUS, COYOTE, DI_ACCEL, GRAVITY, GROUND_ACCEL, GROUND_DECEL,
-  HIT_SLIDE_ACCEL, JUMP_V, MANTLE_H, STEP_DOWN, STEP_UP, TUMBLE_DRAG, TUMBLE_FRICTION,
+  AIR_ACCEL, AIR_DASHES, AIR_JUMP_V, CHAR_RADIUS, COYOTE, DASH_CD, DASH_END_KEEP, DASH_SPEED, DASH_TIME, DI_ACCEL, GRAVITY,
+  GROUND_ACCEL, GROUND_DECEL, HIT_SLIDE_ACCEL, JUMP_V, MANTLE_H, STEP_DOWN, STEP_UP, TUMBLE_DRAG, TUMBLE_FRICTION,
 } from './constants';
 import type { CollisionWorld, Obstacle } from './collision';
 import { BTN, held, pressed, type InputFrame } from './input';
@@ -20,7 +20,15 @@ export interface MoveState {
   hitstun: number; // no puede actuar ni corregir en el aire
   stun: number;
   hitSlide: number; // tras un empujón chico: poca tracción
+  dashT: number; // > 0: en pleno dash
+  dashCd: number;
+  dashX: number;
+  dashZ: number;
+  airDashes: number;
 }
+
+/** Campos de dash en reposo (para armar estados de movimiento a mano). */
+export const DASH_IDLE = { dashT: 0, dashCd: 0, dashX: 0, dashZ: 0, airDashes: AIR_DASHES };
 
 export interface MoveParams {
   speed: number;
@@ -30,6 +38,7 @@ export interface MoveParams {
   maxAirJumps: number;
   jumpMul: number;
   noGravity: boolean;
+  dash: boolean; // las reglas habilitan el dash (Shift)
 }
 
 export interface WallHit {
@@ -44,12 +53,13 @@ export interface MoveOut {
   jumped: boolean;
   airJumped: boolean;
   mantled: boolean;
+  dashed: boolean;
 }
 
-export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: false, airJumped: false, mantled: false });
+export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: false, airJumped: false, mantled: false, dashed: false });
 
 export const defaultMoveParams = (): MoveParams => ({
-  speed: 6, lock: false, airControl: 1, restitution: 0.3, maxAirJumps: 1, jumpMul: 1, noGravity: false,
+  speed: 6, lock: false, airControl: 1, restitution: 0.3, maxAirJumps: 1, jumpMul: 1, noGravity: false, dash: false,
 });
 
 const MAX_SUBSTEP = 0.3;
@@ -62,8 +72,9 @@ export function canAct(s: MoveState) {
 export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: CollisionWorld, dt: number, out: MoveOut) {
   out.wallHits.length = 0;
   out.landed = 0;
-  out.jumped = out.airJumped = out.mantled = false;
+  out.jumped = out.airJumped = out.mantled = out.dashed = false;
 
+  s.dashCd = Math.max(0, s.dashCd - dt);
   s.hitstun = Math.max(0, s.hitstun - dt);
   s.stun = Math.max(0, s.stun - dt);
   s.coyote = Math.max(0, s.coyote - dt);
@@ -95,8 +106,33 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
     spd *= dot >= 0 ? 0.86 + 0.14 * dot : 0.86 + 0.12 * dot;
   }
 
+  // Dash (Shift): ráfaga corta hacia donde caminás, o hacia donde mirás si estás quieto.
+  // No cancela un lanzamiento: para recuperarte primero usás el segundo salto y después el dash.
+  if (p.dash && free && s.tumble <= 0 && s.dashT <= 0 && s.dashCd <= 0 && pressed(inp.b, s.prevB, BTN.DASH) && (s.grounded || s.airDashes > 0)) {
+    let dx = wx, dz = wz;
+    if (dx === 0 && dz === 0) { const f = dirOf(s.facing); dx = f.x; dz = f.z; }
+    const l = Math.hypot(dx, dz) || 1;
+    s.dashX = dx / l;
+    s.dashZ = dz / l;
+    s.dashT = DASH_TIME;
+    s.dashCd = DASH_CD;
+    s.hitSlide = 0;
+    if (!s.grounded) s.airDashes--;
+    out.dashed = true;
+  }
+  const dashing = s.dashT > 0 && !p.lock && s.tumble <= 0;
+  if (s.dashT > 0) {
+    s.dashT = Math.max(0, s.dashT - dt);
+    if (!dashing || !act) s.dashT = 0;
+  }
+
   if (p.lock) {
     // La acción maneja la velocidad horizontal.
+  } else if (dashing) {
+    s.vel.x = s.dashX * DASH_SPEED;
+    s.vel.z = s.dashZ * DASH_SPEED;
+    s.vel.y = 0;
+    if (s.dashT <= 0) { s.vel.x *= DASH_END_KEEP; s.vel.z *= DASH_END_KEEP; }
   } else if (s.tumble > 0) {
     if (s.grounded) {
       approach2(s.vel, 0, 0, TUMBLE_FRICTION * dt);
@@ -140,7 +176,7 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
   }
   s.prevB = inp.b;
 
-  if (!s.grounded && !p.noGravity) s.vel.y = Math.max(-TERMINAL_V, s.vel.y - GRAVITY * dt);
+  if (!s.grounded && !p.noGravity && !dashing) s.vel.y = Math.max(-TERMINAL_V, s.vel.y - GRAVITY * dt);
 
   // Horizontal, con subpasos para que los cuerpos rápidos no atraviesen cosas.
   const dx = s.vel.x * dt, dz = s.vel.z * dt;
@@ -173,6 +209,7 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
         s.vel.y = 0;
         s.grounded = true;
         s.airJumps = p.maxAirJumps;
+        s.airDashes = AIR_DASHES;
         s.coyote = 0;
       }
     }
@@ -203,6 +240,7 @@ function moveAxis(s: MoveState, isX: boolean, d: number, p: MoveParams, cw: Coll
         s.vel.y = 0;
         s.grounded = true;
         s.airJumps = p.maxAirJumps;
+        s.airDashes = AIR_DASHES;
         s.tumble = 0;
         out.mantled = true;
         return false;

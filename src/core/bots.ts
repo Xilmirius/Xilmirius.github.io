@@ -12,9 +12,9 @@ import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
 
 const DIFF = {
-  1: { think: 0.5, aimErr: 2.4, use: 0.12, lead: 0.2, push: 0.15, craftEvery: 8 },
-  2: { think: 0.2, aimErr: 0.8, use: 0.55, lead: 0.7, push: 0.6, craftEvery: 4 },
-  3: { think: 0.1, aimErr: 0.35, use: 0.85, lead: 1, push: 0.9, craftEvery: 2.5 },
+  1: { think: 0.5, aimErr: 2.4, use: 0.12, lead: 0.2, push: 0.15, craftEvery: 8, dash: 0.05 },
+  2: { think: 0.2, aimErr: 0.8, use: 0.55, lead: 0.7, push: 0.6, craftEvery: 4, dash: 0.2 },
+  3: { think: 0.1, aimErr: 0.35, use: 0.85, lead: 1, push: 0.9, craftEvery: 2.5, dash: 0.35 },
 } as const;
 
 const ITEM_PRIORITY: Record<string, string[]> = {
@@ -55,6 +55,7 @@ export class BotBrain {
   private lastZ = 0;
   private craftT = 0;
   private repairing = false;
+  private dashAway: Character | null = null;
 
   constructor(level: number, seed: number) {
     this.rng = new Rng(seed);
@@ -68,7 +69,7 @@ export class BotBrain {
     if (!ch.alive) return this.frame(ch, 0);
 
     this.craftT -= dt;
-    if (this.craftT <= 0) {
+    if (this.craftT <= 0 && sim.rules.crafting) {
       this.craftT = this.d.craftEvery;
       this.craft(sim, ch);
     }
@@ -89,7 +90,7 @@ export class BotBrain {
     b |= this.tap;
     this.tap = 0;
     // Asegurar flancos: un bit "tap" no puede quedar mantenido dos ticks seguidos.
-    const edgeBits = BTN.JUMP | BTN.Q | BTN.E | BTN.F | BTN.R | BTN.I1 | BTN.I2 | BTN.I3;
+    const edgeBits = BTN.JUMP | BTN.DASH | BTN.Q | BTN.E | BTN.F | BTN.R | BTN.I1 | BTN.I2 | BTN.I3;
     b &= ~(this.lastB & edgeBits & ~this.hold);
     this.lastB = b;
     return this.frame(ch, b);
@@ -119,7 +120,7 @@ export class BotBrain {
 
     // Reparar si estoy muy roto y nadie cerca.
     this.repairing = false;
-    if (ch.stage >= 2 && ch.mats[ch.family] >= 4 && dist > 9) {
+    if (sim.rules.repair && ch.stage >= 2 && ch.mats[ch.family] >= 4 && dist > 9) {
       this.repairing = true;
       this.hold |= BTN.REPAIR;
       this.goal = null;
@@ -181,10 +182,16 @@ export class BotBrain {
       }
     }
 
+    // Dash: entrar al cuerpo a cuerpo o escaparse estando muy roto.
+    if (sim.rules.dash && ch.dashCd <= 0 && ch.grounded && this.rng.chance(this.d.dash)) {
+      if (hero.preferredRange < 3 && dist > 3.5 && dist < 7) this.tap |= BTN.DASH;
+      else if (ch.stage >= 2 && dist < 3) { this.dashAway = t; this.tap |= BTN.DASH; }
+    }
+
     // Habilidades
     for (const slot of ['r', 'q', 'e', 'f'] as AbilitySlot[]) {
       const a = hero.abilities[slot];
-      if (ch.level < a.unlock || ch.cds[slot] > 0 || !this.rng.chance(this.d.use)) continue;
+      if (!sim.abilityUnlocked(ch, slot) || ch.cds[slot] > 0 || (slot === 'r' && !sim.ultReady(ch)) || !this.rng.chance(this.d.use)) continue;
       if (this.wantsAbility(sim, ch, t, dist, a.bot, a.range)) {
         if (a.bot === 'escape') {
           const u = norm2(-ch.pos.x, -ch.pos.z);
@@ -267,6 +274,8 @@ export class BotBrain {
         this.wishX = u.x;
         this.wishZ = u.z;
         if (ch.vel.y < 1 && ch.airJumps > 0 && ch.hitstun <= 0) this.tap |= BTN.JUMP;
+        // Sin saltos: el dash aéreo es la última carta (el tumbo ya lo canceló el segundo salto).
+        else if (sim.rules.dash && ch.airJumps === 0 && ch.airDashes > 0 && ch.dashCd <= 0 && ch.tumble <= 0 && ch.hitstun <= 0) this.tap |= BTN.DASH;
         const gi = ch.actives.indexOf('garfio');
         if (gi >= 0 && ch.pos.y < safe.top - 0.5 && ch.cds[(['i1', 'i2', 'i3'] as const)[gi]] <= 0) {
           this.aimAt(ch, safe.x, safe.z);
@@ -327,6 +336,13 @@ export class BotBrain {
       if (this.stuckT > 1.2) { this.stuckT = 0; this.path = []; }
     }
 
+    if (this.dashAway && (this.tap & BTN.DASH)) {
+      const u = norm2(ch.pos.x - this.dashAway.pos.x, ch.pos.z - this.dashAway.pos.z);
+      const c = norm2(-ch.pos.x, -ch.pos.z); // hacia el centro, nunca al vacío
+      const d = norm2(u.x + c.x, u.z + c.z);
+      wx = d.x; wz = d.z;
+    }
+    this.dashAway = null;
     this.wishX = wx;
     this.wishZ = wz;
     if (!this.target) {

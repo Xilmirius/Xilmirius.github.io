@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Family } from '../core/types';
+import { assetTexture } from '../assets/registry';
 
 const cache = new Map<string, THREE.Texture>();
 
@@ -37,6 +38,8 @@ export function toonGradient(): THREE.Texture {
 
 /** Atlas del terreno: mitad izquierda = baldosa del piso, mitad derecha = estratos de roca. */
 export function terrainAtlas(seed = 1): THREE.Texture {
+  const file = assetTexture('terrain.atlas');
+  if (file) return file;
   const k = 'terrain' + seed;
   if (cache.has(k)) return cache.get(k)!;
   const { c, g } = canvas(512, 256);
@@ -110,6 +113,17 @@ function drawCracks(g: CanvasRenderingContext2D, r: Rng, w: number, h: number, c
 export function beanSkin(family: Family, stage: number, base: number): { map: THREE.Texture; glow: THREE.Texture } {
   const k = `bean-${family}-${stage}-${base}`;
   if (cache.has(k)) return { map: cache.get(k)!, glow: cache.get(k + 'g')! };
+  const fileMap = assetTexture(`skin.${family}.${stage}`);
+  if (fileMap) {
+    const fileGlow = assetTexture(`skin.${family}.${stage}.glow`);
+    return { map: fileMap, glow: fileGlow ?? beanSkinProcedural(family, stage, base).glow };
+  }
+  return beanSkinProcedural(family, stage, base);
+}
+
+function beanSkinProcedural(family: Family, stage: number, base: number): { map: THREE.Texture; glow: THREE.Texture } {
+  const k = `bean-${family}-${stage}-${base}`;
+  if (cache.has(k)) return { map: cache.get(k)!, glow: cache.get(k + 'g')! };
   const W = 256, H = 128;
   const { c, g } = canvas(W, H);
   const { c: cg, g: gg } = canvas(W, H);
@@ -152,7 +166,7 @@ export function beanSkin(family: Family, stage: number, base: number): { map: TH
   if (stage > 0) {
     const counts = [0, 5, 12, 22];
     const widths = [0, 2.2, 3, 3.8];
-    const dark = family === 'crystal' ? 'rgba(255,255,255,0.95)' : family === 'goo' ? 'rgba(20,60,10,0.9)' : 'rgba(25,15,10,0.95)';
+    const dark = family === 'crystal' ? 'rgba(150,90,255,0.95)' : family === 'goo' ? 'rgba(20,60,10,0.9)' : 'rgba(25,15,10,0.95)';
     const cr = new Rng(stage * 31 + family.length);
     drawCracks(g, cr, W, H, counts[stage], widths[stage], dark);
     const cr2 = new Rng(stage * 31 + family.length);

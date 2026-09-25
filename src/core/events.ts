@@ -13,6 +13,7 @@ export type SimEvent =
   | { k: 'ring'; id: number; x: number; z: number; tm: number; last: number }
   | { k: 'feed'; a: number; v: number; as: number[] }
   | { k: 'jump'; id: number; air: number }
+  | { k: 'dash'; id: number; dx: number; dz: number }
   | { k: 'land'; id: number; p: number }
   | { k: 'slam'; id: number; x: number; y: number; z: number; p: number; h: number }
   | { k: 'body'; id: number; x: number; y: number; z: number; a: number }

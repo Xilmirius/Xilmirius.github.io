@@ -66,13 +66,23 @@ try {
   await p.mouse.up();
   await p.keyboard.up('KeyD');
   await p.keyboard.press('Space');
-  await p.keyboard.press('KeyQ');
+  await p.keyboard.press('ShiftLeft');
+  // Mantener Q muestra el área; al soltar sale la habilidad.
+  await p.keyboard.down('KeyQ');
+  await wait(300);
+  await p.screenshot({ path: `${OUT}/04-aim.png` });
+  await p.keyboard.up('KeyQ');
   await wait(1200);
   await p.screenshot({ path: `${OUT}/04-match.png` });
-  await p.keyboard.press('KeyC');
-  await wait(400);
-  await p.screenshot({ path: `${OUT}/05-forge.png` });
-  await p.keyboard.press('KeyC');
+  // Tooltip de una habilidad
+  await p.hover('.hud-bar .slot.ult');
+  await p.waitForSelector('.tooltip.on', { timeout: 5000 });
+  const tipTxt = await p.$eval('.tooltip', (e) => e.textContent);
+  step('tooltip: ' + tipTxt.slice(0, 60));
+  if (!/ulti|Ulti/.test(tipTxt)) throw new Error('El tooltip de la ulti no muestra su contenido');
+  await wait(400); // transición de opacidad
+  await p.screenshot({ path: `${OUT}/05-tooltip.png` });
+  await p.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.5);
   await p.keyboard.down('Tab');
   await wait(300);
   await p.screenshot({ path: `${OUT}/06-board.png` });
@@ -124,7 +134,9 @@ try {
   const before = await a.evaluate((pid) => { const c = window.__rubble.session.sim.charByPid.get(pid); return { x: c.pos.x, z: c.pos.z }; }, pidB);
   // El cliente se mueve
   await b.keyboard.down('KeyW');
-  await wait(1500);
+  await wait(700);
+  await b.keyboard.press('ShiftLeft'); // dash predicho en el cliente
+  await wait(800);
   await b.keyboard.up('KeyW');
   await wait(500);
   const after = await a.evaluate((pid) => { const c = window.__rubble.session.sim.charByPid.get(pid); return { x: c.pos.x, z: c.pos.z }; }, pidB);

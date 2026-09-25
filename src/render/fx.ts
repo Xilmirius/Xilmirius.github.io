@@ -1,5 +1,6 @@
-// Efectos: partículas (InstancedMesh), ondas expansivas, arcos de golpe, proyectiles, zonas y telegrafías.
+// Efectos: partículas (InstancedMesh), proyectiles, zonas y telegrafías. (Anillos y arcos de golpe: juice.ts)
 import * as THREE from 'three';
+import { assetModel } from '../assets/registry';
 import type { AreaFrame, ProjFrame } from '../core/snapshot';
 import { ringTexture, softDisc, toonGradient } from './textures';
 
@@ -18,14 +19,14 @@ export class Particles {
   private c = new THREE.Color();
   private hdr: number;
 
-  /** additive: partículas que brillan (chispas, confeti de luz) con color HDR para el bloom. */
-  constructor(opts: { additive?: boolean; hdr?: number; tetra?: boolean } = {}) {
-    this.hdr = opts.hdr ?? 1;
+  /**
+   * glow: chispas de color con un poco de HDR para el bloom. Mezcla normal a propósito: con mezcla
+   * aditiva, muchas chispas superpuestas suman hasta el blanco y "queman" la pantalla.
+   */
+  constructor(opts: { glow?: boolean; hdr?: number; tetra?: boolean } = {}) {
+    this.hdr = Math.min(1.35, opts.hdr ?? 1);
     const geo = opts.tetra ? new THREE.TetrahedronGeometry(1, 0) : new THREE.IcosahedronGeometry(1, 0);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, toneMapped: !opts.additive,
-      ...(opts.additive ? { blending: THREE.AdditiveBlending, transparent: true, depthWrite: false } : {}),
-    });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: !opts.glow });
     this.mesh = new THREE.InstancedMesh(geo, mat, MAX_P);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
@@ -86,61 +87,58 @@ export class Particles {
   clear() { this.ps = []; this.mesh.count = 0; }
 }
 
-interface Wave { m: THREE.Mesh; t: number; dur: number; r: number }
-
-/** Anillos expansivos en el piso y arcos de golpe. */
-export class Waves {
-  group = new THREE.Group();
-  private list: Wave[] = [];
-  private geo = new THREE.PlaneGeometry(2, 2);
-  private tex = ringTexture();
-
-  ring(x: number, y: number, z: number, r: number, color: number, dur = 0.4) {
-    const m = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ map: this.tex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    m.rotation.x = -Math.PI / 2;
-    m.position.set(x, y + 0.08, z);
-    m.renderOrder = 3;
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur, r });
-  }
-
-  arc(x: number, y: number, z: number, yaw: number, range: number, angleDeg: number, color: number) {
-    const a = (angleDeg * Math.PI) / 180;
-    const g = new THREE.RingGeometry(range * 0.35, range, 20, 1, Math.PI / 2 - a / 2, a);
-    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
-    m.rotation.x = -Math.PI / 2;
-    m.rotation.z = yaw + Math.PI;
-    m.position.set(x, y + 0.6, z);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur: 0.18, r: -1 });
-  }
-
-  update(dt: number) {
-    for (const w of this.list) {
-      w.t += dt;
-      const k = w.t / w.dur;
-      const mat = w.m.material as THREE.MeshBasicMaterial;
-      if (w.r > 0) {
-        w.m.scale.setScalar(Math.max(0.01, w.r * (0.2 + 0.8 * Math.sqrt(k))));
-        mat.opacity = 1 - k;
-      } else {
-        mat.opacity = 0.55 * (1 - k);
-        w.m.scale.setScalar(1 + k * 0.15);
-      }
-    }
-    const done = this.list.filter((w) => w.t >= w.dur);
-    for (const w of done) { w.m.removeFromParent(); w.m.geometry !== this.geo && w.m.geometry.dispose(); (w.m.material as THREE.Material).dispose(); }
-    this.list = this.list.filter((w) => w.t < w.dur);
-  }
-
-  clear() { for (const w of this.list) w.m.removeFromParent(); this.list = []; }
-}
-
 // ───────────── proyectiles ─────────────
 
-const PROJ_COLORS: Record<string, number> = {
-  shard: 0x9ff0ff, lance: 0xd8fbff, glob: 0x7bea4f, wave: 0x6fdc4a, hook: 0xc9d3dd, bolt: 0xffd23f, nova: 0xaef4ff, goolob: 0x7bea4f,
+export const PROJ_COLORS: Record<string, number> = {
+  shard: 0x4fd1ff, lance: 0x3fb4ff, glob: 0x7bea4f, wave: 0x4fdc4a, hook: 0x8fa3b8, bolt: 0xffc629, nova: 0x9d7bff, goolob: 0x7bea4f,
 };
+
+/** Malla de un proyectil: el GLB proj.<tipo> si existe, si no la versión procedural. */
+export function buildProjectileMesh(kind: string, radius: number): THREE.Object3D {
+  const file = assetModel(`proj.${kind}`);
+  if (file) {
+    if (kind === 'wave') file.scale.set(radius, 1, radius * 0.5);
+    return file;
+  }
+  return buildProjectileProcedural(kind, radius);
+}
+
+function buildProjectileProcedural(kind: string, radius: number): THREE.Object3D {
+  const c = PROJ_COLORS[kind] ?? 0xffc629;
+  const glow = (k = 1.3) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(Math.min(1.35, k)), toneMapped: false });
+  const tg = toonGradient();
+  switch (kind) {
+    case 'shard': {
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), glow(1.3));
+      m.scale.set(0.6, 0.6, 1.6);
+      return m;
+    }
+    case 'lance': {
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), glow(1.35));
+      m.scale.set(0.6, 0.6, 4);
+      return m;
+    }
+    case 'glob': case 'goolob':
+      return new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshToonMaterial({ color: c, gradientMap: tg, transparent: true, opacity: 0.85 }));
+    case 'wave': {
+      const g = new THREE.CylinderGeometry(1, 1, 1, 24, 1, true, -Math.PI / 2, Math.PI);
+      const m = new THREE.Mesh(g, new THREE.MeshToonMaterial({ color: c, gradientMap: tg, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+      m.scale.set(radius, 1.6, radius * 0.5);
+      const grp = new THREE.Group();
+      grp.add(m);
+      return grp;
+    }
+    case 'hook':
+      return new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.06, 6, 10, Math.PI * 1.4), new THREE.MeshToonMaterial({ color: c, gradientMap: tg }));
+    case 'nova': {
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), glow(1.35));
+      m.scale.set(1, 1.6, 1);
+      return m;
+    }
+    default:
+      return new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.12, radius), 8, 6), glow(1.3));
+  }
+}
 
 export class ProjectilesView {
   group = new THREE.Group();
@@ -149,56 +147,13 @@ export class ProjectilesView {
 
   constructor(private particles: Particles) {}
 
-  private build(p: ProjFrame): THREE.Object3D {
-    const c = PROJ_COLORS[p.k] ?? 0xffffff;
-    const glow = (k = 2.2) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), toneMapped: false });
-    const tg = toonGradient();
-    switch (p.k) {
-      case 'shard': {
-        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), glow(2.4));
-        m.scale.set(0.6, 0.6, 1.6);
-        return m;
-      }
-      case 'lance': {
-        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), glow(3));
-        m.scale.set(0.6, 0.6, 4);
-        return m;
-      }
-      case 'glob': case 'goolob': {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshToonMaterial({ color: c, gradientMap: tg, transparent: true, opacity: 0.85 }));
-        return m;
-      }
-      case 'wave': {
-        const g = new THREE.CylinderGeometry(1, 1, 1, 24, 1, true, -Math.PI / 2, Math.PI);
-        const m = new THREE.Mesh(g, new THREE.MeshToonMaterial({ color: c, gradientMap: tg, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
-        m.scale.set(p.r, 1.6, p.r * 0.5);
-        const grp = new THREE.Group();
-        m.position.y = 0;
-        grp.add(m);
-        return grp;
-      }
-      case 'hook': {
-        const m = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.06, 6, 10, Math.PI * 1.4), new THREE.MeshToonMaterial({ color: c, gradientMap: tg }));
-        return m;
-      }
-      case 'nova': {
-        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), glow(2.5));
-        m.scale.set(1, 1.6, 1);
-        return m;
-      }
-      default: {
-        return new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.12, p.r), 8, 6), glow(2.5));
-      }
-    }
-  }
-
   update(list: ProjFrame[], ownerPos: (id: number) => THREE.Vector3 | null, time: number) {
     const seen = new Set<number>();
     for (const p of list) {
       seen.add(p.id);
       let o = this.map.get(p.id);
       if (!o) {
-        o = this.build(p);
+        o = buildProjectileMesh(p.k, p.r);
         this.group.add(o);
         this.map.set(p.id, o);
       }
@@ -214,7 +169,7 @@ export class ProjectilesView {
         const from = ownerPos(p.o);
         if (from) {
           if (!line) {
-            line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x3a3a3a }));
+            line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x5b6570 }));
             this.group.add(line);
             this.chains.set(p.id, line);
           }
@@ -260,11 +215,11 @@ export class AreasView {
       const enemy = a.tm !== myTeam;
       if (!v) {
         const g = new THREE.Group();
-        let color = 0xffffff;
-        if (kind === 'tele') color = enemy ? 0xff3b30 : 0x6fd3ff;
+        let color = 0xffc629;
+        if (kind === 'tele') color = enemy ? 0xff3b30 : 0x4fb4ff;
         else if (a.k === 'puddle') color = 0x6fdc4a;
         else if (a.k === 'magnet') color = 0xb070ff;
-        const hdrCol = new THREE.Color(color).multiplyScalar(kind === 'tele' ? 2.4 : 1.6);
+        const hdrCol = new THREE.Color(color).multiplyScalar(kind === 'tele' ? 1.3 : 1.15);
         const ring = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.ringTex, color: hdrCol, transparent: true, depthWrite: false, opacity: 0.9, toneMapped: false }));
         ring.rotation.x = -Math.PI / 2;
         ring.renderOrder = 2;
@@ -285,7 +240,7 @@ export class AreasView {
       v.ring.scale.setScalar(a.r);
       if (kind === 'tele') {
         v.fill!.scale.setScalar(Math.max(0.01, a.r * a.p));
-        (v.ring.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.4 * Math.sin(time * 20);
+        (v.ring.material as THREE.MeshBasicMaterial).opacity = 0.65 + 0.3 * Math.sin(time * 14);
       } else if (a.k === 'puddle') {
         v.fill!.scale.setScalar(a.r * Math.min(1, a.p * 8));
         (v.fill!.material as THREE.MeshBasicMaterial).opacity = 0.45 * Math.min(1, (1 - a.p) * 5);
@@ -309,15 +264,16 @@ export class AreasView {
   clear() { for (const v of this.map.values()) v.g.removeFromParent(); this.map.clear(); }
 }
 
-/** Zona del modo "Control de zona": anillo + columna de luz con el color del dueño. */
+/** Zona del modo "Control de zona": anillo + columna de luz con el color del dueño (dorada si está libre). */
+const KOTH_FREE = 0xffc629;
 export class KothView {
   group = new THREE.Group();
   private ring: THREE.Mesh;
   private beam: THREE.Mesh;
   constructor() {
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
+    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 64), new THREE.MeshBasicMaterial({ color: KOTH_FREE, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
     this.ring.rotation.x = -Math.PI / 2;
-    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 6, 40, 1, true), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 6, 40, 1, true), new THREE.MeshBasicMaterial({ color: KOTH_FREE, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
     this.beam.position.y = 3;
     this.group.add(this.ring, this.beam);
     this.group.visible = false;
@@ -328,8 +284,8 @@ export class KothView {
     this.group.position.set(z.x, z.y + 0.06, z.z);
     this.ring.scale.setScalar(z.r);
     this.beam.scale.set(z.r, 1, z.r);
-    const c = z.contested ? (Math.floor(time * 6) % 2 ? 0xff4040 : 0xffffff) : z.owner >= 0 ? color(z.owner) : 0xffffff;
-    (this.ring.material as THREE.MeshBasicMaterial).color.setHex(c).multiplyScalar(2.2);
+    const c = z.contested ? (Math.floor(time * 6) % 2 ? 0xff4040 : KOTH_FREE) : z.owner >= 0 ? color(z.owner) : KOTH_FREE;
+    (this.ring.material as THREE.MeshBasicMaterial).color.setHex(c).multiplyScalar(1.3);
     (this.beam.material as THREE.MeshBasicMaterial).color.setHex(c);
   }
 }

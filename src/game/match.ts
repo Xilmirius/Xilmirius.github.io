@@ -5,7 +5,14 @@ import { getPrefs, savePrefs } from '../config';
 import { toast } from '../ui/dom';
 import { CollisionWorld, type Obstacle } from '../core/collision';
 import { DT, INTERP_TICKS } from '../core/constants';
-import { DESTRUCT_DEF } from '../core/entities';
+import { DESTRUCT_DEF, SLOTS } from '../core/entities';
+import { HEROES } from '../core/heroes';
+import { ITEM_BY_ID } from '../core/items';
+import { ROUTE_MODS } from '../core/mutations';
+import { getRules, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
+import { TEAM_COLORS } from '../core/constants';
+import type { AbilitySlot, HeroId } from '../core/types';
+import type { AimView } from '../render/indicator';
 import type { TimedEvent } from '../core/events';
 import { type InputFrame } from '../core/input';
 import type { MatchInit, MatchResultInfo } from '../core/protocol';
@@ -21,6 +28,8 @@ import { applyMatch } from './profile';
 import { Ticker } from './ticker';
 
 const STRUCT_DIM: Record<string, [number, number]> = { wall: [0.55, 1.8], stonewall: [0.55, 1.8], turret: [0.4, 1.2] };
+const AIM_SLOT: Record<string, AbilitySlot> = { KeyQ: 'q', KeyE: 'e', KeyF: 'f', KeyR: 'r' };
+const AIM_ITEM: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 2 };
 
 export interface MatchHooks {
   onEscape(): void;
@@ -54,11 +63,12 @@ export class MatchRunner {
   private latestWorld: WorldFrame | null = null;
   private disposed = false;
   private boardHeld = false;
-  // Tiempo visual: hitstop (congelar), cámara lenta y recuperación.
+  // Tiempo visual: hitstop (congelar un instante) y recuperación.
   private lag = 0;
   private stopT = 0;
-  private slowT = 0;
-  private slowScale = 1;
+  private readonly rules: Ruleset;
+  private heroId: HeroId | null = null;
+  private teamColor = TEAM_COLORS[0];
   private heartT = 0;
   private lowFpsT = 0;
 
@@ -71,10 +81,13 @@ export class MatchRunner {
     const prefs = getPrefs();
     const me = init.roster.find((r) => r.pid === session.localPid);
     this.localId = me ? me.id : -1;
-    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme });
+    this.rules = getRules(init.settings.rules);
+    this.heroId = me ? me.hero : null;
+    this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
+    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: getRules(init.settings.rules).pickups });
     this.cw = new CollisionWorld(this.view.terrain);
-    this.hud = new Hud(container, init.roster, this.localId, (c) => this.command(c));
-    this.view.onImpact = (stop, scale, dur) => this.impact(stop, scale, dur);
+    this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c));
+    this.view.onImpact = (stop) => this.impact(stop);
     this.view.onLocalPickup = (sx, sy, mat) => this.hud.flyMat(sx, sy, mat);
     this.hud.onFlash = (c, a) => this.view.flash(c, a);
     audio.tension = 0;
@@ -102,7 +115,7 @@ export class MatchRunner {
   private onResize = () => this.view.resize();
 
   private onKey(code: string) {
-    if (code === 'KeyC') this.hud.toggleForge();
+    if (code === 'KeyC' && this.rules.crafting) this.hud.toggleForge();
     else if (code === 'Tab') { this.boardHeld = true; this.hud.showBoard(true); }
     else if (code === 'Escape') {
       if (this.hud.forgeOpen) this.hud.toggleForge(false);
@@ -160,6 +173,7 @@ export class MatchRunner {
       stepMove(this.pred, f, this.predParams, this.cw, DT, this.mo);
       if (this.mo.jumped) audio.play('jump', 0.8);
       if (this.mo.airJumped) audio.play('airjump', 0.8);
+      if (this.mo.dashed) audio.play('whoosh', 0.8, 0, 1.4);
     }
   }
 
@@ -210,8 +224,9 @@ export class MatchRunner {
     const s: MoveState = {
       pos: { x: c.x, y: c.y, z: c.z }, vel: { x: c.vx, y: me.vy, z: c.vz }, facing: c.f,
       grounded: !!me.gr, airJumps: me.aj, coyote: me.co, prevB: me.pb, tumble: me.tb, hitstun: me.hs, stun: me.sn, hitSlide: me.hsl,
+      dashT: me.dt, dashCd: me.dcd, dashX: me.dx, dashZ: me.dz, airDashes: me.ad,
     };
-    const p: MoveParams = { speed: me.spd, lock: !!me.lock, airControl: me.air, restitution: me.rest, maxAirJumps: me.maj, jumpMul: me.jm, noGravity: !!me.ng };
+    const p: MoveParams = { speed: me.spd, lock: !!me.lock, airControl: me.air, restitution: me.rest, maxAirJumps: me.maj, jumpMul: me.jm, noGravity: !!me.ng, dash: !!me.dsh };
     this.predParams = p;
     if ((c.fl & F_DEAD) || me.direct) {
       this.pred = s;
@@ -227,13 +242,29 @@ export class MatchRunner {
     this.pred = s;
   }
 
-  /** Congela el dibujo del mundo (hitstop) y/o lo pone en cámara lenta. Es solo visual: la simulación sigue. */
-  impact(hitstop: number, slowScale?: number, slowDur?: number) {
-    this.stopT = Math.max(this.stopT, hitstop);
-    if (slowScale && slowDur) {
-      this.slowScale = Math.min(this.slowScale, slowScale);
-      this.slowT = Math.max(this.slowT, slowDur);
+  /** Congela el dibujo del mundo un instante (hitstop). Es solo visual: la simulación sigue. */
+  impact(hitstop: number) {
+    this.stopT = Math.max(this.stopT, Math.min(0.1, hitstop));
+  }
+
+  /** Qué dibujar mientras mantenés la tecla de una habilidad o ítem (área, línea, cono...). */
+  private computeAim(local: CharFrame | null): AimView | null {
+    const me = this.me;
+    const code = this.input.aimKey();
+    if (!code || !local || !me || !this.heroId || (local.fl & F_DEAD)) return null;
+    const slot = AIM_SLOT[code];
+    if (slot) {
+      const a = HEROES[this.heroId].abilities[slot];
+      if (local.lv < unlockLevel(this.rules, a)) return null;
+      const ready = usesUltCharge(this.rules, slot) ? me.ult >= 1 : me.cd[SLOTS.indexOf(slot)] <= 0;
+      const mut = me.mut[slot];
+      return { shape: a.shape, range: a.range, area: mut ? ROUTE_MODS[mut].area : 1, ready, color: this.teamColor };
     }
+    const n = AIM_ITEM[code];
+    if (n === undefined || !this.rules.crafting) return null;
+    const it = me.act[n] ? ITEM_BY_ID[me.act[n]!] : null;
+    if (!it?.shape) return null;
+    return { shape: it.shape, range: it.range ?? 0, area: 1, ready: me.cd[SLOTS.indexOf((['i1', 'i2', 'i3'] as const)[n])] <= 0, color: this.teamColor };
   }
 
   // ───────────── render (rAF) ─────────────
@@ -253,11 +284,10 @@ export class MatchRunner {
       }
     }
 
-    // Velocidad del "tiempo visual": 0 en hitstop, <1 en cámara lenta, >1 mientras recupera el atraso.
+    // Velocidad del "tiempo visual": 0 en hitstop, >1 un instante mientras recupera el atraso.
     let rate = 1;
     if (this.stopT > 0) { rate = 0; this.stopT -= dt; }
-    else if (this.slowT > 0) { rate = this.slowScale; this.slowT -= dt; if (this.slowT <= 0) this.slowScale = 1; }
-    else if (this.lag > 0) rate = 1.6;
+    else if (this.lag > 0) rate = 1.5;
     this.lag = Math.min(40, Math.max(0, this.lag + dt * 60 * (1 - rate)));
     const worldDt = dt * Math.min(1, rate);
 
@@ -278,7 +308,7 @@ export class MatchRunner {
         this.events = this.events.filter((e) => e.t > renderTick + 1);
         const listener = this.view.listener();
         for (const e of due) {
-          if (e.k === 'jump' && e.id === this.localId && !this.session.isHost) {
+          if ((e.k === 'jump' || e.k === 'dash') && e.id === this.localId && !this.session.isHost) {
             this.view.handleEvent(e);
             continue; // el sonido ya lo hizo la predicción
           }
@@ -319,7 +349,8 @@ export class MatchRunner {
       this.heartT -= dt;
       if (this.heartT <= 0) { audio.play('heart', 0.9); this.heartT = 0.75; }
     } else this.heartT = 0;
-    this.view.render(w, worldDt, camChar, this.cursor, this.input.shift, dt);
+    this.view.aim = this.computeAim(local);
+    this.view.render(w, worldDt, camChar, this.cursor, dt);
     const ping = this.session.isHost ? 0 : (this.session as ClientSession).rtt;
     this.hud.update(w, local, this.me, dt, { ping, fps: this.fps, showFps: getPrefs().showFps, kind: this.session.isHost ? 'host' : 'client' });
   }

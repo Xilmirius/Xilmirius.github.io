@@ -4,17 +4,17 @@ import { describe, expect, it } from 'vitest';
 const log = (...a: unknown[]) => { if (process.env.SIM_LOG) appendFileSync(process.env.SIM_LOG, JSON.stringify(a) + '\n'); };
 import { BotBrain } from '../src/core/bots';
 import { CollisionWorld } from '../src/core/collision';
-import { DT, KILL_Y, LEVEL_H, STAGE_AT } from '../src/core/constants';
+import { DT, KILL_Y, LEVEL_H, STAGE_AT, ULT_PER_HEAT } from '../src/core/constants';
 import { emptyInput, BTN } from '../src/core/input';
 import { MAPS } from '../src/core/maps';
-import { defaultMoveParams, newMoveOut, stepMove, type MoveState } from '../src/core/movement';
+import { DASH_IDLE, defaultMoveParams, newMoveOut, stepMove, type MoveState } from '../src/core/movement';
 import { Simulation } from '../src/core/sim';
 import { buildWorldFrame, decodeWorld, encodeWorld, buildMeFrame } from '../src/core/snapshot';
 import { Terrain } from '../src/core/terrain';
 import { DEFAULT_SETTINGS, HERO_IDS, type MatchSettings, type RosterEntry, type HeroId } from '../src/core/types';
 
 function mkState(x: number, y: number, z: number): MoveState {
-  return { pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, facing: 0, grounded: true, airJumps: 1, coyote: 0, prevB: 0, tumble: 0, hitstun: 0, stun: 0, hitSlide: 0 };
+  return { pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, facing: 0, grounded: true, airJumps: 1, coyote: 0, prevB: 0, tumble: 0, hitstun: 0, stun: 0, hitSlide: 0, ...DASH_IDLE };
 }
 
 describe('mapas', () => {
@@ -73,6 +73,39 @@ describe('movimiento', () => {
     }
     expect(fell).toBe(true);
   });
+
+  it('dash: ráfaga corta, enfriamiento y solo si las reglas lo habilitan', () => {
+    const sp = t.spawns.team[0][0];
+    const off = mkState(sp.x, 0, sp.z);
+    const tap = { ...emptyInput(), mx: 1, ax: sp.x + 10, az: sp.z, b: BTN.DASH };
+    stepMove(off, tap, mp, cw, DT, out);
+    expect(out.dashed).toBe(false);
+
+    const on = { ...mp, dash: true };
+    const s = mkState(sp.x, 0, sp.z);
+    stepMove(s, tap, on, cw, DT, out);
+    expect(out.dashed).toBe(true);
+    const walk = { ...tap, b: 0 };
+    for (let i = 0; i < 20; i++) stepMove(s, walk, on, cw, DT, out);
+    expect(s.pos.x - sp.x).toBeGreaterThan(3.5);
+    // Enfriamiento: un segundo toque enseguida no sale.
+    stepMove(s, tap, on, cw, DT, out);
+    expect(out.dashed).toBe(false);
+  });
+
+  it('dash: no cancela un lanzamiento (primero hay que usar el segundo salto)', () => {
+    const sp = t.spawns.team[0][0];
+    const on = { ...mp, dash: true };
+    const s = mkState(sp.x, 3, sp.z);
+    s.grounded = false; s.tumble = 2; s.vel = { x: 12, y: 2, z: 0 };
+    stepMove(s, { ...emptyInput(), mx: -1, b: BTN.DASH }, on, cw, DT, out);
+    expect(out.dashed).toBe(false);
+    stepMove(s, { ...emptyInput(), mx: -1, b: BTN.JUMP }, on, cw, DT, out);
+    expect(out.airJumped).toBe(true);
+    stepMove(s, { ...emptyInput(), mx: -1, b: BTN.DASH }, on, cw, DT, out);
+    expect(out.dashed).toBe(true);
+    expect(s.airDashes).toBe(0);
+  });
 });
 
 function roster(n: number, heroes?: HeroId[]): RosterEntry[] {
@@ -106,7 +139,7 @@ function runMatch(settings: Partial<MatchSettings>, n: number, seconds: number, 
   const s: MatchSettings = { ...DEFAULT_SETTINGS, ...settings };
   const sim = new Simulation({ settings: s, roster: roster(n, heroes), seed: 42 });
   const brains = sim.chars.map((c, i) => new BotBrain(3, 100 + i));
-  let deaths = 0, crafts = 0, lvl = 0;
+  let deaths = 0, crafts = 0, lvl = 0, ults = 0, dashes = 0;
   for (let i = 0; i < seconds * 60 && sim.phase !== 'end'; i++) {
     sim.chars.forEach((c, k) => { c.input = brains[k].think(sim, c, DT); });
     sim.step();
@@ -114,6 +147,8 @@ function runMatch(settings: Partial<MatchSettings>, n: number, seconds: number, 
       if (e.k === 'ring') deaths++;
       if (e.k === 'craft') crafts++;
       if (e.k === 'lvl') lvl++;
+      if (e.k === 'cast' && e.s === 'r') ults++;
+      if (e.k === 'dash') dashes++;
     }
     // snapshot válido todo el tiempo
     if (i % 30 === 0) {
@@ -123,16 +158,30 @@ function runMatch(settings: Partial<MatchSettings>, n: number, seconds: number, 
       buildMeFrame(sim, sim.chars[0]);
     }
   }
-  return { sim, deaths, crafts, lvl };
+  return { sim, deaths, crafts, lvl, ults, dashes };
 }
 
 describe('partidas headless de bots', () => {
   it('3v3 vidas en La Cantera termina sin errores', () => {
-    const r = runMatch({ mode: 'stock', map: 'cantera', lives: 2, timeLimit: 480 }, 6, 500);
+    const r = runMatch({ mode: 'stock', rules: 'full', map: 'cantera', lives: 2, timeLimit: 480 }, 6, 500);
     expect(r.deaths).toBeGreaterThan(3);
     expect(r.lvl).toBeGreaterThan(6);
     expect(r.sim.phase).toBe('end');
     log('stock', { deaths: r.deaths, crafts: r.crafts, t: Math.round(r.sim.elapsed), res: r.sim.result });
+  }, 60000);
+
+  it('Brawler: sin niveles ni forja, la ulti se carga y se usa', () => {
+    const r = runMatch({ mode: 'stock', rules: 'brawl', map: 'cantera', lives: 2, timeLimit: 480 }, 6, 500);
+    expect(r.sim.phase).toBe('end');
+    expect(r.lvl).toBe(0);
+    expect(r.crafts).toBe(0);
+    expect(r.ults).toBeGreaterThan(2);
+    expect(r.dashes).toBeGreaterThan(5);
+    for (const c of r.sim.chars) {
+      expect(c.level).toBe(1);
+      expect(c.mats.stone + c.mats.metal + c.mats.crystal + c.mats.goo).toBe(0);
+    }
+    log('brawl', { deaths: r.deaths, ults: r.ults, dashes: r.dashes, t: Math.round(r.sim.elapsed), res: r.sim.result });
   }, 60000);
 
   it('1v1 ring-outs en El Islote', () => {
@@ -188,5 +237,44 @@ describe('eventos con tick', () => {
     expect(typeof msgs[0].tx).toBe('string');
     expect(msgs[0].tx).toContain('30');
     expect(typeof msgs[0].t).toBe('number');
+  });
+});
+
+describe('reglas', () => {
+  it('las habilidades salen al soltar la tecla (mantener = apuntar)', () => {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'brawl' }, roster: roster(2, ['prisma', 'canto']), seed: 5 });
+    sim.phase = 'play';
+    const [a] = sim.chars;
+    const casts = () => sim.drainEvents().filter((e) => e.k === 'cast').length;
+    a.input = { ...emptyInput(), ax: a.pos.x + 5, az: a.pos.z, b: BTN.F };
+    for (let i = 0; i < 10; i++) sim.step();
+    expect(casts()).toBe(0);
+    a.input = { ...a.input, b: 0 };
+    sim.step();
+    expect(casts()).toBe(1);
+  });
+
+  it('Brawler: todo desbloqueado en nivel 1 y la ulti necesita carga', () => {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'brawl' }, roster: roster(2, ['canto', 'prisma']), seed: 6 });
+    sim.phase = 'play';
+    const [a, b] = sim.chars;
+    for (const s of ['q', 'e', 'f', 'r'] as const) expect(sim.abilityUnlocked(a, s)).toBe(true);
+    expect(sim.ultReady(a)).toBe(false);
+    sim.hit(b, a, { heat: 1 / ULT_PER_HEAT + 5, kb: 0, dirX: 1, dirZ: 0 });
+    expect(a.ult).toBeGreaterThanOrEqual(1);
+    expect(sim.ultReady(a)).toBe(true);
+    // En Completo, la ulti se desbloquea por nivel.
+    const full = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'full' }, roster: roster(2), seed: 7 });
+    expect(full.abilityUnlocked(full.chars[0], 'r')).toBe(false);
+    expect(full.abilityUnlocked(full.chars[0], 'q')).toBe(true);
+  });
+
+  it('Brawler: los comandos de forja se ignoran', () => {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'brawl' }, roster: roster(2), seed: 8 });
+    const a = sim.chars[0];
+    a.mats = { stone: 20, metal: 20, crystal: 20, goo: 20 };
+    sim.queueCommand(a.pid, { c: 'craft', id: 'coraza' });
+    sim.step();
+    expect(a.passives.length).toBe(0);
   });
 });

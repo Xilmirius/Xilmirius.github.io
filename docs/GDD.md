@@ -102,6 +102,8 @@ Es la decisión que desbloquea todo lo demás. Click-to-move (Dota/LoL) es incom
 
 Isométrica fija en ángulo (estilo Dota2), pero **sigue al personaje** (no es una vista de "toda la arena" fija). Para ver más lejos, `Shift` la corre hacia el cursor hasta un radio máximo (D-0013). No es top-down puro.
 
+> **Versión web:** el `Shift` para mirar lejos se sacó (desorientaba) y ahora es un **dash**; la cámara queda fija siguiendo al personaje. Ver [decisiones-web.md](decisiones-web.md) DW-37 y DW-38.
+
 ---
 
 ## 6. Combate: el pilar diferenciador (knockback físico)

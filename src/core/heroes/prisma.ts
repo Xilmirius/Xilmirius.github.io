@@ -32,7 +32,7 @@ export const prisma: HeroDef = {
   },
   abilities: {
     q: {
-      name: 'Lanza de cuarzo', icon: '🔹', cd: 6, unlock: 1, range: 18, aim: 'dir', bot: 'poke',
+      name: 'Lanza de cuarzo', icon: '🔹', cd: 6, unlock: 1, range: 18, aim: 'dir', shape: { k: 'line', w: 0.9 }, bot: 'poke',
       desc: 'Tras cargar un instante, dispara una lanza que atraviesa a todos y empuja fuerte.',
       cast(sim, ch, ax, az, m) {
         sim.windup(ch, 0.25, () => {
@@ -46,7 +46,7 @@ export const prisma: HeroDef = {
       },
     },
     e: {
-      name: 'Destello', icon: '✨', cd: 9, unlock: 2, range: 6, aim: 'point', bot: 'escape',
+      name: 'Destello', icon: '✨', cd: 9, unlock: 2, range: 6, aim: 'point', shape: { k: 'blink', r: 2.6 }, bot: 'escape',
       desc: 'Parpadeo hacia el cursor. Donde estabas queda una mina de cristal que explota enseguida.',
       cast(sim, ch, ax, az, m) {
         const ox = ch.pos.x, oy = ch.pos.y, oz = ch.pos.z;
@@ -59,7 +59,7 @@ export const prisma: HeroDef = {
       },
     },
     f: {
-      name: 'Refracción', icon: '🔆', cd: 16, unlock: 3, range: 0, aim: 'self', bot: 'buff',
+      name: 'Refracción', icon: '🔆', cd: 16, unlock: 3, range: 0, aim: 'self', shape: { k: 'self', r: 0 }, bot: 'buff',
       desc: 'Por 4 s tus esquirlas se dividen en tres.',
       cast(sim, ch, _ax, _az, m) {
         ch.refractT = 4 * m.dur;
@@ -67,7 +67,7 @@ export const prisma: HeroDef = {
       },
     },
     r: {
-      name: 'Supernova', icon: '💎', cd: 50, unlock: 5, range: 12, aim: 'point', radius: 5, bot: 'finisher',
+      name: 'Supernova', icon: '💎', cd: 50, unlock: 5, range: 12, aim: 'point', radius: 5, shape: { k: 'circle', r: 5 }, bot: 'finisher',
       desc: 'Lanza un cristal gigante que cae en el punto marcado y estalla en un área enorme.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 12);

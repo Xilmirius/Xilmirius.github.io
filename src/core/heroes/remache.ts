@@ -24,7 +24,7 @@ export const remache: HeroDef = {
   },
   abilities: {
     q: {
-      name: 'Muro', icon: '🧱', cd: 9, unlock: 1, range: 9, aim: 'point', radius: 1.8, bot: 'zone',
+      name: 'Muro', icon: '🧱', cd: 9, unlock: 1, range: 9, aim: 'point', radius: 1.8, shape: { k: 'wall', len: 3.45 }, bot: 'zone',
       desc: 'Levanta un muro de chapa perpendicular a tu mirada. Frena proyectiles y sirve para estamparlos contra algo.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 9);
@@ -32,7 +32,7 @@ export const remache: HeroDef = {
       },
     },
     e: {
-      name: 'Torreta', icon: '🔩', cd: 14, unlock: 2, range: 6, aim: 'point', bot: 'zone',
+      name: 'Torreta', icon: '🔩', cd: 14, unlock: 2, range: 6, aim: 'point', shape: { k: 'point', r: 10 }, bot: 'zone',
       desc: 'Planta una torreta que dispara al enemigo más cercano durante 8 s.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 6);
@@ -40,7 +40,7 @@ export const remache: HeroDef = {
       },
     },
     f: {
-      name: 'Gancho', icon: '🪝', cd: 10, unlock: 3, range: 12, aim: 'dir', bot: 'engage',
+      name: 'Gancho', icon: '🪝', cd: 10, unlock: 3, range: 12, aim: 'dir', shape: { k: 'line', w: 0.8 }, bot: 'engage',
       desc: 'Lanza un gancho: si engancha a un enemigo, lo trae hacia vos; si engancha una pared o cobertura, te tira hacia ella.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 12);
@@ -52,7 +52,7 @@ export const remache: HeroDef = {
       },
     },
     r: {
-      name: 'Imán', icon: '🧲', cd: 50, unlock: 5, range: 10, aim: 'point', radius: 6, bot: 'finisher',
+      name: 'Imán', icon: '🧲', cd: 50, unlock: 5, range: 10, aim: 'point', radius: 6, shape: { k: 'circle', r: 6 }, bot: 'finisher',
       desc: 'Un campo magnético que chupa a los enemigos hacia el centro y después los repele con una explosión.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 10);

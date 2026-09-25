@@ -1,7 +1,7 @@
 // Constantes de juego. Todo lo "tuneable" vive acá para iterar balance sin tocar sistemas.
 export const GAME_TITLE = 'RUBBLE';
 export const GAME_SUBTITLE = 'arena brawler de materiales';
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -59,6 +59,18 @@ export const TILE_CRUMBLE = 0.8;
 // Empujón universal (clic derecho): mantener carga (D-0028)
 export const PUSH_MAX_CHARGE = 0.8;
 export const PUSH_CD = 0.5;
+
+// Dash universal (Shift): ráfaga corta, predicha en el cliente igual que el salto.
+export const DASH_SPEED = 24;
+export const DASH_TIME = 0.17; // ≈ 4 m
+export const DASH_CD = 1.3;
+export const DASH_END_KEEP = 0.35; // velocidad que queda al terminar
+export const AIR_DASHES = 1;
+
+// Carga de ulti (reglas con ultCharge): se llena pegando, juntando trozos y un goteo lento.
+export const ULT_PER_HEAT = 1 / 220;
+export const ULT_TRICKLE = 1 / 90;
+export const ULT_PER_PICKUP = 0.04;
 
 // Reparar (V)
 export const REPAIR_TIME = 1.4;

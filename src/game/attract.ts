@@ -46,7 +46,7 @@ export class AttractMode {
         const alive = w.chars.filter((x) => !(x.fl & F_DEAD));
         if (alive.length) { c = alive[Math.floor(Math.random() * alive.length)]; this.follow = c.id; this.followT = 8; }
       }
-      this.view.render(w, dt, c ?? null, null, false);
+      this.view.render(w, dt, c ?? null, null);
     };
     this.raf = requestAnimationFrame(loop);
   }

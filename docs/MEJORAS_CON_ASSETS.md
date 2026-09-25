@@ -2,6 +2,8 @@
 
 **Para quién es esto:** otro agente (o una persona) que tenga acceso a Blender, a bibliotecas de assets, a generadores de imagen, audio o voz, o que pueda descargar de internet. Hoy **todo el juego es procedural** (formas geométricas, texturas dibujadas en canvas, audio sintetizado). Eso lo hace liviano y sin licencias, pero tiene techo visual. Cada mejora de abajo dice **qué hacer, con qué especificaciones y dónde se enchufa en el código**, siempre con *fallback* a lo procedural si el archivo no está.
 
+> **Actualización — registro de assets:** ahora cada pieza procedural tiene un **id** y un archivo esperado en `src/assets/catalog.ts`, con la checklist generada en [ASSETS_CATALOGO.md](ASSETS_CATALOGO.md) y una galería en el juego (menú → 🧩 Assets). Para **modelos, texturas e íconos ya no hace falta tocar código**: se pone el archivo en `public/assets/<ruta>` y se lista en `public/assets/manifest.json`. Las rutas de abajo que dicen `public/models/...`, `public/textures/...` o `public/icons/...` pasan a ser `public/assets/models/...`, `public/assets/textures/...` y `public/assets/icons/...` (la ruta exacta de cada pieza está en el catálogo). Lo que todavía necesita código es lo que cambia comportamiento: el rig con animaciones (§1.1), los flipbooks de VFX (§3.4) y los retratos/splash del lobby (§3.2).
+
 Reglas generales:
 - **Licencias:** solo CC0, CC-BY (con atribución) o assets propios o generados con términos que permitan uso comercial. Registrá **todo** en `CREDITS.md` (archivo, autor, licencia, URL).
 - **Presupuesto:** texturas ≤ 1024 px (512 en props), modelos ≤ 3.000 triángulos por personaje y ≤ 800 por prop, peso total de assets ≤ 25 MB. Es un juego web: cada MB es tiempo de carga.
@@ -169,7 +171,7 @@ Hoy los efectos son geometrías con colores HDR y bloom (`src/render/juice.ts`, 
 
 (Las podés hacer vos o cualquier agente sin herramientas extra.)
 - **Repeticiones del KO:** grabar los últimos 3 s de frames (ya existe `FrameBuffer`) y repetir el ring-out final en cámara lenta en la pantalla de resultados.
-- **Cámara de KO cinematográfica:** en el golpe letal, rotar un poco la cámara alrededor de la víctima (hoy hace zoom, congela y pasa a cámara lenta).
+- ~~Cámara de KO cinematográfica~~ **descartado**: durante la partida la cámara queda fija (DW-38 en decisiones-web.md). Si se quiere espectáculo de KO, que sea en la repetición de la pantalla de resultados.
 - **Emotes** (teclas 5-8) con burbujas encima del personaje: sincronizar como un evento más.
 - **Pantalla de "Jugador de la partida"** con el bean haciendo su animación de victoria (cuando exista el rig).
 - **Trail de colores del arma o empujón** con `MeshLine` o una estela de cinta.

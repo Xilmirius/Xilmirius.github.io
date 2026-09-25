@@ -1,4 +1,5 @@
 // Ítems: 3 pasivos + 3 activos, fabricados fusionando materiales del mapa (GDD §10).
+import type { AimShape } from './heroes/types';
 import type { Family, Materials } from './types';
 
 export type ItemKind = 'passive' | 'active';
@@ -11,6 +12,8 @@ export interface ItemDef {
   cost: Partial<Materials>;
   cd?: number; // activos
   icon: string;
+  range?: number; // activos: alcance
+  shape?: AimShape; // activos: área que se muestra al apuntar
 }
 
 export const ITEMS: ItemDef[] = [
@@ -23,12 +26,12 @@ export const ITEMS: ItemDef[] = [
   { id: 'savia', name: 'Savia', kind: 'passive', icon: '💧', desc: 'Si no te pegan por 4 s, te reparás 2.5 heat/s.', cost: { goo: 5, stone: 3 } },
   { id: 'resorte', name: 'Resorte', kind: 'passive', icon: '🌀', desc: '+1 salto en el aire y saltás 10% más alto.', cost: { goo: 4, metal: 4 } },
   // Activos
-  { id: 'parpadeo', name: 'Parpadeo', kind: 'active', icon: '✨', cd: 14, desc: 'Te teletransportás hasta 6 m hacia el cursor.', cost: { crystal: 6, goo: 3 } },
-  { id: 'ancla', name: 'Ancla', kind: 'active', icon: '🪨', cd: 25, desc: '2.5 s inamovible: sin knockback y 30% menos heat.', cost: { metal: 7, stone: 3 } },
-  { id: 'onda', name: 'Onda', kind: 'active', icon: '💥', cd: 16, desc: 'Onda expansiva que empuja a todos a tu alrededor.', cost: { stone: 5, goo: 4 } },
-  { id: 'muralla', name: 'Muralla', kind: 'active', icon: '🧱', cd: 18, desc: 'Levanta un muro de piedra en el cursor por 8 s.', cost: { stone: 6, metal: 2 } },
-  { id: 'garfio', name: 'Garfio', kind: 'active', icon: '🪝', cd: 12, desc: 'Te tirás hacia el cursor (hasta 10 m). Salva ring-outs.', cost: { metal: 5, crystal: 3 } },
-  { id: 'frasco', name: 'Frasco pegajoso', kind: 'active', icon: '🧪', cd: 14, desc: 'Charco de goo que frena enemigos por 3 s.', cost: { goo: 5, crystal: 2 } },
+  { id: 'parpadeo', name: 'Parpadeo', kind: 'active', icon: '✨', cd: 14, range: 6, shape: { k: 'point' }, desc: 'Te teletransportás hasta 6 m hacia el cursor.', cost: { crystal: 6, goo: 3 } },
+  { id: 'ancla', name: 'Ancla', kind: 'active', icon: '🪨', cd: 25, range: 0, shape: { k: 'self', r: 0 }, desc: '2.5 s inamovible: sin knockback y 30% menos heat.', cost: { metal: 7, stone: 3 } },
+  { id: 'onda', name: 'Onda', kind: 'active', icon: '💥', cd: 16, range: 0, shape: { k: 'self', r: 3.5 }, desc: 'Onda expansiva que empuja a todos a tu alrededor.', cost: { stone: 5, goo: 4 } },
+  { id: 'muralla', name: 'Muralla', kind: 'active', icon: '🧱', cd: 18, range: 8, shape: { k: 'wall', len: 3.45 }, desc: 'Levanta un muro de piedra en el cursor por 8 s.', cost: { stone: 6, metal: 2 } },
+  { id: 'garfio', name: 'Garfio', kind: 'active', icon: '🪝', cd: 12, range: 10, shape: { k: 'point' }, desc: 'Te tirás hacia el cursor (hasta 10 m). Salva ring-outs.', cost: { metal: 5, crystal: 3 } },
+  { id: 'frasco', name: 'Frasco pegajoso', kind: 'active', icon: '🧪', cd: 14, range: 9, shape: { k: 'circle', r: 2.5 }, desc: 'Charco de goo que frena enemigos por 3 s.', cost: { goo: 5, crystal: 2 } },
 ];
 
 export const ITEM_BY_ID: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]));

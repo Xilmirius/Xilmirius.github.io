@@ -10,7 +10,7 @@ import { FAMILIES, type AbilitySlot, type Route } from './types';
 
 export const F_GROUNDED = 1, F_TUMBLE = 2, F_STUN = 4, F_SHIELD = 8, F_INVULN = 16, F_KBIMM = 32, F_CHARGING = 64,
   F_REPAIRING = 128, F_DEAD = 256, F_SLOWED = 512, F_ARMOR = 1024, F_REFRACT = 2048, F_HITSTUN = 4096,
-  F_DISCONNECTED = 8192, F_HASTE = 16384, F_ELIMINATED = 32768, F_ULTREADY = 65536;
+  F_DISCONNECTED = 8192, F_HASTE = 16384, F_ELIMINATED = 32768, F_ULTREADY = 65536, F_DASH = 131072;
 
 export interface CharFrame {
   id: number;
@@ -60,14 +60,17 @@ export interface MeFrame {
   mut: Partial<Record<AbilitySlot, Route>>;
   slots: number;
   rep: number;
+  ult: number; // carga de ulti 0..1
+  dcd: number; // enfriamiento del dash
   // estado de movimiento para la predicción
   vy: number; gr: number; aj: number; tb: number; hs: number; sn: number; co: number; hsl: number; pb: number;
   spd: number; lock: number; ng: number; direct: number; air: number; rest: number; maj: number; jm: number;
+  dt: number; dx: number; dz: number; ad: number; dsh: number;
 }
 
 const r2 = round2;
 
-export function charFlags(c: Character): number {
+export function charFlags(c: Character, sim?: Simulation): number {
   let f = 0;
   if (c.grounded) f |= F_GROUNDED;
   if (c.tumble > 0) f |= F_TUMBLE;
@@ -85,7 +88,8 @@ export function charFlags(c: Character): number {
   if (c.disconnected) f |= F_DISCONNECTED;
   if (c.hasteT > 0) f |= F_HASTE;
   if (c.eliminated) f |= F_ELIMINATED;
-  if (c.level >= 5 && c.cds.r <= 0 && c.alive) f |= F_ULTREADY;
+  if (sim ? sim.ultReady(c) : c.level >= 5 && c.cds.r <= 0 && c.alive) f |= F_ULTREADY;
+  if (c.dashT > 0) f |= F_DASH;
   return f;
 }
 
@@ -97,7 +101,7 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
     phaseT: sim.phaseT,
     chars: sim.chars.map((c) => ({
       id: c.id, x: c.pos.x, y: c.pos.y, z: c.pos.z, f: c.facing, vx: c.vel.x, vy: c.vel.y, vz: c.vel.z,
-      fl: charFlags(c), heat: c.heat, st: c.stage, lv: c.level,
+      fl: charFlags(c, sim), heat: Math.round(c.heat), st: c.stage, lv: c.level,
       ac: c.action ? c.action.kind : '', ap: c.action ? Math.min(1, c.action.t / c.action.dur) : 0,
       ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : 0,
       sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT),
@@ -126,10 +130,13 @@ export function buildMeFrame(sim: Simulation, c: Character): MeFrame {
     mut: { ...c.mutations },
     slots: MUTATION_LEVELS.filter((l) => c.level >= l).length,
     rep: c.repairT / REPAIR_TIME,
+    ult: r2(c.ult),
+    dcd: r2(c.dashCd),
     vy: r2(c.vel.y), gr: c.grounded ? 1 : 0, aj: c.airJumps, tb: r2(c.tumble), hs: r2(c.hitstun), sn: r2(c.stun), co: r2(c.coyote),
     hsl: r2(c.hitSlide), pb: c.prevB,
     spd: r2(sim.charSpeed(c)), lock: a && a.lock ? 1 : 0, ng: a && a.noGravity ? 1 : 0, direct: a && a.direct ? 1 : 0,
     air: c.stats.airControl, rest: c.stats.restitution, maj: c.stats.maxAirJumps, jm: c.stats.jumpMul,
+    dt: r2(c.dashT), dx: r2(c.dashX), dz: r2(c.dashZ), ad: c.airDashes, dsh: sim.rules.dash ? 1 : 0,
   };
 }
 

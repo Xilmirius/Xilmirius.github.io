@@ -3,15 +3,35 @@ import * as THREE from 'three';
 import { STAGE_NAMES } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import { Rng } from '../core/rng';
-import { F_ARMOR, F_CHARGING, F_DEAD, F_GROUNDED, F_INVULN, F_KBIMM, F_REPAIRING, F_SHIELD, F_STUN, F_TUMBLE, F_ULTREADY, type CharFrame } from '../core/snapshot';
+import { assetModel } from '../assets/registry';
+import { F_ARMOR, F_CHARGING, F_DASH, F_DEAD, F_GROUNDED, F_INVULN, F_KBIMM, F_REPAIRING, F_SHIELD, F_STUN, F_TUMBLE, F_ULTREADY, type CharFrame } from '../core/snapshot';
 import { FAMILY_COLORS, FAMILY_CRACK, type Family, type HeroId } from '../core/types';
 import { beanSkin, softDisc, toonGradient } from './textures';
 
 const OUTLINE_BASE = new THREE.Color(0x1a1420);
 const STAGE_OUTLINE = [0x1a1420, 0x2a1a10, 0xff7a1a, 0xff1a2a];
+/** Color del destello al recibir un golpe (tiñe el cuerpo; nunca blanco). */
+const HIT_TINT = new THREE.Color(1, 0.42, 0.3);
+const WHITE = new THREE.Color(1, 1, 1);
+const DEG = Math.PI / 180;
 
-/** Sombreros cosméticos (se ganan subiendo el nivel de cuenta). */
-function buildHat(id: string): THREE.Object3D | null {
+/** Animaciones de brazos que dispara la vista (golpes, empujón, disparos). */
+export type ArmMove = 'hook' | 'wide' | 'shove' | 'slam' | 'throw';
+const ARM_DUR: Record<ArmMove, number> = { hook: 0.2, wide: 0.26, shove: 0.2, slam: 0.24, throw: 0.16 };
+
+/** Posición local de una mano sobre un arco alrededor del cuerpo. a: 0 = al frente, + = lado +X (mano "R"). */
+function onArc(out: THREE.Vector3, a: number, r: number, y: number) {
+  return out.set(Math.sin(a) * r, y, Math.cos(a) * r);
+}
+const easeOut = (k: number) => 1 - (1 - k) * (1 - k);
+
+/** Sombreros cosméticos (se ganan subiendo el nivel de cuenta). Si hay GLB (hat.<id>), se usa ese. */
+export function buildHat(id: string): THREE.Object3D | null {
+  if (id !== 'none') { const file = assetModel(`hat.${id}`); if (file) return file; }
+  return buildHatProcedural(id);
+}
+
+function buildHatProcedural(id: string): THREE.Object3D | null {
   const tg = toonGradient();
   const g = new THREE.Group();
   const toon = (c: number, e = 0) => new THREE.MeshToonMaterial({ color: c, gradientMap: tg, emissive: c, emissiveIntensity: e });
@@ -47,7 +67,7 @@ function buildHat(id: string): THREE.Object3D | null {
       break;
     }
     case 'halo': {
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.035, 8, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffe680).multiplyScalar(2.5), toneMapped: false }));
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.035, 8, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23f).multiplyScalar(1.3), toneMapped: false }));
       halo.rotation.x = Math.PI / 2;
       halo.position.y = 0.35;
       halo.name = 'spin';
@@ -93,7 +113,7 @@ function buildHat(id: string): THREE.Object3D | null {
         sp.position.set(Math.cos(a) * 0.2, 0.2, Math.sin(a) * 0.2);
         g.add(sp);
       }
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.05), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff2a6a).multiplyScalar(2.5), toneMapped: false }));
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.05), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff2a6a).multiplyScalar(1.3), toneMapped: false }));
       gem.position.set(0, 0.08, 0.21);
       g.add(gem);
       break;
@@ -153,6 +173,11 @@ export class BeanView {
   private walk = 0;
   private blinkT = 2;
   private spin = 0;
+  private arm: { move: ArmMove; hand: number; t: number; dur: number } | null = null;
+  private nextHand = 1;
+  private tmp = new THREE.Vector3();
+  private tmp2 = new THREE.Vector3();
+  private chargeColor: THREE.Color;
   readonly family: Family;
   readonly hero: HeroId;
   label: HTMLDivElement;
@@ -164,6 +189,7 @@ export class BeanView {
     const def = HEROES[hero];
     this.hero = hero;
     this.family = def.family;
+    this.chargeColor = new THREE.Color(teamColor);
     const base = FAMILY_COLORS[def.family];
     const skin = beanSkin(def.family, 0, base);
     this.bodyMat = new THREE.MeshToonMaterial({
@@ -192,18 +218,23 @@ export class BeanView {
     }
     this.eyes.position.set(0, 1.02, 0.36);
 
-    // Manos y pies
+    // Manos (guantes con el color del héroe: se leen los golpes) y pies
     const limbMat = new THREE.MeshToonMaterial({ color: new THREE.Color(base).multiplyScalar(0.85), gradientMap: toonGradient() });
-    const handG = new THREE.SphereGeometry(0.13, 10, 8);
-    this.handL = new THREE.Mesh(handG, limbMat);
-    this.handR = new THREE.Mesh(handG, limbMat);
+    const gloveMat = new THREE.MeshToonMaterial({ color: new THREE.Color(def.color).lerp(new THREE.Color(base), 0.25), gradientMap: toonGradient() });
+    const handG = new THREE.SphereGeometry(0.15, 12, 10);
+    handG.scale(1, 0.9, 1.1);
+    this.handL = new THREE.Mesh(handG, gloveMat);
+    this.handR = new THREE.Mesh(handG, gloveMat);
     this.handL.castShadow = this.handR.castShadow = true;
     const footG = new THREE.SphereGeometry(0.14, 10, 8);
     footG.scale(1, 0.6, 1.3);
     this.footL = new THREE.Mesh(footG, limbMat);
     this.footR = new THREE.Mesh(footG, limbMat);
 
-    this.buildExtras(hero, base);
+    const extras = assetModel(`hero.${hero}`);
+    if (extras) this.extras.add(extras);
+    else this.buildExtras(hero, base);
+    if (hero === 'remache') this.handR.add(buildWrench());
 
     // Escudo / piel de roca / aturdimiento
     this.shield = new THREE.Mesh(
@@ -229,7 +260,7 @@ export class BeanView {
     // Cono de carga del empujón (telegrafía: el otro lo ve venir).
     this.chargeCone = new THREE.Mesh(
       new THREE.CircleGeometry(1, 20, Math.PI / 2 - 0.83, 1.66),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ color: teamColor, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide }),
     );
     this.chargeCone.rotation.x = -Math.PI / 2;
     this.chargeCone.position.y = 0.06;
@@ -257,7 +288,7 @@ export class BeanView {
     // Aura de ulti lista: anillo brillante en el piso con el color del equipo.
     this.aura = new THREE.Mesh(
       new THREE.RingGeometry(0.75, 0.95, 40),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(teamColor).multiplyScalar(2.6), transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(teamColor).multiplyScalar(1.3), transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false }),
     );
     this.aura.rotation.x = -Math.PI / 2;
     this.aura.visible = false;
@@ -358,6 +389,72 @@ export class BeanView {
     this.squash = Math.min(0.35, 0.1 + power * 0.01);
   }
 
+  /** Dispara una animación de brazos. hook alterna manos como un boxeador (derecha, izquierda...). */
+  armMove(move: ArmMove) {
+    let hand = 0;
+    if (move === 'hook' || move === 'throw') { hand = this.nextHand; this.nextHand = -this.nextHand; }
+    else if (move === 'wide') hand = 1;
+    this.arm = { move, hand, t: 0, dur: ARM_DUR[move] };
+  }
+
+  /** Mano que está golpeando ahora (para la estela): +1 = derecha del modelo (+X), -1 = izquierda, 0 = ambas. */
+  get lastHand() { return -this.nextHand; }
+
+  /** Aplica la animación activa sobre las posiciones de reposo de las manos. */
+  private applyArm(dt: number) {
+    const a = this.arm;
+    if (!a) return;
+    a.t += dt;
+    const u = Math.min(1, a.t / a.dur);
+    // 0..0.55: sale el golpe siguiendo el arco; 0.55..1: vuelve a la guardia.
+    const out = u < 0.55 ? easeOut(u / 0.55) : 1;
+    const back = u < 0.55 ? 0 : (u - 0.55) / 0.45;
+    const blend = (hand: THREE.Mesh, target: THREE.Vector3, scale: number) => {
+      hand.position.lerp(target, 1 - back);
+      hand.scale.setScalar(1 + (scale - 1) * (1 - back));
+    };
+    const P = this.tmp, Q = this.tmp2;
+    switch (a.move) {
+      case 'hook': {
+        // Gancho: el puño viaja desde el costado hacia el frente describiendo un arco.
+        const s = a.hand;
+        const ang = s * (85 - 100 * out) * DEG;
+        onArc(P, ang, 0.55 + 0.7 * out, 0.68 + 0.14 * out);
+        blend(s > 0 ? this.handR : this.handL, P, 1 + 0.6 * out);
+        break;
+      }
+      case 'wide': {
+        // Llavazo: barrido amplio de derecha a izquierda con el brazo extendido.
+        const ang = (105 - 190 * out) * DEG;
+        onArc(P, ang, 0.85, 0.8);
+        blend(this.handR, P, 1.2);
+        break;
+      }
+      case 'throw': {
+        // Tiro: estocada recta hacia adelante.
+        const s = a.hand;
+        P.set(s * (0.38 - 0.24 * out), 0.75 + 0.08 * out, 0.2 + 0.75 * out);
+        blend(s > 0 ? this.handR : this.handL, P, 1 + 0.25 * out);
+        break;
+      }
+      case 'shove':
+        // Empujón: las dos palmas al frente.
+        P.set(0.26, 0.78, 0.25 + 0.8 * out);
+        Q.set(-0.26, 0.78, 0.25 + 0.8 * out);
+        blend(this.handR, P, 1.3);
+        blend(this.handL, Q, 1.3);
+        break;
+      case 'slam':
+        // Martillazo: de arriba de la cabeza al piso, adelante.
+        P.set(0.22, 1.35 - 1.0 * out, 0.1 + 0.8 * out);
+        Q.set(-0.22, 1.35 - 1.0 * out, 0.1 + 0.8 * out);
+        blend(this.handR, P, 1.35);
+        blend(this.handL, Q, 1.35);
+        break;
+    }
+    if (u >= 1) { this.arm = null; this.handL.scale.setScalar(1); this.handR.scale.setScalar(1); }
+  }
+
   update(f: CharFrame, dt: number, groundY: number, time: number) {
     this.lastFrame = f;
     const dead = (f.fl & F_DEAD) !== 0;
@@ -395,6 +492,14 @@ export class BeanView {
     } else if (f.ac === 'roll') {
       this.spin += dt * 16;
       this.tilt.rotation.set(this.spin, 0, 0);
+    } else if (f.fl & F_DASH) {
+      // Dash: se inclina fuerte hacia donde va.
+      this.spin = 0;
+      const yaw = f.f;
+      const fwd = f.vx * Math.sin(yaw) + f.vz * Math.cos(yaw);
+      const side = f.vx * Math.cos(yaw) - f.vz * Math.sin(yaw);
+      const l = Math.hypot(fwd, side) || 1;
+      this.tilt.rotation.set((fwd / l) * 0.55, 0, (-side / l) * 0.55);
     } else {
       this.spin = 0;
       const yaw = f.f;
@@ -428,6 +533,8 @@ export class BeanView {
     else if (grounded) { hz = 0.1 - step * 0.15; }
     this.handL.position.set(-hx, hy, hz);
     this.handR.position.set(hx, hy, grounded && !charging && !f.ac ? 0.1 + step * 0.15 : hz);
+    if (f.fl & F_DASH) { this.handL.position.set(-0.4, 0.7, -0.35); this.handR.position.set(0.4, 0.7, -0.35); }
+    this.applyArm(dt);
     this.chargeCone.visible = charging;
     if (charging) {
       const r = 1.7 + 0.8 * f.ch;
@@ -436,7 +543,7 @@ export class BeanView {
       this.chargeCone.rotation.z = f.f + Math.PI;
       const m = this.chargeCone.material as THREE.MeshBasicMaterial;
       m.opacity = 0.15 + f.ch * 0.45;
-      m.color.setHex(f.ch > 0.95 ? 0xff5040 : 0xffffff);
+      if (f.ch > 0.95) m.color.setHex(0xff5040); else m.color.copy(this.chargeColor);
     }
 
     // Parpadeo de ojos
@@ -461,8 +568,7 @@ export class BeanView {
     // Contorno por etapa: se lee de un vistazo quién está a punto de volar.
     const oc = STAGE_OUTLINE[f.st] ?? STAGE_OUTLINE[0];
     this.outlineMat.color.setHex(oc);
-    if (f.st >= 3) this.outlineMat.color.multiplyScalar(1.5 + Math.sin(time * 12) * 0.9);
-    else if (f.st === 2) this.outlineMat.color.multiplyScalar(1.3);
+    if (f.st >= 3) this.outlineMat.color.multiplyScalar(1.05 + Math.sin(time * 12) * 0.25);
     // Sombrero que gira (aureola, hélice)
     if (this.hat) this.hat.traverse((o) => { if (o.name === 'spin') o.rotation.y += dt * (o.parent === this.hat ? 14 : 2); });
     // Aura de ulti
@@ -474,7 +580,7 @@ export class BeanView {
       this.aura.rotation.z = time;
       (this.aura.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(time * 6) * 0.3;
     }
-    this.bodyMat.color.setScalar(this.flash > 0 ? 2.6 : 1);
+    this.bodyMat.color.copy(WHITE).lerp(HIT_TINT, this.flash > 0 ? Math.min(1, this.flash / 0.12) : 0);
 
     // Suelo: anillo de equipo y sombra
     const gy = groundY > -100 ? groundY : f.y;
@@ -492,4 +598,20 @@ export class BeanView {
     for (const o of this.groundObjects()) o.removeFromParent();
     this.label.remove();
   }
+}
+
+/** Llave de Remache (va en la mano derecha y acompaña el barrido). */
+function buildWrench(): THREE.Object3D {
+  const tg = toonGradient();
+  const m = new THREE.MeshToonMaterial({ color: 0x9aa7b4, gradientMap: tg });
+  const g = new THREE.Group();
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.55), m);
+  handle.position.z = 0.3;
+  const head = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.035, 6, 12, Math.PI * 1.5), m);
+  head.position.z = 0.6;
+  head.rotation.x = Math.PI / 2;
+  head.rotation.z = Math.PI * 0.75;
+  g.add(handle, head);
+  g.castShadow = true;
+  return g;
 }
