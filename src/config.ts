@@ -74,6 +74,8 @@ export interface Prefs {
   seenHelp: boolean;
   post: boolean;
   announcer: boolean;
+  /** Lanzamiento rápido: las habilidades salen al apretar la tecla, sin clic. */
+  quickCast: boolean;
 }
 
 function uuid(): string {
@@ -118,6 +120,7 @@ export function getPrefs(): Prefs {
     seenHelp: p.seenHelp ?? false,
     post: p.post ?? true,
     announcer: p.announcer ?? true,
+    quickCast: p.quickCast ?? false,
   };
   return prefsCache;
 }

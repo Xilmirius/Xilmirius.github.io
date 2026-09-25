@@ -513,6 +513,15 @@ export class AudioEngine {
   }
 
   /** Traduce eventos de simulación a sonidos con volumen y paneo según distancia a la cámara. */
+  /** Límite de sonidos de esbirros peleando entre ellos (si no, veinte golpes por segundo tapan todo). */
+  private unitT = 0;
+  private unitOk() {
+    const now = performance.now();
+    if (now - this.unitT < 90) return false;
+    this.unitT = now;
+    return true;
+  }
+
   onEvent(e: SimEvent, pos: { x: number; z: number } | null, listener: { x: number; z: number }, localId: number, family: (id: number) => string | null) {
     let vol = 1, pan = 0;
     if (pos) {
@@ -523,6 +532,8 @@ export class AudioEngine {
     }
     switch (e.k) {
       case 'hit':
+        // Golpes entre unidades (esbirros, torres) sin que estés vos: bajito y con límite.
+        if (family(e.id) === null && e.a !== localId) { if (this.unitOk()) this.play('hit', vol * 0.3, pan, 1.3); break; }
         this.play(e.p >= 12 ? 'hitbig' : 'hit', vol * (e.id === localId ? 1 : 0.85), pan, e.p >= 12 ? 1 : 1 + Math.min(0.25, e.h * 0.01));
         if (e.l) { this.play('lethal', 1); this.play('crowd', 0.5); }
         if (e.f === 'glob' || e.f === 'goo') this.play('goo', vol * 0.6, pan);
@@ -537,6 +548,7 @@ export class AudioEngine {
         break;
       case 'swing': this.play(e.c.startsWith('push') ? 'push' : 'swing', vol * 0.8, pan); break;
       case 'shoot': {
+        if (e.c === 'spark' || e.c === 'cannon') { if (this.unitOk()) this.play(e.c === 'spark' ? 'shard' : 'boom', vol * 0.25, pan, 1.4); break; }
         const s = { shard: 'shard', lance: 'lance', glob: 'glob', goolob: 'glob', wave: 'wave', hook: 'hook', bolt: 'bolt', nova: 'blink' }[e.c];
         if (s) this.play(s, vol * 0.7, pan);
         break;
@@ -575,6 +587,24 @@ export class AudioEngine {
       case 'deny': if (e.id === localId) this.play('deny', 0.7); break;
       case 'save': this.play('whoosh', vol, pan); this.play('crowd', 0.5); if (e.id === localId) this.play('jackpot', 0.8); break;
       case 'final': this.play('tick', 1); break;
+      // ── Asedio (MOBA) ──
+      case 'udie': if (!e.fall && (e.by === localId || this.unitOk())) this.play('crack', vol * (e.by === localId ? 0.7 : 0.35), pan); break;
+      case 'tshot': this.play('bolt', vol * 0.8, pan, 0.7); break;
+      case 'shit': if (e.by === localId) this.play(e.h > 0 ? 'metal' : 'shield', 0.45, pan); break;
+      case 'sdown': this.play('quake', 1); this.play('boom', 1); this.play('crowd', 0.8); break;
+      case 'recall':
+        if (e.s === 1) this.play('charge', vol * 0.7, pan);
+        else if (e.s === 2) this.play('blink', vol, pan);
+        else if (e.id === localId) this.play('deny', 0.4);
+        break;
+      case 'gold':
+        if (e.id === localId) {
+          const now = performance.now();
+          this.coinChain = now - this.coinT < 900 ? Math.min(this.coinChain + 1, 12) : 0;
+          this.coinT = now;
+          this.play('coin', 0.6, 0, Math.pow(2, this.coinChain / 12));
+        }
+        break;
     }
   }
 }

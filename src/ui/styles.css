@@ -425,6 +425,9 @@ img.aicon { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: mi
 
 /* Barra: cooldown listo, ulti lista */
 .slot.ready { animation: readyFlash 0.45s ease-out; }
+/* Habilidad armada (apuntando): borde de color y un poco más grande; el cursor pasa a mira. */
+.slot.armed { border-color: #4fd1ff; box-shadow: 0 0 0 2px #4fd1ff, 0 0 18px rgba(79, 209, 255, 0.7); transform: translateY(-4px) scale(1.06); }
+.game-canvas.aiming { cursor: crosshair; }
 @keyframes readyFlash { 0% { box-shadow: 0 0 0 0 #fff, 0 0 30px #fff; background: #fff; } 100% { box-shadow: 0 0 0 8px transparent; } }
 .slot.ultready { border-color: transparent; background: linear-gradient(#14101d, #14101d) padding-box, conic-gradient(from var(--ang, 0deg), #ffe14a, #ff4f8b, #b070ff, #4fd1ff, #7dff6a, #ffe14a) border-box; border: 3px solid transparent; box-shadow: 0 0 22px rgba(255, 225, 74, 0.8); animation: ultSpin 1.2s linear infinite; }
 @property --ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
@@ -537,3 +540,21 @@ img.aicon { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: mi
 .gal-info code { display: block; background: #140f1e; border-radius: 6px; padding: 4px 8px; font-size: 12px; user-select: text; word-break: break-all; }
 .gal-info p { margin: 4px 0; }
 .gal-tags { display: flex; gap: 6px; align-items: center; color: var(--muted); font-weight: 700; }
+
+/* ───────── Asedio (MOBA) ───────── */
+.hud-top .moba-bar { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 6px; }
+.hud-top .moba-bar .vs { font-size: 18px; }
+.moba-bar .side { display: flex; align-items: center; gap: 5px; background: var(--panel); border-radius: 12px; padding: 4px 10px; border-bottom: 4px solid var(--c); }
+.moba-bar .side b { color: var(--c); font-family: var(--title); font-weight: 400; font-size: 17px; margin-right: 2px; }
+.moba-bar .tw { width: 14px; height: 18px; border-radius: 4px 4px 2px 2px; background: linear-gradient(to top, var(--c) var(--h, 100%), #2a2236 var(--h, 100%)); border: 2px solid #14101d; }
+.moba-bar .tw.prot { box-shadow: 0 0 0 2px #4fd1ff; }
+.moba-bar .tw.down { background: #3a3344; position: relative; }
+.moba-bar .tw.down::after { content: '✕'; position: absolute; inset: -3px 0 0; font-size: 12px; color: #8a7f96; text-align: center; }
+.moba-bar .core { position: relative; min-width: 70px; height: 20px; border-radius: 10px; background: #2a2236; font-size: 12px; font-weight: 900; line-height: 20px; padding: 0 6px; overflow: hidden; margin-left: 4px; }
+.moba-bar .core em { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); opacity: 0.55; }
+.moba-bar .core.prot { box-shadow: 0 0 0 2px #4fd1ff; }
+.moba-bar .core.down { background: #3a3344; }
+.hud .minimap { pointer-events: none; border-radius: 12px; border: 2px solid var(--line); background: rgba(12, 8, 20, 0.72); image-rendering: auto; }
+.forge-lock { margin: 8px 0; padding: 8px 12px; border-radius: 12px; background: rgba(79, 209, 255, 0.12); border: 2px solid #4fd1ff; font-weight: 700; }
+.forge-lock kbd { margin: 0 3px; }
+.zone-info .bad { color: var(--bad); }

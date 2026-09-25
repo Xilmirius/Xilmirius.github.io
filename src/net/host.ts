@@ -9,6 +9,7 @@ import type { ClientMsg, LobbyState, MatchInit, MatchResultInfo, RosterInfo } fr
 import { Simulation } from '../core/sim';
 import { buildMeFrame, buildWorldFrame, encodeWorld, FrameBuffer } from '../core/snapshot';
 import { validHat } from '../core/cosmetics';
+import { mobaMapFor } from '../core/maps';
 import { DEFAULT_SETTINGS, HERO_IDS, type HeroId, type MatchSettings, type RosterEntry } from '../core/types';
 import { db } from '../db/persistence';
 import { PeerLink } from './peer';
@@ -277,7 +278,7 @@ export class HostSession {
     const total = humans.length + s.bots;
     if (total < 2) return 'Hacen falta al menos 2 personajes: sumá bots o esperá a tus amigos.';
     if (total > MAX_PLAYERS) return `Máximo ${MAX_PLAYERS} personajes por partida.`;
-    if (s.teams === 'teams') {
+    if (s.teams === 'teams' || s.mode === 'moba') {
       const t = [0, 0];
       for (const p of humans) t[p.team]++;
       let b = s.bots;
@@ -292,6 +293,7 @@ export class HostSession {
     const err = this.canStart();
     if (err) return err;
     const s = { ...this.lobby.settings };
+    if (s.mode === 'moba') { s.teams = 'teams'; s.rules = 'moba'; }
     const humans = this.lobby.players.filter((p) => p.connected);
     const roster: RosterEntry[] = humans.map((p) => ({ pid: p.pid, name: p.name, hero: p.hero, team: p.team, bot: false, hat: p.hat }));
     const t = [0, 0];
@@ -305,6 +307,8 @@ export class HostSession {
       used.add(hero);
       roster.push({ pid: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], hero, team, bot: true, botLevel: s.botLevel, hat: ['none', 'party', 'horns', 'tophat'][i % 4] });
     }
+    // Asedio: el mapa sale del tamaño de los equipos (1 línea hasta 2v2, 2 líneas en 3v3).
+    if (s.mode === 'moba') s.map = mobaMapFor(Math.max(t[0], t[1]));
     const seed = Math.floor(Math.random() * 1e9);
     this.sim = new Simulation({ settings: s, roster, seed });
     this.brains.clear();
@@ -387,7 +391,7 @@ export class HostSession {
       winner: r.winner, draw: r.draw, reason: r.reason, duration: sim.elapsed, teams: sim.settings.teams,
       players: sim.chars.map((c) => ({
         id: c.id, pid: c.pid, name: c.name, hero: c.hero, team: c.team, bot: c.bot,
-        kills: c.kills, deaths: c.deaths, assists: c.assists, heatDealt: c.heatDealt, level: c.level,
+        kills: c.kills, deaths: c.deaths, assists: c.assists, heatDealt: c.heatDealt, level: c.level, cs: c.cs,
         destroyed: c.destroyed, pickups: c.pickups, billiards: c.billiards, bestLaunch: Math.round(c.bestLaunch), lethals: c.lethals, saves: c.saves, hat: c.hat,
       })),
     };

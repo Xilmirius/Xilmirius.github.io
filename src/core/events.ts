@@ -32,6 +32,15 @@ export type SimEvent =
   | { k: 'blink'; id: number; x: number; z: number; x2: number; z2: number }
   | { k: 'deny'; id: number; w: string }
   | { k: 'save'; id: number } // sobrevivió a un golpe letal
-  | { k: 'final'; n: number }; // cuenta regresiva de los últimos segundos
+  | { k: 'final'; n: number } // cuenta regresiva de los últimos segundos
+  // ── Asedio (MOBA) ──
+  | { k: 'udie'; id: number; x: number; y: number; z: number; tm: number; by: number; fall: number } // murió una unidad
+  | { k: 'uatk'; id: number; tg: number } // una unidad golpea cuerpo a cuerpo (tg: id del cuerpo o -id-1 de estructura)
+  | { k: 'recall'; id: number; s: number; x: number; z: number } // volver a la base: 1 empieza, 0 se corta, 2 llegó
+  | { k: 'shit'; id: number; h: number; x: number; y: number; z: number; by: number } // golpe a torre/núcleo (h 0 = protegida)
+  | { k: 'sdown'; id: number; kd: string; tm: number; x: number; z: number; by: number } // cayó una torre o un núcleo
+  | { k: 'tshot'; id: number; tg: number } // una torre disparó
+  | { k: 'gold'; id: number; m: number; n: number } // materiales directos (m: índice de familia)
+  | { k: 'alert'; w: string; tm: number; x: number; z: number }; // avisos del modo para un equipo (-1 = todos)
 
 export type TimedEvent = SimEvent & { t: number };

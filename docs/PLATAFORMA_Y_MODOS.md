@@ -15,25 +15,27 @@ Un "modo" = **reglas de victoria** + **sistemas prendidos** + **tipo de mapa**.
 
 | Capa | Dónde | Qué decide | Ejemplo |
 |---|---|---|---|
-| **GameMode** | `src/core/modes.ts` | Cómo se gana, cuándo se reaparece, qué muestra el marcador | Vidas, Ring-outs, Control de zona |
-| **Ruleset** | `src/core/rules.ts` | Qué sistemas del núcleo están prendidos | Brawler, Completo |
-| **Mapa** | `src/core/maps/` | Terreno, coberturas, zonas, spawns | La Cantera, El Islote |
+| **GameMode** | `src/core/modes.ts` | Cómo se gana, cuándo se reaparece, qué muestra el marcador | Vidas, Ring-outs, Control de zona, Asedio |
+| **Ruleset** | `src/core/rules.ts` | Qué sistemas del núcleo están prendidos | Brawler, Completo, Asedio |
+| **Mapa** | `src/core/maps/` | Terreno, coberturas, zonas, spawns (y en Asedio: torres, núcleos, líneas) | La Cantera, El Islote, El Puente, Las Dos Cornisas |
 | **Contenido** | `src/core/heroes/`, `items.ts`, `mutations.ts` | Héroes, ítems, rutas de mutación | 4 héroes, 13 ítems |
 
 La simulación **nunca pregunta "¿estoy en el modo X?"**: pregunta "¿está prendido el sistema Y?" (`sim.rules.crafting`, `sim.rules.dash`...). Por eso un modo nuevo no toca combate ni red.
 
 ### Reglas disponibles
 
-| Sistema | ⚡ Brawler | 🧬 Completo |
-|---|---|---|
-| Niveles y XP en la partida (desbloquean habilidades) | – (todo desde el inicio) | ✔ |
-| Forja: ítems pasivos/activos y mutaciones | – | ✔ |
-| Reparar el cuerpo (V) | – | ✔ |
-| Trozos que sueltan las coberturas | cargan la ulti | materiales |
-| Ulti | se carga pegando | nivel 5 + enfriamiento |
-| Dash (Shift) | ✔ | ✔ |
+| Sistema | ⚡ Brawler | 🧬 Completo | 🏰 Asedio |
+|---|---|---|---|
+| Niveles y XP en la partida (desbloquean habilidades) | – (todo desde el inicio) | ✔ | ✔ (XP ×0.55) |
+| Forja: ítems pasivos/activos y mutaciones | – | ✔ | ✔ solo en la base |
+| Reparar el cuerpo (V) | – | ✔ | ✔ |
+| Trozos que sueltan las coberturas | cargan la ulti | materiales | materiales |
+| Ulti | se carga pegando | nivel 5 + enfriamiento | nivel 5 + enfriamiento |
+| Dash (Shift) | ✔ | ✔ | ✔ |
+| Volver a la base (B) | – | – | ✔ |
+| Piso frágil que se rearma | – | – | ✔ (25 s) |
 
-**Brawler** es la respuesta a "en una partida rápida no da el tiempo para administrar recursos, upgrades, ítems y niveles": queda el combate puro (romper → entrar → sacar), más movilidad (dash) y una sola barra que mirar (la ulti). **Completo** guarda intacto todo lo que se diseñó pensando en el MOBA.
+**Brawler** es la respuesta a "en una partida rápida no da el tiempo para administrar recursos, upgrades, ítems y niveles": queda el combate puro (romper → entrar → sacar), más movilidad (dash) y una sola barra que mirar (la ulti). **Completo** guarda intacto todo lo que se diseñó para partidas largas, y **Asedio** son las reglas del MOBA (vienen atadas al modo: necesitan bases).
 
 ## 3. Catálogo de piezas del núcleo
 
@@ -49,23 +51,25 @@ Lo que ya existe y cualquier modo puede reutilizar:
 | Niveles y XP dentro de la partida | ✅ | Solo en Completo. |
 | Carga de ulti | ✅ | Brawler. |
 | Dash, segundo salto, trepar bordes | ✅ | Movimiento predicho en el cliente. |
-| Construcciones (muros, torretas) con equipo y vida | ✅ | Base para torres de un MOBA. |
+| Construcciones (muros, torretas) con equipo y vida | ✅ | Las torres y núcleos del Asedio son estructuras fijas del mapa. |
 | Zonas y telegrafías | ✅ | Base para zona que se cierra (battle royale). |
-| Bots con el mismo input que un humano | ✅ | Base para creeps y hordas. |
+| Bots con el mismo input que un humano | ✅ | También juegan el Asedio (línea, remate, torres, volver a la base). |
+| Unidades con cuerpo (esbirros, neutrales) | ✅ | Misma física y knockback que los héroes, con vida e IA propia. Base para hordas. |
 | Red P2P host-autoritativa (hasta 6) | ✅ | Más jugadores → servidor dedicado (ver §6). |
 | Feedback: efectos, sonido, locutor, combos, logros | ✅ | Todo por eventos: lo nuevo lo hereda. |
 | Registro de assets reemplazables | ✅ | Ver [ASSETS_CATALOGO.md](ASSETS_CATALOGO.md). |
 | Objetos cinemáticos (plataformas móviles, rotores) | ⬜ | Necesario para obstáculos. |
 | Rondas/eliminatorias entre mapas | ⬜ | Necesario para obstáculos y torneos. |
 | Inventario/loot en el piso | ⬜ | Necesario para battle royale. |
-| Carriles, oleadas y objetivos de base | ⬜ | Necesario para MOBA. |
+| Carriles, oleadas y objetivos de base | ✅ | Asedio: ver [MOBA.md](MOBA.md). |
+| Minimapa | ✅ | Asedio. Reutilizable para battle royale. |
 
 ## 4. Modos propuestos y qué piezas usan
 
 | Modo | Victoria (GameMode) | Reglas (sistemas) | Mapa | Piezas nuevas que hacen falta |
 |---|---|---|---|---|
 | **Brawler** ✅ | Vidas / Ring-outs / Zona | Brawler | Arenas chicas-medianas | – |
-| **MOBA** | Destruir la base rival | Completo (niveles, forja, mutaciones) | 3 carriles, jungla, bases | Oleadas de creeps (bots simples), torres (construcciones con IA de torreta), núcleo/base, visión/niebla opcional, recall |
+| **Asedio (MOBA)** ✅ | Destruir el núcleo rival | Asedio (niveles, forja en base, B, piso que se rearma) | 1 línea (2v2) o 2 líneas (3v3) | Hecho: oleadas, torres, núcleo, base, Coloso, campamentos, minimapa. Falta: niebla de guerra, 5v5 (servidor). Ver [MOBA.md](MOBA.md) |
 | **Battle Royale** | Último en pie | Brawler + loot | Mapa grande, zona que se cierra | Zona que achica (una `Zone` que daña afuera), cofres/loot en el piso (pickups con ítems), caída inicial, más jugadores |
 | **Obstáculos** (tipo Fall Guys) | Llegar/sobrevivir; rondas eliminatorias | Sin combate o combate reducido (solo empujón + dash) | Pistas lineales con obstáculos | Plataformas móviles y rotores (cinemáticos en `collision.ts`), checkpoints, rondas con clasificación, cámara que sigue la pista |
 | **Fútbol de knockback** (idea) | Goles | Brawler | Cancha con arcos | Pelota = cuerpo físico con knockback (reusar `stepPickup`/proyectil), arcos como zonas |
@@ -76,7 +80,7 @@ Orden sugerido (menor costo → mayor aprendizaje):
 1. **Pulir Brawler** con jugadores reales (lo que tenemos). Medir: ¿dura bien una partida? ¿se entiende la ulti?
 2. **Obstáculos**: la pieza nueva (cinemáticos + rondas) es acotada y el modo es muy "compartible" con amigos.
 3. **Battle Royale chico** (6–10): reutiliza casi todo; lo nuevo es la zona que cierra y el loot.
-4. **MOBA**: el más grande (carriles, oleadas, torres, balance). Conviene cuando haya servidor dedicado.
+4. **MOBA** ✅ (primera versión, 1v1 a 3v3): lo que sigue es probarlo con gente, niebla de guerra y 5v5 con servidor dedicado.
 
 ## 5. Más assets según el modo
 

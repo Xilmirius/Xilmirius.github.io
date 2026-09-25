@@ -10,6 +10,8 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import { F_GROUNDED, type CharFrame } from '../core/snapshot';
 import { FAMILIES, FAMILY_COLORS, type Family, type HeroId } from '../core/types';
+import { buildFixedMesh, buildUnitMesh } from '../render/mobaView';
+import type { UnitKind } from '../core/entities';
 import { BeanView, buildHat } from '../render/beanView';
 import { buildProjectileMesh } from '../render/fx';
 import { buildDestructMesh, buildStructureMesh, pickupMesh } from '../render/propsView';
@@ -149,7 +151,7 @@ function buildPreview(a: AssetDef): THREE.Object3D | null {
   switch (kind) {
     case 'hero': {
       const bean = new BeanView(x as HeroId, 0, TEAM_COLORS[0], '', false);
-      const f: CharFrame = { id: 1, x: 0, y: 0, z: 0, f: 0, vx: 0, vy: 0, vz: 0, fl: F_GROUNDED, heat: 0, st: 0, lv: 1, ac: '', ap: 0, ch: 0, sh: 0, k: 0, d: 0, a: 0, lives: 0, rt: 0 };
+      const f: CharFrame = { id: 1, x: 0, y: 0, z: 0, f: 0, vx: 0, vy: 0, vz: 0, fl: F_GROUNDED, heat: 0, st: 0, lv: 1, ac: '', ap: 0, ch: 0, sh: 0, k: 0, d: 0, a: 0, lives: 0, rt: 0, cs: 0 };
       bean.update(f, 0, -999, 0);
       bean.label.remove();
       return bean.root;
@@ -157,7 +159,8 @@ function buildPreview(a: AssetDef): THREE.Object3D | null {
     case 'hat': { const o = buildHat(x); if (o) o.scale.setScalar(2.5); return o; }
     case 'prop': return buildDestructMesh(x as Family, 0);
     case 'pickup': { const o = pickupMesh(FAMILIES.indexOf(x as Family)); o.scale.setScalar(3); o.position.y = 0.6; return o; }
-    case 'struct': return buildStructureMesh(x, 0, TEAM_COLORS[0]).g;
+    case 'struct': return x === 'tower' || x === 'core' ? buildFixedMesh(x, TEAM_COLORS[0]).g : buildStructureMesh(x, 0, TEAM_COLORS[0]).g;
+    case 'unit': return buildUnitMesh(x as UnitKind, TEAM_COLORS[0]);
     case 'proj': { const o = buildProjectileMesh(x, x === 'wave' ? 1.2 : 0.4); const g = new THREE.Group(); g.add(o); g.position.y = 0.8; g.scale.setScalar(x === 'wave' ? 1 : 2); return g; }
     case 'skin': {
       const fam = x as Family, stage = Number(y);

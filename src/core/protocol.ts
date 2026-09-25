@@ -53,6 +53,7 @@ export interface PlayerResult {
   assists: number;
   heatDealt: number;
   level: number;
+  cs?: number; // unidades rematadas (Asedio)
   destroyed: number;
   pickups: number;
   billiards: number;

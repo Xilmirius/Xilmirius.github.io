@@ -1,7 +1,7 @@
 // Constantes de juego. Todo lo "tuneable" vive acá para iterar balance sin tocar sistemas.
 export const GAME_TITLE = 'RUBBLE';
 export const GAME_SUBTITLE = 'arena brawler de materiales';
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -71,6 +71,10 @@ export const AIR_DASHES = 1;
 export const ULT_PER_HEAT = 1 / 220;
 export const ULT_TRICKLE = 1 / 90;
 export const ULT_PER_PICKUP = 0.04;
+
+// Asedio (MOBA): volver a la base (B) y la base como refugio/forja.
+export const RECALL_TIME = 4;
+export const BASE_RADIUS = 7.5;
 
 // Reparar (V)
 export const REPAIR_TIME = 1.4;

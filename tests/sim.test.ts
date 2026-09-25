@@ -26,10 +26,48 @@ describe('mapas', () => {
       const t = new Terrain(id);
       expect(t.spawns.team[0].length).toBeGreaterThanOrEqual(3);
       expect(t.spawns.team[1].length).toBeGreaterThanOrEqual(3);
-      expect(t.zonePoints.length).toBeGreaterThanOrEqual(1);
       expect(t.fragile.length).toBeGreaterThan(10);
       expect(t.destructs.length).toBeGreaterThan(5);
       for (const s of [...t.spawns.team[0], ...t.spawns.team[1]]) expect(t.groundAt(s.x, s.z)).toBe(0);
+      if (m.kind === 'moba') return;
+      expect(t.zonePoints.length).toBeGreaterThanOrEqual(1);
+    });
+  }
+
+  for (const id of Object.keys(MAPS).filter((k) => MAPS[k].kind === 'moba')) {
+    it(`${id}: Asedio (líneas transitables, torres sobre las líneas, espejado)`, () => {
+      const m = MAPS[id];
+      const t = new Terrain(id);
+      const lanes = t.lanes.length;
+      expect(lanes).toBeGreaterThanOrEqual(1);
+      for (const team of [0, 1]) {
+        expect(t.cores.filter((c) => c.team === team).length).toBe(1);
+        expect(t.towers.filter((c) => c.team === team).length).toBe(2 * lanes);
+      }
+      expect(t.camps.length).toBeGreaterThanOrEqual(2);
+      expect(t.lairs.length).toBe(1);
+      // Cada tramo de cada línea es piso firme (los esbirros no saltan).
+      for (const lane of t.lanes) {
+        for (let i = 1; i < lane.length; i++) {
+          const a = lane[i - 1], b = lane[i];
+          const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.5);
+          for (let k = 0; k <= n; k++) {
+            const x = a.x + ((b.x - a.x) * k) / n, z = a.z + ((b.z - a.z) * k) / n;
+            expect(t.groundAt(x, z), `${id} (${x.toFixed(1)}, ${z.toFixed(1)})`).toBe(0);
+          }
+        }
+      }
+      // Toda torre queda sobre alguna línea (a menos de 1 celda del recorrido).
+      const distToLane = (x: number, z: number) => Math.min(...t.lanes.flatMap((lane) => lane.slice(1).map((b, i) => {
+        const a = lane[i];
+        const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+        const u = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2));
+        return Math.hypot(a.x + dx * u - x, a.z + dz * u - z);
+      })));
+      for (const tw of t.towers) expect(distToLane(tw.x, tw.z)).toBeLessThan(2);
+      // Espejado izquierda ↔ derecha con los equipos cambiados.
+      const sw: Record<string, string> = { A: 'B', B: 'A', X: 'x', x: 'X', K: 'k', k: 'K', '<': '>', '>': '<' };
+      for (const r of m.rows) expect([...r].reverse().map((c) => sw[c] ?? c).join('')).toBe(r);
     });
   }
 });
@@ -132,6 +170,21 @@ describe('knockback', () => {
     }
     for (let i = 1; i < dists.length; i++) expect(dists[i]).toBeGreaterThan(dists[i - 1]);
     expect(dists[0]).toBeLessThan(5);
+  });
+
+  it('los disparos básicos a distancia suman heat pero no empujan (el cuerpo a cuerpo puede acercarse)', () => {
+    for (const shooter of ['prisma', 'gloop'] as HeroId[]) {
+      const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, map: 'cantera' }, roster: roster(2, [shooter, 'canto']), seed: 3 });
+      sim.phase = 'play';
+      const [a, b] = sim.chars;
+      a.pos = { x: -20, y: 0, z: -2 }; b.pos = { x: -14, y: 0, z: -2 };
+      b.heat = STAGE_AT[3]; b.stage = 3; // aun destrozado, un disparo básico no lo corre
+      const start = { ...b.pos };
+      a.input = { ...emptyInput(), ax: b.pos.x, az: b.pos.z, b: BTN.BASIC };
+      for (let i = 0; i < 60; i++) sim.step();
+      expect(b.heat, shooter).toBeGreaterThan(STAGE_AT[3]);
+      expect(Math.hypot(b.pos.x - start.x, b.pos.z - start.z), shooter).toBeLessThan(0.05);
+    }
   });
 });
 
@@ -240,18 +293,43 @@ describe('eventos con tick', () => {
   });
 });
 
+describe('fin de partida', () => {
+  it('al terminar nadie se mueve ni ataca y se apagan los proyectiles', () => {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'brawl', mode: 'stock', lives: 1 }, roster: roster(2, ['prisma', 'canto']), seed: 9 });
+    sim.phase = 'play';
+    const [a, b] = sim.chars;
+    a.input = { ...emptyInput(), ax: b.pos.x, az: b.pos.z, b: BTN.BASIC };
+    for (let i = 0; i < 30; i++) sim.step();
+    expect(sim.projectiles.length).toBeGreaterThan(0);
+    b.lives = 0; b.eliminated = true; // gana el equipo de a
+    sim.step();
+    expect(sim.phase).toBe('end');
+    expect(sim.projectiles.length).toBe(0);
+    expect(buildWorldFrame(sim).win).toBe(a.team);
+    sim.drainEvents();
+    const start = { ...a.pos };
+    a.input = { ...emptyInput(), mx: 1, ax: b.pos.x, az: b.pos.z, b: BTN.BASIC | BTN.Q | BTN.PUSH | BTN.DASH };
+    for (let i = 0; i < 90; i++) { sim.step(); a.input = { ...a.input, b: i % 2 ? a.input.b : 0 }; }
+    const evs = sim.drainEvents().map((e) => e.k);
+    expect(evs).not.toContain('shoot');
+    expect(evs).not.toContain('cast');
+    expect(evs).not.toContain('swing');
+    expect(evs).not.toContain('dash');
+    expect(Math.hypot(a.pos.x - start.x, a.pos.z - start.z)).toBeLessThan(0.01);
+  });
+});
+
 describe('reglas', () => {
-  it('las habilidades salen al soltar la tecla (mantener = apuntar)', () => {
+  it('las habilidades salen con el pulso del lanzamiento (una sola vez aunque el bit quede prendido)', () => {
     const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, rules: 'brawl' }, roster: roster(2, ['prisma', 'canto']), seed: 5 });
     sim.phase = 'play';
     const [a] = sim.chars;
     const casts = () => sim.drainEvents().filter((e) => e.k === 'cast').length;
     a.input = { ...emptyInput(), ax: a.pos.x + 5, az: a.pos.z, b: BTN.F };
-    for (let i = 0; i < 10; i++) sim.step();
-    expect(casts()).toBe(0);
-    a.input = { ...a.input, b: 0 };
     sim.step();
     expect(casts()).toBe(1);
+    for (let i = 0; i < 10; i++) sim.step();
+    expect(casts()).toBe(0);
   });
 
   it('Brawler: todo desbloqueado en nivel 1 y la ulti necesita carga', () => {

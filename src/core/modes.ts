@@ -1,8 +1,23 @@
 // Modos de juego: el núcleo es agnóstico al objetivo de victoria (GDD §11).
 // Agregar un modo = implementar esta interfaz; no se toca combate ni red.
-import type { Character } from './entities';
+import type { Character, Structure } from './entities';
+import { createMobaMode } from './moba/mode';
 import type { Simulation } from './sim';
 import type { ModeId } from './types';
+
+/** Estado del Asedio para el HUD y el minimapa (lo que cambia; lo fijo sale del mapa). */
+export interface MobaHud {
+  /** Estructuras en pie por equipo: [id, vida 0..1, protegida 0/1] (torres y núcleo). */
+  alive: [number, number, number][][];
+  /** Posiciones de torres/núcleos destruidos (para dibujar escombros en el minimapa). */
+  down: [number, number, number][]; // [x, z, equipo]
+  /** Segundos para la próxima oleada. */
+  wave: number;
+  /** Coloso: vivo (1/0), segundos para que aparezca, equipo con la bendición (-1) y segundos que le quedan. */
+  coloso: [number, number, number, number];
+  /** Muerte súbita (se acabó el tiempo: núcleos vulnerables). */
+  sudden: number;
+}
 
 export interface ModeHud {
   id: ModeId;
@@ -12,6 +27,7 @@ export interface ModeHud {
   scores: number[];
   target: number;
   zone?: { x: number; y: number; z: number; r: number; owner: number; contested: boolean; next: number };
+  moba?: MobaHud;
 }
 
 export interface ModeResult { winner: number; draw: boolean; reason: string }
@@ -24,12 +40,21 @@ export interface GameMode {
   tick(sim: Simulation, dt: number): void;
   result(sim: Simulation): ModeResult | null;
   hud(sim: Simulation): ModeHud;
+  /** Antes de mover a los personajes (IA de unidades y torres). */
+  preTick?(sim: Simulation, dt: number): void;
+  /** Murió una unidad (esbirro, neutral). killer: quién la mató o la tiró; fell: cayó al vacío. */
+  onUnitDeath?(sim: Simulation, unit: Character, killer: Character | null, fell: boolean): void;
+  /** Se destruyó una estructura fija del mapa (torre, núcleo). */
+  onStructureDown?(sim: Simulation, st: Structure, by: Character | null): void;
+  /** Segundos hasta reaparecer (por defecto RESPAWN_TIME). */
+  respawnTime?(sim: Simulation, ch: Character): number;
 }
 
 export const MODE_INFO: Record<ModeId, { name: string; desc: string }> = {
   stock: { name: 'Vidas', desc: 'Cada uno tiene vidas. Gana el último equipo con alguien en pie.' },
   kills: { name: 'Ring-outs', desc: 'Sumá puntos sacando rivales del mapa. Gana quien llega primero al objetivo.' },
   koth: { name: 'Control de zona', desc: 'Pará en la zona sin rivales para sumar puntos. La zona se mueve.' },
+  moba: { name: 'Asedio (MOBA)', desc: 'Dos bases, torres y oleadas de esbirros. Empujá las líneas y destruí el núcleo rival. 1 línea hasta 2v2, 2 líneas en 3v3.' },
 };
 
 function timeLeft(sim: Simulation) {
@@ -159,6 +184,7 @@ export function createMode(id: ModeId): GameMode {
   switch (id) {
     case 'kills': return new KillsMode();
     case 'koth': return new KothMode();
+    case 'moba': return createMobaMode();
     default: return new StockMode();
   }
 }

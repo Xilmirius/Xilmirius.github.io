@@ -1,8 +1,8 @@
 // Frames de mundo: lo que el render necesita ver. El host arma uno por tick; los clientes los
 // reciben (20 Hz) y los interpolan. Host y cliente dibujan exactamente con el mismo camino.
-import { MUTATION_LEVELS, XP_TABLE, MAX_LEVEL, REPAIR_TIME, PUSH_MAX_CHARGE } from './constants';
+import { MUTATION_LEVELS, XP_TABLE, MAX_LEVEL, REPAIR_TIME, PUSH_MAX_CHARGE, RECALL_TIME } from './constants';
 import type { Character } from './entities';
-import { SLOTS } from './entities';
+import { SLOTS, UNIT_KINDS } from './entities';
 import { lerp, lerpAngle, round2 } from './math';
 import type { ModeHud } from './modes';
 import type { Simulation } from './sim';
@@ -10,7 +10,12 @@ import { FAMILIES, type AbilitySlot, type Route } from './types';
 
 export const F_GROUNDED = 1, F_TUMBLE = 2, F_STUN = 4, F_SHIELD = 8, F_INVULN = 16, F_KBIMM = 32, F_CHARGING = 64,
   F_REPAIRING = 128, F_DEAD = 256, F_SLOWED = 512, F_ARMOR = 1024, F_REFRACT = 2048, F_HITSTUN = 4096,
-  F_DISCONNECTED = 8192, F_HASTE = 16384, F_ELIMINATED = 32768, F_ULTREADY = 65536, F_DASH = 131072;
+  F_DISCONNECTED = 8192, F_HASTE = 16384, F_ELIMINATED = 32768, F_ULTREADY = 65536, F_DASH = 131072, F_RECALL = 262144;
+
+/** Flags de unidades (esbirros, neutrales). */
+export const U_TUMBLE = 1, U_STUN = 2, U_SLOW = 4, U_BLESSED = 8, U_GROUNDED = 16;
+/** Flags de estructuras: protegida (invulnerable) / con menos daño (sin esbirros rivales cerca). */
+export const S_INVULN = 1, S_ARMOR = 2;
 
 export interface CharFrame {
   id: number;
@@ -28,17 +33,22 @@ export interface CharFrame {
   k: number; d: number; a: number;
   lives: number;
   rt: number;
+  cs: number;
 }
+
+/** Unidad del Asedio: k = índice en UNIT_KINDS, hp 0..1. */
+export interface UnitFrame { id: number; k: number; tm: number; x: number; y: number; z: number; f: number; fl: number; hp: number; vx: number; vz: number }
 
 export interface ProjFrame { id: number; k: string; x: number; y: number; z: number; vx: number; vz: number; r: number; tm: number; o: number }
 export interface AreaFrame { id: number; k: string; x: number; y: number; z: number; r: number; p: number; tm: number }
-export interface StructFrame { id: number; k: string; x: number; y: number; z: number; rot: number; hp: number; tm: number; fam: number }
+export interface StructFrame { id: number; k: string; x: number; y: number; z: number; rot: number; hp: number; tm: number; fam: number; fl: number; tg: number }
 
 export interface WorldFrame {
   tick: number;
   phase: 'countdown' | 'play' | 'end';
   phaseT: number;
   chars: CharFrame[];
+  units: UnitFrame[];
   projs: ProjFrame[];
   zones: AreaFrame[];
   teles: AreaFrame[];
@@ -46,6 +56,8 @@ export interface WorldFrame {
   dst: string;
   tiles: string;
   mode: ModeHud;
+  /** Resultado cuando terminó: equipo ganador, -1 empate, -2 todavía se juega. */
+  win: number;
 }
 
 export interface MeFrame {
@@ -90,6 +102,17 @@ export function charFlags(c: Character, sim?: Simulation): number {
   if (c.eliminated) f |= F_ELIMINATED;
   if (sim ? sim.ultReady(c) : c.level >= 5 && c.cds.r <= 0 && c.alive) f |= F_ULTREADY;
   if (c.dashT > 0) f |= F_DASH;
+  if (c.recallT > 0) f |= F_RECALL;
+  return f;
+}
+
+function unitFlags(u: Character): number {
+  let f = 0;
+  if (u.tumble > 0) f |= U_TUMBLE;
+  if (u.stun > 0) f |= U_STUN;
+  if (u.slowT > 0) f |= U_SLOW;
+  if (u.ai?.blessed) f |= U_BLESSED;
+  if (u.grounded) f |= U_GROUNDED;
   return f;
 }
 
@@ -103,16 +126,24 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
       id: c.id, x: c.pos.x, y: c.pos.y, z: c.pos.z, f: c.facing, vx: c.vel.x, vy: c.vel.y, vz: c.vel.z,
       fl: charFlags(c, sim), heat: Math.round(c.heat), st: c.stage, lv: c.level,
       ac: c.action ? c.action.kind : '', ap: c.action ? Math.min(1, c.action.t / c.action.dur) : 0,
-      ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : 0,
-      sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT),
+      ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : c.recallT > 0 ? c.recallT / RECALL_TIME : 0,
+      sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT), cs: c.cs,
+    })),
+    units: sim.units.filter((u) => u.alive).map((u) => ({
+      id: u.id, k: UNIT_KINDS.indexOf(u.unit), tm: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, f: u.facing,
+      fl: unitFlags(u), hp: u.maxHp > 0 ? Math.max(0, u.hp / u.maxHp) : 1, vx: u.vel.x, vz: u.vel.z,
     })),
     projs: sim.projectiles.map((p) => ({ id: p.id, k: p.kind, x: p.pos.x, y: p.pos.y, z: p.pos.z, vx: p.vel.x, vz: p.vel.z, r: p.radius, tm: p.team, o: p.owner })),
     zones: sim.zones.map((z) => ({ id: z.id, k: z.kind, x: z.x, y: z.y, z: z.z, r: z.r, p: z.t / z.dur, tm: z.team })),
     teles: sim.telegraphs.map((t) => ({ id: t.id, k: t.kind, x: t.x, y: t.y, z: t.z, r: t.r, p: t.t / t.dur, tm: t.team })),
-    structs: sim.structures.map((s) => ({ id: s.id, k: s.kind, x: s.x, y: s.y, z: s.z, rot: s.rot, hp: s.hp / s.maxHp, tm: s.team, fam: fam(s.family) })),
+    structs: sim.structures.map((s) => ({
+      id: s.id, k: s.kind, x: s.x, y: s.y, z: s.z, rot: s.rot, hp: s.hp / s.maxHp, tm: s.team, fam: fam(s.family),
+      fl: (s.invuln ? S_INVULN : 0) | ((s.armor ?? 1) < 1 ? S_ARMOR : 0), tg: s.target ?? -1,
+    })),
     dst: sim.destructibles.map((d) => d.stage).join(''),
     tiles: sim.terrain.tileString(),
     mode: sim.mode.hud(sim),
+    win: sim.result ? (sim.result.draw ? -1 : sim.result.winner) : -2,
   };
 }
 
@@ -147,14 +178,16 @@ export function encodeWorld(w: WorldFrame): any[] {
     w.tick,
     w.phase === 'countdown' ? 0 : w.phase === 'play' ? 1 : 2,
     r2(w.phaseT),
-    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt)]),
+    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs]),
     w.projs.map((p) => [p.id, p.k, r2(p.x), r2(p.y), r2(p.z), r2(p.vx), r2(p.vz), r2(p.r), p.tm, p.o]),
     w.zones.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
     w.teles.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
-    w.structs.map((s) => [s.id, s.k, r2(s.x), r2(s.y), r2(s.z), r2(s.rot), r2(s.hp), s.tm, s.fam]),
+    w.structs.map((s) => [s.id, s.k, r2(s.x), r2(s.y), r2(s.z), r2(s.rot), r2(s.hp), s.tm, s.fam, s.fl, s.tg]),
     w.dst,
     w.tiles,
     w.mode,
+    w.units.map((u) => [u.id, u.k, u.tm, r2(u.x), r2(u.y), r2(u.z), r2(u.f), u.fl, r2(u.hp), r2(u.vx), r2(u.vz)]),
+    w.win,
   ];
 }
 
@@ -165,15 +198,17 @@ export function decodeWorld(a: any[]): WorldFrame {
     phaseT: a[2],
     chars: a[3].map((c: any[]) => ({
       id: c[0], x: c[1], y: c[2], z: c[3], f: c[4], vx: c[5], vy: c[6], vz: c[7], fl: c[8], heat: c[9], st: c[10], lv: c[11],
-      ac: c[12], ap: c[13], ch: c[14], sh: c[15], k: c[16], d: c[17], a: c[18], lives: c[19], rt: c[20],
+      ac: c[12], ap: c[13], ch: c[14], sh: c[15], k: c[16], d: c[17], a: c[18], lives: c[19], rt: c[20], cs: c[21] ?? 0,
     })),
+    units: (a[11] ?? []).map((u: any[]) => ({ id: u[0], k: u[1], tm: u[2], x: u[3], y: u[4], z: u[5], f: u[6], fl: u[7], hp: u[8], vx: u[9], vz: u[10] })),
     projs: a[4].map((p: any[]) => ({ id: p[0], k: p[1], x: p[2], y: p[3], z: p[4], vx: p[5], vz: p[6], r: p[7], tm: p[8], o: p[9] })),
     zones: a[5].map((z: any[]) => ({ id: z[0], k: z[1], x: z[2], y: z[3], z: z[4], r: z[5], p: z[6], tm: z[7] })),
     teles: a[6].map((z: any[]) => ({ id: z[0], k: z[1], x: z[2], y: z[3], z: z[4], r: z[5], p: z[6], tm: z[7] })),
-    structs: a[7].map((s: any[]) => ({ id: s[0], k: s[1], x: s[2], y: s[3], z: s[4], rot: s[5], hp: s[6], tm: s[7], fam: s[8] })),
+    structs: a[7].map((s: any[]) => ({ id: s[0], k: s[1], x: s[2], y: s[3], z: s[4], rot: s[5], hp: s[6], tm: s[7], fam: s[8], fl: s[9] ?? 0, tg: s[10] ?? -1 })),
     dst: a[8],
     tiles: a[9],
     mode: a[10],
+    win: a[12] ?? -2,
   };
 }
 
@@ -183,6 +218,7 @@ export function interpolateFrames(a: WorldFrame, b: WorldFrame, t: number): Worl
   if (t <= 0) return a;
   if (t >= 1) return b;
   const ca = new Map(a.chars.map((c) => [c.id, c]));
+  const ua = new Map(a.units.map((u) => [u.id, u]));
   const pa = new Map(a.projs.map((p) => [p.id, p]));
   return {
     ...b,
@@ -191,6 +227,11 @@ export function interpolateFrames(a: WorldFrame, b: WorldFrame, t: number): Worl
       const c0 = ca.get(cb.id);
       if (!c0 || (c0.fl & F_DEAD) !== (cb.fl & F_DEAD) || Math.hypot(cb.x - c0.x, cb.z - c0.z) > 8) return cb;
       return { ...cb, x: lerp(c0.x, cb.x, t), y: lerp(c0.y, cb.y, t), z: lerp(c0.z, cb.z, t), f: lerpAngle(c0.f, cb.f, t), ap: lerp(c0.ap, cb.ap, t), ch: lerp(c0.ch, cb.ch, t) };
+    }),
+    units: b.units.map((ub) => {
+      const u0 = ua.get(ub.id);
+      if (!u0 || Math.hypot(ub.x - u0.x, ub.z - u0.z) > 8) return ub;
+      return { ...ub, x: lerp(u0.x, ub.x, t), y: lerp(u0.y, ub.y, t), z: lerp(u0.z, ub.z, t), f: lerpAngle(u0.f, ub.f, t), hp: lerp(u0.hp, ub.hp, t) };
     }),
     projs: b.projs.map((pb) => {
       const p0 = pa.get(pb.id);

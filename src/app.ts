@@ -3,7 +3,7 @@ import { audio } from './audio/audio';
 import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs } from './config';
 import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
-import { MAPS } from './core/maps';
+import { ARENA_MAP_IDS, MAPS } from './core/maps';
 import { MODE_INFO } from './core/modes';
 import type { LobbyState, MatchInit, MatchResultInfo } from './core/protocol';
 import { FAMILY_COLORS, FAMILY_NAMES, HERO_IDS, type HeroId, type MatchSettings, type ModeId } from './core/types';
@@ -18,7 +18,7 @@ import { createDirectory, type Directory, type RoomInfo } from './net/signaling'
 import { clear, colorHex, fmtTime, h, modal, toast } from './ui/dom';
 import { HeroPreview } from './ui/heroPreview';
 import { THEMES } from './render/themes';
-import { getRules, RULESETS, RULESET_IDS, unlockLevel, type RulesetId } from './core/rules';
+import { rulesFor, RULESETS, RULESET_IDS, unlockLevel, type RulesetId } from './core/rules';
 import { assetsReady, loadAssets } from './assets/registry';
 import { tip } from './ui/tooltip';
 import { abilityTip, heroTip, modeTip, rulesTip } from './ui/tips';
@@ -120,7 +120,7 @@ export class App {
         ),
         netInfo,
       ),
-      h('div', { class: 'credits' }, 'WASD mover · Espacio saltar · Clic pegar · Clic derecho empujar (mantené) · Q E F R habilidades'),
+      h('div', { class: 'credits' }, 'WASD mover · Espacio saltar · Clic pegar · Clic derecho empujar (mantené) · Q E F R apuntar y clic lanzar'),
     ));
     if (!getPrefs().seenHelp) { savePrefs({ seenHelp: true }); setTimeout(() => this.showHelp(), 600); }
     if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
@@ -263,7 +263,7 @@ export class App {
     );
 
     // Equipos
-    const teamMode = l.settings.teams === 'teams';
+    const teamMode = l.settings.teams === 'teams' || l.settings.mode === 'moba';
     const humans = l.players;
     const botsN = l.settings.bots;
     const teamsBox = h('div', { class: 'teams' });
@@ -287,7 +287,7 @@ export class App {
     // Héroes
     const heroesBox = h('div', { class: 'heroes' });
     const previewBox = h('div', { class: 'preview' });
-    const rules = getRules(l.settings.rules);
+    const rules = rulesFor(l.settings);
     for (const id of HERO_IDS) {
       const hd = HEROES[id];
       heroesBox.append(tip(h('button', {
@@ -320,20 +320,26 @@ export class App {
       h('select', { class: 'input', disabled: dis, onchange: (e: Event) => on((e.target as HTMLSelectElement).value) },
         opts.map(([v, label]) => h('option', { value: v, selected: v === value }, label)));
     const humansN = humans.filter((p) => p.connected).length;
+    const moba = st.mode === 'moba';
     const settings = h('div', { class: 'settings' },
       h('h3', null, 'Partida', isHost ? null : h('small', null, ' (la configura el host)')),
-      tip(h('label', null, 'Reglas ⓘ'), () => rulesTip(rules.id)),
-      select(rules.id, RULESET_IDS.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
-      h('p', { class: 'muted small' }, rules.desc),
-      tip(h('label', null, 'Modo ⓘ'), () => modeTip(st.mode)), select(st.mode, (Object.keys(MODE_INFO) as ModeId[]).map((m) => [m, MODE_INFO[m].name]), (v) => set({ mode: v as ModeId })),
+      tip(h('label', null, 'Modo ⓘ'), () => modeTip(st.mode)), select(st.mode, (Object.keys(MODE_INFO) as ModeId[]).map((m) => [m, MODE_INFO[m].name]), (v) => set(modePatch(st, v as ModeId))),
       h('p', { class: 'muted small' }, MODE_INFO[st.mode].desc),
-      h('label', null, 'Mapa'), select(st.map, Object.values(MAPS).map((m) => [m.id, `${m.name} (${m.players})`]), (v) => set({ map: v })),
+      moba
+        ? [tip(h('label', null, 'Reglas ⓘ'), () => rulesTip('moba')), h('p', { class: 'muted small' }, `${RULESETS.moba.icon} ${RULESETS.moba.name}: ${RULESETS.moba.desc}`)]
+        : [tip(h('label', null, 'Reglas ⓘ'), () => rulesTip(rules.id)),
+          select(rules.id, RULESET_IDS.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
+          h('p', { class: 'muted small' }, rules.desc)],
+      h('label', null, 'Mapa'),
+      moba
+        ? h('p', { class: 'muted small' }, `Automático según los equipos: ${MAPS.puente.name} (1 línea) hasta 2v2 · ${MAPS.cornisas.name} (2 líneas) en 3v3.`)
+        : select(st.map, ARENA_MAP_IDS.map((id) => [id, `${MAPS[id].name} (${MAPS[id].players})`]), (v) => set({ map: v })),
       h('label', null, 'Tema visual'), select(st.theme ?? 'neon', THEMES.map((t) => [t.id, `${t.icon} ${t.name}`]), (v) => set({ theme: v })),
-      h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' })),
+      moba ? null : [h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' }))],
       st.mode === 'stock' ? [h('label', null, 'Vidas'), select(String(st.lives), [1, 2, 3, 4, 5].map((n) => [String(n), String(n)]), (v) => set({ lives: +v }))] : null,
       st.mode === 'kills' ? [h('label', null, 'Ring-outs para ganar'), select(String(st.killTarget), [5, 10, 15, 20].map((n) => [String(n), String(n)]), (v) => set({ killTarget: +v }))] : null,
       st.mode === 'koth' ? [h('label', null, 'Puntos para ganar'), select(String(st.kothTarget), [60, 100, 150].map((n) => [String(n), String(n)]), (v) => set({ kothTarget: +v }))] : null,
-      h('label', null, 'Tiempo límite'), select(String(st.timeLimit), [300, 480, 600, 900].map((n) => [String(n), fmtTime(n)]), (v) => set({ timeLimit: +v })),
+      h('label', null, moba ? 'Tiempo (después: muerte súbita)' : 'Tiempo límite'), select(String(st.timeLimit), [300, 480, 600, 900, 1200].map((n) => [String(n), fmtTime(n)]), (v) => set({ timeLimit: +v })),
       h('label', null, `Bots (máx ${MAX_PLAYERS - humansN})`), select(String(st.bots), Array.from({ length: MAX_PLAYERS - humansN + 1 }, (_, i) => [String(i), String(i)]), (v) => set({ bots: +v })),
       h('label', null, 'Dificultad de bots'), select(String(st.botLevel), [['1', 'Fácil'], ['2', 'Normal'], ['3', 'Difícil']], (v) => set({ botLevel: +v as 1 | 2 | 3 })),
     );
@@ -480,10 +486,10 @@ export class App {
             <tr><td><kbd>Espacio</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
             <tr><td><kbd>Clic</kbd></td><td>Ataque básico: <b>rompe</b> (suma heat)</td></tr>
             <tr><td><kbd>Clic derecho</kbd></td><td><b>Empujón</b>: mantené para cargar, soltá para <b>sacar</b></td></tr>
-            <tr><td><kbd>Q E F</kbd> <kbd>R</kbd></td><td>Habilidades y ulti: <b>mantené</b> para ver el área, <b>soltá</b> para usarla</td></tr>
+            <tr><td><kbd>Q E F</kbd> <kbd>R</kbd></td><td>Habilidades y ulti: la tecla <b>apunta</b> (ves el área), <b>clic izquierdo</b> la lanza, <b>clic derecho</b> o <kbd>Esc</kbd> cancela. Las que no apuntan salen al toque.</td></tr>
             <tr><td><kbd>Shift</kbd></td><td><b>Dash</b>: ráfaga corta (en el aire, después del segundo salto)</td></tr>
             <tr><td><kbd>Tab</kbd></td><td>Tabla de jugadores</td></tr>
-            <tr><td colspan="2" class="muted small">Solo con reglas <b>Completo</b>: <kbd>1 2 3</kbd> ítems activos · <kbd>C</kbd> forja · <kbd>V</kbd> reparar</td></tr>
+            <tr><td colspan="2" class="muted small">Con reglas <b>Completo</b> o en el <b>Asedio</b>: <kbd>1 2 3</kbd> ítems activos · <kbd>C</kbd> forja · <kbd>V</kbd> reparar · <kbd>B</kbd> volver a la base (Asedio)</td></tr>
           </table>
           <p class="muted small">Pasá el mouse por cualquier ícono (habilidades, ítems, tu cuerpo, héroes) para ver qué hace.</p>
         </div>
@@ -494,7 +500,10 @@ export class App {
           <p>El cuerpo lanzado es un <b>proyectil</b>: rompe cobertura, se estampa contra paredes y voltea a otros. Mientras volás podés corregir con WASD y usar el segundo salto o trepar el borde.</p>
           <h4>Reglas</h4>
           <p><b>⚡ Brawler</b> (la de siempre): todo desbloqueado desde el principio y la <b>ulti se carga pegando</b> y juntando los trozos que sueltan las coberturas. Nada que administrar: a pelear.</p>
-          <p><b>🧬 Completo</b>: niveles, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.</p>
+          <p><b>🧬 Completo</b>: niveles, materiales, forja de ítems y mutaciones, reparación.</p>
+          <h4>🏰 Asedio (MOBA)</h4>
+          <p>Dos bases unidas por puentes sobre el vacío: <b>1 línea</b> hasta 2v2, <b>2 líneas</b> en 3v3. Cada 24 s sale una oleada de esbirros; acompañala, rematá esbirros (te dan su material y sueltan un trozo) y rompé las torres rivales cuando tu oleada las tanquea. Gana quien destruye el <b>núcleo</b> rival.</p>
+          <p>No hay barra de vida tampoco acá: te agrietás y tu base te enfría. <kbd>B</kbd> te lleva a casa (4 s quieto) y la forja solo funciona ahí. El <b>Coloso</b> del centro bendice a los esbirros de quien lo derriba.</p>
           <p>Ojo: el piso frágil se rompe y deja agujeros.</p>
         </div>
       </div>`;
@@ -567,6 +576,7 @@ export class App {
       check('Mostrar FPS', p.showFps, (x) => savePrefs({ showFps: x })),
       check('Brillos y postproceso (bloom, destellos) — desactivar si va lento', p.post, (x) => savePrefs({ post: x })),
       check('Locutor (voz que anuncia combos y rachas)', p.announcer, (x) => { savePrefs({ announcer: x }); audio.announcer = x; }),
+      check('Lanzamiento rápido: las habilidades salen al apretar la tecla, sin clic (para expertos)', p.quickCast, (x) => savePrefs({ quickCast: x })),
       h('p', { class: 'muted small' }, 'Sombras y resolución se aplican en la próxima partida.'),
       adv,
     );
@@ -581,4 +591,15 @@ function setRoomParam(code: string | null) {
     if (code) u.searchParams.set('sala', code); else u.searchParams.delete('sala');
     history.replaceState(null, '', u.toString());
   } catch { /* */ }
+}
+
+/** Cambiar de modo: el Asedio trae sus reglas, formato por equipos y un tiempo más largo; al salir se vuelve a lo de arena. */
+function modePatch(st: MatchSettings, mode: ModeId): Partial<MatchSettings> {
+  if (mode === 'moba') return { mode, rules: 'moba', teams: 'teams', timeLimit: Math.max(900, st.timeLimit) };
+  return {
+    mode,
+    rules: st.rules === 'moba' ? 'brawl' : st.rules,
+    map: MAPS[st.map]?.kind === 'moba' ? 'cantera' : st.map,
+    timeLimit: st.mode === 'moba' ? 600 : st.timeLimit,
+  };
 }

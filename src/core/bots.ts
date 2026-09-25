@@ -7,6 +7,8 @@ import { BTN, type InputFrame } from './input';
 import { ITEM_BY_ID, canAfford } from './items';
 import { dirOf, norm2 } from './math';
 import { Rng } from './rng';
+import { CORE, TOWER } from './moba/defs';
+import type { MobaMode } from './moba/mode';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
@@ -56,6 +58,9 @@ export class BotBrain {
   private craftT = 0;
   private repairing = false;
   private dashAway: Character | null = null;
+  // Asedio
+  private lane = -1;
+  private retreating = false;
 
   constructor(level: number, seed: number) {
     this.rng = new Rng(seed);
@@ -66,13 +71,13 @@ export class BotBrain {
 
   think(sim: Simulation, ch: Character, dt: number): InputFrame {
     this.seq++;
-    if (!ch.alive) return this.frame(ch, 0);
-
+    // Forja: en el Asedio solo en la base (o esperando para volver).
     this.craftT -= dt;
-    if (this.craftT <= 0 && sim.rules.crafting) {
-      this.craftT = this.d.craftEvery;
+    if (this.craftT <= 0 && sim.rules.crafting && (!sim.rules.forgeAtBase || !ch.alive || sim.atBase(ch))) {
+      this.craftT = sim.rules.forgeAtBase ? 0.5 : this.d.craftEvery;
       this.craft(sim, ch);
     }
+    if (!ch.alive) return this.frame(ch, 0);
 
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
@@ -90,7 +95,7 @@ export class BotBrain {
     b |= this.tap;
     this.tap = 0;
     // Asegurar flancos: un bit "tap" no puede quedar mantenido dos ticks seguidos.
-    const edgeBits = BTN.JUMP | BTN.DASH | BTN.Q | BTN.E | BTN.F | BTN.R | BTN.I1 | BTN.I2 | BTN.I3;
+    const edgeBits = BTN.JUMP | BTN.DASH | BTN.Q | BTN.E | BTN.F | BTN.R | BTN.I1 | BTN.I2 | BTN.I3 | BTN.RECALL;
     b &= ~(this.lastB & edgeBits & ~this.hold);
     this.lastB = b;
     return this.frame(ch, b);
@@ -103,8 +108,8 @@ export class BotBrain {
   // ───────────── decisión ─────────────
 
   private decide(sim: Simulation, ch: Character) {
-    const hero = HEROES[ch.hero];
     this.hold = 0;
+    if (sim.mode.id === 'moba') { this.decideMoba(sim, ch); return; }
 
     // Elegir objetivo: el enemigo más cercano, con preferencia por los golpeados y los que están cerca del borde.
     let best: Character | null = null, bs = Infinity;
@@ -133,17 +138,7 @@ export class BotBrain {
     if (hud.zone && (!t || dist > 7)) {
       this.goal = { x: hud.zone.x + this.rng.range(-1.5, 1.5), z: hud.zone.z + this.rng.range(-1.5, 1.5) };
     } else if (t && dist < 22) {
-      const pref = hero.preferredRange;
-      if (dist > pref + 0.8) this.goal = { x: t.pos.x, z: t.pos.z };
-      else if (dist < pref - 2) {
-        const u = norm2(ch.pos.x - t.pos.x, ch.pos.z - t.pos.z);
-        this.goal = { x: ch.pos.x + u.x * 3, z: ch.pos.z + u.z * 3 };
-      } else {
-        this.strafeT -= this.d.think;
-        if (this.strafeT <= 0) { this.strafe = this.rng.chance(0.5) ? 1 : -1; this.strafeT = this.rng.range(0.6, 1.6); }
-        const u = norm2(t.pos.x - ch.pos.x, t.pos.z - ch.pos.z);
-        this.goal = pref < 3 ? { x: t.pos.x, z: t.pos.z } : { x: ch.pos.x - u.z * this.strafe * 2, z: ch.pos.z + u.x * this.strafe * 2 };
-      }
+      this.approach(ch, t, dist);
     } else {
       // Farmear: ir al destructible vivo más cercano.
       let bd = Infinity, g: { x: number; z: number } | null = null;
@@ -160,7 +155,30 @@ export class BotBrain {
     }
 
     if (!t) return;
+    this.engage(sim, ch, t, dist, false);
+  }
 
+  /** Posicionarse respecto del objetivo según el alcance preferido del héroe (entrar, alejarse o rodear). */
+  private approach(ch: Character, t: Character, dist: number) {
+    const pref = HEROES[ch.hero].preferredRange;
+    if (dist > pref + 0.8) this.goal = { x: t.pos.x, z: t.pos.z };
+    else if (dist < pref - 2) {
+      const u = norm2(ch.pos.x - t.pos.x, ch.pos.z - t.pos.z);
+      this.goal = { x: ch.pos.x + u.x * 3, z: ch.pos.z + u.z * 3 };
+    } else {
+      this.strafeT -= this.d.think;
+      if (this.strafeT <= 0) { this.strafe = this.rng.chance(0.5) ? 1 : -1; this.strafeT = this.rng.range(0.6, 1.6); }
+      const u = norm2(t.pos.x - ch.pos.x, t.pos.z - ch.pos.z);
+      this.goal = pref < 3 ? { x: t.pos.x, z: t.pos.z } : { x: ch.pos.x - u.z * this.strafe * 2, z: ch.pos.z + u.x * this.strafe * 2 };
+    }
+  }
+
+  /**
+   * Pelear contra un objetivo: apuntar, básico, empujón, dash, habilidades e ítems.
+   * vsUnits: el objetivo es un esbirro/neutral (se guardan la ulti y las habilidades para los héroes).
+   */
+  private engage(sim: Simulation, ch: Character, t: Character, dist: number, vsUnits: boolean) {
+    const hero = HEROES[ch.hero];
     // Apuntar con anticipación.
     const lead = this.d.lead * Math.min(0.5, dist / 25);
     const err = this.d.aimErr * (0.3 + Math.min(1, dist / 10));
@@ -173,8 +191,8 @@ export class BotBrain {
     const inRange = b.kind === 'melee' ? dist < b.range + 0.4 : dist < b.range * 0.9;
     if (inRange && Math.abs(t.pos.y - ch.pos.y) < 1.8) this.hold |= BTN.BASIC;
 
-    // Empujón cargado: sobre todo si está agrietado o cerca del borde.
-    if (dist < 2.3 && this.pushT <= 0 && ch.cds.push <= 0 && this.rng.chance(this.d.push)) {
+    // Empujón cargado: sobre todo si está agrietado o cerca del borde (a un esbirro, solo si hay vacío atrás).
+    if (dist < 2.3 && this.pushT <= 0 && ch.cds.push <= 0 && this.rng.chance(this.d.push) && (!vsUnits || this.edgeBehind(sim, ch, t))) {
       const edge = this.edgeBehind(sim, ch, t);
       if (t.stage >= 1 || edge) {
         this.pushT = t.stage >= 2 || edge ? 0.8 : 0.35;
@@ -183,15 +201,17 @@ export class BotBrain {
     }
 
     // Dash: entrar al cuerpo a cuerpo o escaparse estando muy roto.
-    if (sim.rules.dash && ch.dashCd <= 0 && ch.grounded && this.rng.chance(this.d.dash)) {
+    if (!vsUnits && sim.rules.dash && ch.dashCd <= 0 && ch.grounded && this.rng.chance(this.d.dash)) {
       if (hero.preferredRange < 3 && dist > 3.5 && dist < 7) this.tap |= BTN.DASH;
       else if (ch.stage >= 2 && dist < 3) { this.dashAway = t; this.tap |= BTN.DASH; }
     }
 
-    // Habilidades
+    // Habilidades (contra esbirros: solo las de daño en área y si hay varios juntos).
+    const clump = vsUnits ? sim.enemiesInRadius(ch.team, t.pos.x, t.pos.z, 3.5).length : 0;
     for (const slot of ['r', 'q', 'e', 'f'] as AbilitySlot[]) {
       const a = hero.abilities[slot];
       if (!sim.abilityUnlocked(ch, slot) || ch.cds[slot] > 0 || (slot === 'r' && !sim.ultReady(ch)) || !this.rng.chance(this.d.use)) continue;
+      if (vsUnits && (slot === 'r' || clump < 3 || (a.bot !== 'poke' && a.bot !== 'zone') || !this.rng.chance(0.25))) continue;
       if (this.wantsAbility(sim, ch, t, dist, a.bot, a.range)) {
         if (a.bot === 'escape') {
           const u = norm2(-ch.pos.x, -ch.pos.z);
@@ -208,7 +228,7 @@ export class BotBrain {
     }
 
     // Ítems activos
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 3 && !vsUnits; i++) {
       const id = ch.actives[i];
       if (!id || ch.cds[(['i1', 'i2', 'i3'] as const)[i]] > 0) continue;
       let use = false;
@@ -226,6 +246,190 @@ export class BotBrain {
         break;
       }
     }
+  }
+
+  // ───────────── Asedio (MOBA) ─────────────
+
+  /**
+   * Cómo juega un bot el Asedio: acompaña a su oleada por su línea, remata esbirros, pelea con héroes
+   * cuando le conviene, no se mete bajo una torre rival sin esbirros que la distraigan, pega a las
+   * torres cuando su oleada las tanquea, y cuando está muy roto vuelve a la base (B) a enfriarse y comprar.
+   */
+  private decideMoba(sim: Simulation, ch: Character) {
+    const m = sim.mode as MobaMode;
+    if (this.lane < 0) {
+      const mates = sim.chars.filter((c) => c.team === ch.team).sort((a, b) => a.id - b.id);
+      this.lane = mates.indexOf(ch) % Math.max(1, m.lanes.length);
+    }
+    const path = m.lanePath(this.lane, ch.team);
+    const base = sim.baseCenter(ch.team);
+    this.target = null;
+    this.pushT = 0;
+    const enemies = sim.chars.filter((c) => c.alive && c.team !== ch.team && c.invuln <= 0);
+    const near = (r: number) => enemies.filter((e) => Math.hypot(e.pos.x - ch.pos.x, e.pos.z - ch.pos.z) < r);
+
+    // Canalizando la vuelta: quieto.
+    if (ch.recallT > 0) { this.goal = null; return; }
+    // En la base: enfriarse del todo antes de salir (y comprar, lo hace think()).
+    if (sim.atBase(ch) && ch.heat > 8 && !near(10).length) { this.goal = { x: base.x, z: base.z }; return; }
+
+    // Muy roto: volver. Si nadie está cerca, B; si no, caminar hacia la base.
+    const retreatAt = this.d === DIFF[1] ? 150 : 100;
+    if (ch.heat >= retreatAt || (this.retreating && ch.heat > 20)) {
+      this.retreating = true;
+      // B solo si nadie me puede cortar la vuelta (héroes, esbirros o torres); si no, caminar hacia la base.
+      const threat = near(10).length || this.towerOn(sim, m, ch)
+        || sim.units.some((u) => u.alive && u.team !== ch.team && u.team < 2 && Math.hypot(u.pos.x - ch.pos.x, u.pos.z - ch.pos.z) < 9);
+      if (!threat && sim.tick - ch.lastHitTick > 30) {
+        this.goal = null;
+        this.tap |= BTN.RECALL;
+        return;
+      }
+      this.goal = { x: base.x, z: base.z };
+      const e = near(3)[0];
+      if (e) this.engage(sim, ch, e, Math.hypot(e.pos.x - ch.pos.x, e.pos.z - ch.pos.z), false);
+      return;
+    }
+    this.retreating = false;
+
+    // Una torre rival me está apuntando: salir de su alcance.
+    const shooter = this.towerOn(sim, m, ch);
+    if (shooter) {
+      const u = norm2(ch.pos.x - shooter.x, ch.pos.z - shooter.z);
+      this.goal = { x: ch.pos.x + u.x * 5, z: ch.pos.z + u.z * 5 };
+      return;
+    }
+
+    // Héroe rival cerca y conviene pelear (no bajo su torre).
+    let foe: Character | null = null, fd = Infinity;
+    for (const e of near(8)) {
+      if (this.inEnemyTowerRange(sim, m, ch.team, e.pos.x, e.pos.z, 0.5)) continue;
+      const d = Math.hypot(e.pos.x - ch.pos.x, e.pos.z - ch.pos.z);
+      const s = d - e.stage * 2;
+      if (s < fd) { fd = s; foe = e; }
+    }
+    if (foe && ch.stage <= foe.stage + 1) {
+      const d = Math.hypot(foe.pos.x - ch.pos.x, foe.pos.z - ch.pos.z);
+      this.target = foe;
+      this.approach(ch, foe, d);
+      this.engage(sim, ch, foe, d, false);
+      return;
+    }
+
+    // Esbirros rivales (y neutrales que me estén pegando): rematar el de menos vida.
+    let prey: Character | null = null, pv = Infinity;
+    for (const u of sim.units) {
+      if (!u.alive || u.team === ch.team) continue;
+      const d = Math.hypot(u.pos.x - ch.pos.x, u.pos.z - ch.pos.z);
+      if (d > 9) continue;
+      if (u.team >= 2 && u.lastHits.get(ch.id) === undefined && u.unit !== 'coloso') continue;
+      if (u.unit === 'coloso' && !this.colosoOk(sim, ch)) continue;
+      if (this.inEnemyTowerRange(sim, m, ch.team, u.pos.x, u.pos.z, 1) && !this.towerBusy(sim, m, ch.team, u.pos.x, u.pos.z)) continue;
+      const v = u.hp + d * 3;
+      if (v < pv) { pv = v; prey = u; }
+    }
+    if (prey) {
+      const d = Math.hypot(prey.pos.x - ch.pos.x, prey.pos.z - ch.pos.z);
+      this.target = prey;
+      this.approach(ch, prey, d);
+      this.engage(sim, ch, prey, d, true);
+      return;
+    }
+
+    // Torre o núcleo rival: pegarle si mi oleada la está tanqueando (o si no dispara a nadie).
+    const st = this.siegeTarget(sim, m, ch);
+    if (st) {
+      const b = HEROES[ch.hero].basic;
+      const reach = b.kind === 'melee' ? b.range + st.hw - 0.3 : b.range * 0.85;
+      const d = Math.hypot(st.x - ch.pos.x, st.z - ch.pos.z);
+      this.aimAt(ch, st.x, st.z);
+      if (d > reach) this.goal = { x: st.x, z: st.z };
+      else { this.goal = null; this.hold |= BTN.BASIC; }
+      return;
+    }
+
+    // El Coloso: si hay compañeros cerca y ya tengo nivel, a pegarle.
+    if (m.coloso && this.colosoOk(sim, ch)) {
+      const c = m.coloso;
+      const d = Math.hypot(c.pos.x - ch.pos.x, c.pos.z - ch.pos.z);
+      if (d < 30) { this.target = c; this.approach(ch, c, d); this.engage(sim, ch, c, d, true); return; }
+    }
+
+    // Juntar trozos cerca (si no es bajo una torre rival).
+    let pick: { x: number; z: number } | null = null, pd = 5;
+    for (const p of sim.pickups) {
+      const d = Math.hypot(p.pos.x - ch.pos.x, p.pos.z - ch.pos.z);
+      if (d < pd && !this.inEnemyTowerRange(sim, m, ch.team, p.pos.x, p.pos.z, 1)) { pd = d; pick = { x: p.pos.x, z: p.pos.z }; }
+    }
+    if (pick) { this.goal = pick; return; }
+
+    // Por defecto: detrás de la punta de mi oleada, o en mi torre más adelantada de la línea.
+    this.goal = this.laneSpot(sim, m, ch, path);
+    const f = dirOf(Math.atan2(this.goal.x - ch.pos.x, this.goal.z - ch.pos.z));
+    this.aimAt(ch, ch.pos.x + f.x * 3, ch.pos.z + f.z * 3);
+  }
+
+  /** ¿Puedo ir al Coloso? Con nivel y al menos otro compañero cerca de la guarida. */
+  private colosoOk(sim: Simulation, ch: Character) {
+    const m = sim.mode as MobaMode;
+    const c = m.coloso;
+    if (!c || ch.level < 5 || ch.heat > 60) return false;
+    return sim.chars.filter((a) => a.alive && a.team === ch.team && a !== ch && Math.hypot(a.pos.x - c.pos.x, a.pos.z - c.pos.z) < 16).length >= 1;
+  }
+
+  /** Dónde pararse en la línea: 2.5 m detrás del esbirro propio más adelantado, o en mi torre más adelantada. */
+  private laneSpot(sim: Simulation, m: MobaMode, ch: Character, path: { x: number; z: number }[]) {
+    let best: Character | null = null, bp = -Infinity;
+    for (const u of sim.units) {
+      if (!u.alive || u.team !== ch.team || u.ai?.lane !== this.lane) continue;
+      const p = laneProgress(path, u.pos.x, u.pos.z);
+      if (p > bp) { bp = p; best = u; }
+    }
+    if (best) {
+      const p = pointAt(path, Math.max(0, bp - 2.5));
+      return { x: p.x + this.rng.range(-1, 1), z: p.z + this.rng.range(-1, 1) };
+    }
+    let tp = -Infinity, spot: { x: number; z: number } | null = null;
+    for (const s of m.structs) {
+      if (s.hp <= 0 || s.team !== ch.team || s.kind !== 'tower' || s.ai?.lane !== this.lane) continue;
+      const p = laneProgress(path, s.x, s.z);
+      if (p > tp) { tp = p; spot = pointAt(path, Math.max(0, p - 2)); }
+    }
+    return spot ?? { x: path[0].x, z: path[0].z };
+  }
+
+  /** Torre/núcleo rival que me está apuntando, o null. */
+  private towerOn(sim: Simulation, m: MobaMode, ch: Character) {
+    void sim;
+    return m.structs.find((s) => s.hp > 0 && s.team !== ch.team && s.target === ch.id) ?? null;
+  }
+
+  private inEnemyTowerRange(_sim: Simulation, m: MobaMode, team: number, x: number, z: number, margin: number) {
+    return m.structs.some((s) => s.hp > 0 && s.team !== team && Math.hypot(x - s.x, z - s.z) <= (s.kind === 'core' ? CORE.range : TOWER.range) + s.hw + margin);
+  }
+
+  /** ¿La torre rival que cubre ese punto está ocupada con mis esbirros? (entonces se puede entrar un rato) */
+  private towerBusy(sim: Simulation, m: MobaMode, team: number, x: number, z: number) {
+    const s = m.structs.find((o) => o.hp > 0 && o.team !== team && Math.hypot(x - o.x, z - o.z) <= (o.kind === 'core' ? CORE.range : TOWER.range) + o.hw + 1);
+    if (!s) return true;
+    const t = s.target !== undefined && s.target >= 0 ? sim.charById.get(s.target) : null;
+    const tanks = sim.units.filter((u) => u.alive && u.team === team && Math.hypot(u.pos.x - s.x, u.pos.z - s.z) < TOWER.range + 1).length;
+    return !!t && t.unit !== 'hero' && tanks >= 1;
+  }
+
+  /** Estructura rival a la que conviene pegarle ahora (no protegida, con mi oleada tanqueando). */
+  private siegeTarget(sim: Simulation, m: MobaMode, ch: Character) {
+    let best: (typeof m.structs)[number] | null = null, bd = 16;
+    for (const s of m.structs) {
+      if (s.hp <= 0 || s.team === ch.team || s.invuln) continue;
+      const d = Math.hypot(s.x - ch.pos.x, s.z - ch.pos.z);
+      if (d > bd) continue;
+      // El núcleo expuesto se ataca si no hay héroes rivales defendiéndolo; las torres, solo con la oleada tanqueando.
+      const guarded = sim.chars.some((c) => c.alive && c.team !== ch.team && Math.hypot(c.pos.x - s.x, c.pos.z - s.z) < 14);
+      if (!this.towerBusy(sim, m, ch.team, s.x, s.z) && !(s.kind === 'core' && !guarded && s.target !== ch.id)) continue;
+      bd = d; best = s;
+    }
+    return best;
   }
 
   private wantsAbility(sim: Simulation, ch: Character, t: Character, dist: number, use: string, range: number): boolean {
@@ -452,3 +656,30 @@ export class BotBrain {
 export const BOT_NAMES = [
   'Bot Guijarro', 'Bot Tuerca', 'Bot Cuarzo', 'Bot Mocoso', 'Bot Ladrillo', 'Bot Chispa', 'Bot Grava', 'Bot Resina',
 ];
+
+/** Distancia recorrida a lo largo de un recorrido hasta la proyección de (x,z). */
+export function laneProgress(path: { x: number; z: number }[], x: number, z: number): number {
+  let best = 0, bd = Infinity, acc = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+    const u = Math.max(0, Math.min(l, ((x - a.x) * dx + (z - a.z) * dz) / l));
+    const d = Math.hypot(a.x + (dx / l) * u - x, a.z + (dz / l) * u - z);
+    if (d < bd) { bd = d; best = acc + u; }
+    acc += l;
+  }
+  return best;
+}
+
+/** Punto a cierta distancia a lo largo de un recorrido. */
+export function pointAt(path: { x: number; z: number }[], dist: number): { x: number; z: number } {
+  let acc = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    const l = Math.hypot(b.x - a.x, b.z - a.z);
+    if (acc + l >= dist) { const u = (dist - acc) / (l || 1); return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u }; }
+    acc += l;
+  }
+  const last = path[path.length - 1];
+  return { x: last.x, z: last.z };
+}

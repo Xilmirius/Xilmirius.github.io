@@ -67,11 +67,13 @@ try {
   await p.keyboard.up('KeyD');
   await p.keyboard.press('Space');
   await p.keyboard.press('ShiftLeft');
-  // Mantener Q muestra el área; al soltar sale la habilidad.
-  await p.keyboard.down('KeyQ');
+  // Q arma la habilidad (se ve el área); el clic izquierdo la lanza.
+  await p.keyboard.press('KeyQ');
   await wait(300);
   await p.screenshot({ path: `${OUT}/04-aim.png` });
-  await p.keyboard.up('KeyQ');
+  if (!(await p.$('.slot.armed'))) throw new Error('Q no quedó armada');
+  await p.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.5);
+  await p.waitForSelector('.slot.armed', { state: 'detached', timeout: 3000 });
   await wait(1200);
   await p.screenshot({ path: `${OUT}/04-match.png` });
   // Tooltip de una habilidad
