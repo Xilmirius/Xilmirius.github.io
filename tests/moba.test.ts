@@ -152,6 +152,24 @@ describe('Asedio: reglas', () => {
     expect(sim.units.includes(u)).toBe(false);
   });
 
+  it('el empujón cargado le saca más vida a un esbirro que uno sin cargar', () => {
+    const dmg = (hold: number) => {
+      const { sim } = mk(2);
+      sim.phase = 'play';
+      const [a] = sim.chars;
+      a.pos = { x: -20, y: 0, z: 0 }; a.ppos = { ...a.pos }; a.facing = Math.PI / 2;
+      const u = sim.addUnit('melee', 1, a.pos.x + 1.2, a.pos.z, { name: 'G', family: 'stone', hp: 500, speed: 0, kbTaken: 0 });
+      a.input = { ...emptyInput(), ax: u.pos.x, az: u.pos.z, b: BTN.PUSH };
+      for (let i = 0; i < hold; i++) sim.step();
+      a.input = { ...emptyInput(), ax: u.pos.x, az: u.pos.z };
+      sim.step();
+      return 500 - u.hp;
+    };
+    const quick = dmg(1), full = dmg(60);
+    expect(quick).toBeGreaterThan(0);
+    expect(full).toBeGreaterThan(quick * 2);
+  });
+
   it('las torres priorizan esbirros y castigan al héroe que le pega a un aliado bajo la torre', () => {
     const { sim, mode } = mk(2);
     sim.phase = 'play';

@@ -2,7 +2,7 @@
 // así si cambia el balance, el tooltip se actualiza solo).
 import { iconHtml } from '../assets/registry';
 import {
-  DASH_CD, MUTATION_LEVELS, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
+  DASH_CD, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
 } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
@@ -82,8 +82,8 @@ export function recallTip() {
 
 export function pushTip() {
   return head(iconHtml('icon.push', '🫸'), 'Empujón', 'Clic D')
-    + tags([`Carga hasta ${s(PUSH_MAX_CHARGE)}`, 'Cono de 95°'])
-    + p('Mantené para cargar y soltá para empujar. Cuanto más cargado y más roto está el rival, más lejos vuela: <b>es lo que saca del mapa</b>.')
+    + tags([`Carga hasta ${s(PUSH_MAX_CHARGE)}`, 'Cono de 95°', `Heat ${PUSH_HEAT[0]}–${PUSH_HEAT[1]}`])
+    + p('Mantené para cargar y soltá para empujar. Cuanto más cargado y más roto está el rival, más lejos vuela: <b>es lo que saca del mapa</b>. Cargado también pega más fuerte.')
     + p('El cono en el piso avisa que lo estás cargando (se pone rojo a carga máxima).', 'tt-hint');
 }
 

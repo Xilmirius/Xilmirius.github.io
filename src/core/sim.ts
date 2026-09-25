@@ -4,7 +4,7 @@ import { CollisionWorld, type Obstacle } from './collision';
 import {
   BODY_HIT_SPEED, CHAR_HEIGHT, CHAR_RADIUS, DESTRUCT_RESPAWN, DT, HEAT_MAX, KILL_CREDIT_TIME, KILL_Y,
   LAUNCH_THRESHOLD, MAX_LEVEL, MAX_PICKUPS, MUTATION_LEVELS, PICKUP_COLLECT, PICKUP_MAGNET, PICKUP_TTL,
-  PUSH_CD, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, REPAIR_TIME, RESPAWN_TIME, SPAWN_INVULN, STAGE_AT,
+  PUSH_CD, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, REPAIR_TIME, RESPAWN_TIME, SPAWN_INVULN, STAGE_AT,
   STAGE_KB, TICK_RATE, TILE_CRUMBLE, TILE_HP, WALL_SLAM_SPEED, XP_ASSIST, XP_DESTRUCT, XP_KILL, XP_PER_HEAT, XP_PICKUP,
   XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE, RECALL_TIME, BASE_RADIUS, ISLAND_BOTTOM,
 } from './constants';
@@ -1107,7 +1107,8 @@ export class Simulation {
     ch.pushCharge = 0;
     ch.cds.push = PUSH_CD;
     ch.cdMax.push = PUSH_CD;
-    this.meleeArc(ch, { range: 1.7 + 0.8 * c, angle: 95, heat: 3, kb: 8 + 14 * c, up: c * 1.5, destruct: 6 + 10 * c, fx: c > 0.6 ? 'pushbig' : 'push' }, NO_MODS);
+    const heat = PUSH_HEAT[0] + (PUSH_HEAT[1] - PUSH_HEAT[0]) * c;
+    this.meleeArc(ch, { range: 1.7 + 0.8 * c, angle: 95, heat, kb: 8 + 14 * c, up: c * 1.5, destruct: 6 + 10 * c, fx: c > 0.6 ? 'pushbig' : 'push' }, NO_MODS);
   }
 
   private tryAbility(ch: Character, slot: AbilitySlot, fresh: boolean): boolean {
