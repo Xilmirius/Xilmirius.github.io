@@ -18,6 +18,11 @@ import { createDirectory, type Directory, type RoomInfo } from './net/signaling'
 import { clear, colorHex, fmtTime, h, modal, toast } from './ui/dom';
 import { HeroPreview } from './ui/heroPreview';
 import { THEMES } from './render/themes';
+import { getRules, RULESETS, RULESET_IDS, unlockLevel, type RulesetId } from './core/rules';
+import { assetsReady, loadAssets } from './assets/registry';
+import { tip } from './ui/tooltip';
+import { abilityTip, heroTip, modeTip, rulesTip } from './ui/tips';
+import { openGallery } from './ui/gallery';
 
 type Session = HostSession | ClientSession;
 
@@ -53,6 +58,7 @@ export class App {
   }
 
   start() {
+    void loadAssets();
     const code = new URLSearchParams(location.search).get('sala');
     this.showMenu();
     if (code) setTimeout(() => this.join(code.toUpperCase()), 300);
@@ -110,6 +116,7 @@ export class App {
           h('button', { class: 'btn ghost', onclick: () => this.showHistory() }, '🏆 Historial'),
           h('button', { class: 'btn ghost', onclick: () => this.showAchievements() }, '🏅 Logros'),
           h('button', { class: 'btn ghost', onclick: () => this.showSettings() }, '⚙️ Ajustes'),
+          h('button', { class: 'btn ghost', title: 'Todo lo que hoy es procedural y cómo reemplazarlo por archivos', onclick: () => openGallery() }, '🧩 Assets'),
         ),
         netInfo,
       ),
@@ -280,12 +287,13 @@ export class App {
     // Héroes
     const heroesBox = h('div', { class: 'heroes' });
     const previewBox = h('div', { class: 'preview' });
+    const rules = getRules(l.settings.rules);
     for (const id of HERO_IDS) {
       const hd = HEROES[id];
-      heroesBox.append(h('button', {
+      heroesBox.append(tip(h('button', {
         class: 'herocard' + (me?.hero === id ? ' on' : ''), style: { '--c': colorHex(FAMILY_COLORS[hd.family]) },
         onclick: () => this.pick(id),
-      }, h('b', null, hd.name), h('span', null, `${FAMILY_NAMES[hd.family]} · ${hd.role}`)));
+      }, h('b', null, hd.name), h('span', null, `${FAMILY_NAMES[hd.family]} · ${hd.role}`)), () => heroTip(id, rules)));
     }
     const sel = me ? HEROES[me.hero] : HEROES.canto;
     const heroInfo = h('div', { class: 'heroinfo' },
@@ -295,7 +303,12 @@ export class App {
       h('ul', null,
         h('li', null, h('b', null, `Clic · ${sel.basic.name}: `), sel.basic.desc),
         h('li', null, h('b', null, 'Clic derecho · Empujón: '), 'mantené para cargar. Es lo que saca rivales del mapa.'),
-        ...(['q', 'e', 'f', 'r'] as const).map((k) => h('li', null, h('b', null, `${k.toUpperCase()} · ${sel.abilities[k].icon} ${sel.abilities[k].name}`, h('small', null, ` (nv ${sel.abilities[k].unlock}, ${sel.abilities[k].cd}s)`), ': '), sel.abilities[k].desc)),
+        rules.dash ? h('li', null, h('b', null, 'Shift · Dash: '), 'ráfaga corta para entrar, esquivar o recuperarte.') : null,
+        ...(['q', 'e', 'f', 'r'] as const).map((k) => {
+          const a = sel.abilities[k];
+          const meta = k === 'r' && rules.ultCharge ? ' (se carga pegando)' : rules.progression ? ` (nv ${unlockLevel(rules, a)}, ${a.cd}s)` : ` (${a.cd}s)`;
+          return tip(h('li', null, h('b', null, `${k.toUpperCase()} · ${a.icon} ${a.name}`, h('small', null, meta), ': '), a.desc), () => abilityTip(sel.id, k, rules));
+        }),
       ),
     );
 
@@ -309,7 +322,10 @@ export class App {
     const humansN = humans.filter((p) => p.connected).length;
     const settings = h('div', { class: 'settings' },
       h('h3', null, 'Partida', isHost ? null : h('small', null, ' (la configura el host)')),
-      h('label', null, 'Modo'), select(st.mode, (Object.keys(MODE_INFO) as ModeId[]).map((m) => [m, MODE_INFO[m].name]), (v) => set({ mode: v as ModeId })),
+      tip(h('label', null, 'Reglas ⓘ'), () => rulesTip(rules.id)),
+      select(rules.id, RULESET_IDS.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
+      h('p', { class: 'muted small' }, rules.desc),
+      tip(h('label', null, 'Modo ⓘ'), () => modeTip(st.mode)), select(st.mode, (Object.keys(MODE_INFO) as ModeId[]).map((m) => [m, MODE_INFO[m].name]), (v) => set({ mode: v as ModeId })),
       h('p', { class: 'muted small' }, MODE_INFO[st.mode].desc),
       h('label', null, 'Mapa'), select(st.map, Object.values(MAPS).map((m) => [m.id, `${m.name} (${m.players})`]), (v) => set({ map: v })),
       h('label', null, 'Tema visual'), select(st.theme ?? 'neon', THEMES.map((t) => [t.id, `${t.icon} ${t.name}`]), (v) => set({ theme: v })),
@@ -356,6 +372,12 @@ export class App {
   // ───────────── partida ─────────────
 
   private onStart(init: MatchInit) {
+    // Los assets opcionales (public/assets) se precargan desde el menú; si todavía no terminaron,
+    // se espera un poco (con tope) para que la partida ya arranque con ellos.
+    void assetsReady().then(() => this.startMatch(init));
+  }
+
+  private startMatch(init: MatchInit) {
     const s = this.session;
     if (!s) return;
     this.stopAttract();
@@ -458,21 +480,22 @@ export class App {
             <tr><td><kbd>Espacio</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
             <tr><td><kbd>Clic</kbd></td><td>Ataque básico: <b>rompe</b> (suma heat)</td></tr>
             <tr><td><kbd>Clic derecho</kbd></td><td><b>Empujón</b>: mantené para cargar, soltá para <b>sacar</b></td></tr>
-            <tr><td><kbd>Q E F</kbd> <kbd>R</kbd></td><td>Habilidades y ulti (se desbloquean subiendo de nivel)</td></tr>
-            <tr><td><kbd>1 2 3</kbd></td><td>Ítems activos</td></tr>
-            <tr><td><kbd>C</kbd></td><td>Forja: fabricar ítems y mutaciones</td></tr>
-            <tr><td><kbd>V</kbd></td><td>Reparar tu cuerpo (mantener, gasta tu material)</td></tr>
-            <tr><td><kbd>Shift</kbd></td><td>Correr la cámara hacia el cursor</td></tr>
+            <tr><td><kbd>Q E F</kbd> <kbd>R</kbd></td><td>Habilidades y ulti: <b>mantené</b> para ver el área, <b>soltá</b> para usarla</td></tr>
+            <tr><td><kbd>Shift</kbd></td><td><b>Dash</b>: ráfaga corta (en el aire, después del segundo salto)</td></tr>
             <tr><td><kbd>Tab</kbd></td><td>Tabla de jugadores</td></tr>
+            <tr><td colspan="2" class="muted small">Solo con reglas <b>Completo</b>: <kbd>1 2 3</kbd> ítems activos · <kbd>C</kbd> forja · <kbd>V</kbd> reparar</td></tr>
           </table>
+          <p class="muted small">Pasá el mouse por cualquier ícono (habilidades, ítems, tu cuerpo, héroes) para ver qué hace.</p>
         </div>
         <div>
           <h4>Cómo se gana una pelea</h4>
           <p><b>No hay barra de vida.</b> Cada golpe te agrieta: <span class="s1">Intacto</span> → <span class="s2">Agrietado</span> → <span class="s3">Quebrado</span> → <span class="s4">Destrozado</span>. Cuanto más roto estás, <b>más lejos volás</b>.</p>
           <p>Se muere solo por <b>ring-out</b>: saliendo del mapa. El ritmo es: <b>romper</b> (clic), <b>entrar</b> y <b>sacar</b> (empujón cargado).</p>
           <p>El cuerpo lanzado es un <b>proyectil</b>: rompe cobertura, se estampa contra paredes y voltea a otros. Mientras volás podés corregir con WASD y usar el segundo salto o trepar el borde.</p>
-          <h4>Materiales</h4>
-          <p>Rompé rocas 🪨, chatarra 🔩, cristales 💎 y goo 🟢 para juntar material. Sirve para <b>ítems</b>, <b>mutaciones</b> (usan el material de tu familia) y para <b>repararte</b>. Ojo: el piso frágil también se rompe y deja agujeros.</p>
+          <h4>Reglas</h4>
+          <p><b>⚡ Brawler</b> (la de siempre): todo desbloqueado desde el principio y la <b>ulti se carga pegando</b> y juntando los trozos que sueltan las coberturas. Nada que administrar: a pelear.</p>
+          <p><b>🧬 Completo</b>: niveles, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.</p>
+          <p>Ojo: el piso frágil se rompe y deja agujeros.</p>
         </div>
       </div>`;
     modal('Cómo se juega', body, [{ label: '¡Entendido!', kind: 'primary' }], 'wide');

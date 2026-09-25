@@ -1,5 +1,5 @@
 // Screenshots de cada héroe usando sus habilidades (herramienta de desarrollo visual).
-// Uso: npm run build && node tests/e2e/showcase.mjs   (OUT=carpeta)
+// Uso: npm run build && node tests/e2e/showcase.mjs   (OUT=carpeta, HEROES=canto,prisma, RULES=brawl|full, THEME=neon)
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -25,6 +25,8 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await p.waitForSelector('.lobby');
   await p.click(`.herocard:has-text("${hero[0].toUpperCase() + hero.slice(1)}")`);
   if (process.env.THEME) await p.evaluate((t) => window.__rubble.session.setSettings({ theme: t }), process.env.THEME);
+  const rules = process.env.RULES ?? 'brawl';
+  await p.evaluate((r) => window.__rubble.session.setSettings({ rules: r }), rules);
   await p.click('text=Empezar partida');
   console.log('  start');
   await p.waitForFunction(() => window.__rubble?.session?.sim?.phase === 'play', null, { timeout: 30000 });
@@ -34,6 +36,7 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
     const sim = window.__rubble.session.sim;
     const me = sim.charByPid.get(window.__rubble.session.localPid);
     me.xp = 5000; sim.addXp(me, 1);
+    me.ult = 1;
     me.mats = { stone: 40, metal: 40, crystal: 40, goo: 40 };
     me.pos = { x: -4, y: 0, z: -2 };
     const foes = sim.chars.filter((c) => c.team !== me.team);
@@ -47,6 +50,19 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await p.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.47);
   await wait(400);
   await p.screenshot({ path: `${OUT}/hero-${hero}-0.png` });
+  // Apuntar: mantener la tecla muestra el área (sin soltar todavía).
+  await p.keyboard.down('KeyR');
+  await wait(250);
+  await p.screenshot({ path: `${OUT}/hero-${hero}-aimR.png` });
+  await p.keyboard.up('KeyR');
+  await wait(700);
+  await p.screenshot({ path: `${OUT}/hero-${hero}-KeyR-cast.png` });
+  await p.evaluate(() => { const s = window.__rubble.session; const me = s.sim.charByPid.get(s.localPid); me.ult = 1; me.cds.r = 0; });
+  await wait(300);
+  // Tooltip de una habilidad
+  const slot = await p.$('.hud-bar .slot.ult');
+  if (slot) { await slot.hover(); await wait(400); await p.screenshot({ path: `${OUT}/hero-${hero}-tooltip.png` }); }
+  await p.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.47);
   for (const [i, key] of ['KeyQ', 'KeyE', 'KeyR'].entries()) {
     await p.keyboard.press(key);
     await wait(i === 2 ? 700 : 250);
@@ -60,10 +76,20 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await p.mouse.up({ button: 'right' });
   await wait(300);
   await p.screenshot({ path: `${OUT}/hero-${hero}-push.png` });
-  await p.keyboard.press('KeyC');
-  await p.click('.forge .tab:has-text("Mutaciones")');
-  await wait(300);
-  await p.screenshot({ path: `${OUT}/hero-${hero}-mut.png` });
+  // Golpes básicos: puños en arco
+  for (let i = 0; i < 3; i++) {
+    await p.mouse.down();
+    await wait(90);
+    if (i === 1) await p.screenshot({ path: `${OUT}/hero-${hero}-punch.png` });
+    await p.mouse.up();
+    await wait(200);
+  }
+  if (rules === 'full') {
+    await p.keyboard.press('KeyC');
+    await p.click('.forge .tab:has-text("Mutaciones")');
+    await wait(300);
+    await p.screenshot({ path: `${OUT}/hero-${hero}-mut.png` });
+  }
   await ctx.close();
   console.log('✓', hero);
 }

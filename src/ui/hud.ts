@@ -1,5 +1,5 @@
 // HUD de partida + Forja (C) + Tabla (Tab) + pantalla de resultados.
-import { REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
+import { DASH_CD, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
 import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
@@ -8,7 +8,11 @@ import { MODE_INFO } from '../core/modes';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
 import type { MatchResultInfo, PlayerResult, RosterInfo } from '../core/protocol';
 import type { Command } from '../core/sim';
-import { F_DEAD, F_ELIMINATED, F_SHIELD, type CharFrame, type MeFrame, type WorldFrame } from '../core/snapshot';
+import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFrame, type WorldFrame } from '../core/snapshot';
+import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
+import { iconHtml, iconNode } from '../assets/registry';
+import { tip } from './tooltip';
+import { abilityTip, basicTip, dashTip, itemIdTip, itemTip, levelTip, matTip, pushTip, routeTip, stageTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchReward } from '../game/profile';
@@ -16,7 +20,7 @@ import { HAT_BY_ID } from '../core/cosmetics';
 import { clear, colorHex, fmtTime, h } from './dom';
 
 const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
-const KEYS: Record<string, string> = { basic: 'Clic', push: 'Clic D', q: 'Q', e: 'E', f: 'F', r: 'R', i1: '1', i2: '2', i3: '3' };
+const KEYS: Record<string, string> = { basic: 'Clic', push: 'Clic D', dash: 'Shift', q: 'Q', e: 'E', f: 'F', r: 'R', i1: '1', i2: '2', i3: '3' };
 
 export class Hud {
   root: HTMLDivElement;
@@ -72,6 +76,7 @@ export class Hud {
     parent: HTMLElement,
     private roster: RosterInfo[],
     private localId: number,
+    private rules: Ruleset,
     private send: (c: Command) => void,
   ) {
     for (const r of roster) this.byId.set(r.id, r);
@@ -82,8 +87,25 @@ export class Hud {
     this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, this.comboEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
     parent.appendChild(this.root);
     this.buildBar();
-    this.buildMats();
-    this.hint.innerHTML = '<b>C</b> forja · <b>V</b> reparar · <b>Shift</b> mirar lejos · <b>Tab</b> tabla · <b>Esc</b> menú';
+    if (rules.pickups === 'materials') this.buildMats();
+    else this.mats.style.display = 'none';
+    const hints = ['<b>Mantené Q E F R</b> para apuntar', rules.dash && '<b>Shift</b> dash', rules.crafting && '<b>C</b> forja', rules.repair && '<b>V</b> reparar', '<b>Tab</b> tabla', '<b>Esc</b> menú'];
+    this.hint.innerHTML = hints.filter(Boolean).join(' · ');
+    tip(this.body, () => this.bodyTip());
+    this.body.addEventListener('mouseover', (e) => {
+      const part = (e.target as HTMLElement).closest?.('[data-part]') as HTMLElement | null;
+      this.hoverPart = (part?.dataset.part as typeof this.hoverPart) ?? null;
+    });
+  }
+
+  /** Tooltip del panel de tu personaje: según dónde esté el mouse (etapa, nivel/ulti). */
+  private hoverPart: 'stage' | 'level' | 'ult' | null = null;
+  private bodyTip(): string {
+    const c = this.lastLocal, me = this.lastMe, r = this.me;
+    if (!c || !me || !r) return '';
+    if (this.hoverPart === 'level' && this.rules.progression) return levelTip(c.lv, me.xp, me.xpNext, r.hero);
+    if (this.hoverPart === 'ult' && this.rules.ultCharge) return ultBarTip(me.ult);
+    return stageTip(c.st, c.heat);
   }
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
@@ -92,26 +114,28 @@ export class Hud {
     const me = this.me;
     if (!me) { this.bar.style.display = 'none'; return; }
     const hero = HEROES[me.hero];
-    const mk = (slot: string, icon: string, name: string, desc: string, extra = '') => {
+    const mk = (slot: string, icon: Node, content: () => string, extra = '') => {
       const cd = h('div', { class: 'cd' });
       const txt = h('div', { class: 'cdt' });
       const lock = h('div', { class: 'lock' });
       const ic = h('div', { class: 'ic' }, icon);
       const mut = h('div', { class: 'mut' });
-      const root = h('div', { class: 'slot ' + extra, title: `${name}\n${desc}` }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, KEYS[slot]));
+      const root = tip(h('div', { class: 'slot ' + extra }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, KEYS[slot])), content);
       this.slotEls.set(slot, { root, cd, txt, lock, icon: ic, mut });
       return root;
     };
-    this.bar.append(
-      mk('basic', hero.basic.kind === 'melee' ? '👊' : '🎯', hero.basic.name, hero.basic.desc, 'small'),
-      mk('push', '🫸', 'Empujón', 'Mantené para cargar: más carga, más empuje. Es lo que saca del mapa.', 'small'),
+    const abilityContent = (s: AbilitySlot) => () => abilityTip(me.hero, s, this.rules, { mut: this.lastMe?.mut[s], level: this.lastLocal?.lv, ult: this.lastMe?.ult });
+    this.bar.append(...[
+      mk('basic', iconNode(`icon.basic.${me.hero}`, hero.basic.kind === 'melee' ? '👊' : '🎯'), () => basicTip(me.hero), 'small'),
+      mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
+      this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
       h('div', { class: 'sep' }),
-      ...(['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => { const a = hero.abilities[s]; return mk(s, a.icon, a.name, a.desc, s === 'r' ? 'ult' : ''); }),
-      h('div', { class: 'sep' }),
-      mk('i1', '', 'Ítem 1', 'Fabricá ítems activos en la forja (C).', 'item'),
-      mk('i2', '', 'Ítem 2', 'Fabricá ítems activos en la forja (C).', 'item'),
-      mk('i3', '', 'Ítem 3', 'Fabricá ítems activos en la forja (C).', 'item'),
-    );
+      ...(['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => mk(s, iconNode(`icon.ability.${me.hero}.${s}`, hero.abilities[s].icon), abilityContent(s), s === 'r' ? 'ult' : '')),
+      this.rules.crafting ? [
+        h('div', { class: 'sep' }),
+        ...[0, 1, 2].map((i) => mk(`i${i + 1}`, document.createTextNode(''), () => itemIdTip(this.lastMe?.act[i] ?? null), 'item')),
+      ] : [],
+    ].flat().filter((x): x is HTMLDivElement => !!x));
   }
 
   update(w: WorldFrame, local: CharFrame | null, me: MeFrame | null, dt: number, net: { ping: number; fps: number; showFps: boolean; kind: string }) {
@@ -174,18 +198,26 @@ export class Hud {
     const hero = HEROES[this.me!.hero];
     const fam = hero.family;
     const pips = [0, 1, 2, 3].map((i) => `<i class="${i <= c.st ? 'on s' + c.st : ''}"></i>`).join('');
-    const xpPct = me.xpNext > me.xpPrev ? Math.min(100, ((me.xp - me.xpPrev) / (me.xpNext - me.xpPrev)) * 100) : 100;
     const repair = me.rep > 0 ? `<div class="repair"><div style="width:${Math.round(me.rep * 100)}%"></div></div>` : '';
+    let progress: string;
+    if (this.rules.progression) {
+      const xpPct = me.xpNext > me.xpPrev ? Math.min(100, ((me.xp - me.xpPrev) / (me.xpNext - me.xpPrev)) * 100) : 100;
+      progress = `<div class="xp" data-part="level"><div style="width:${xpPct}%"></div></div>
+      <div class="xpt" data-part="level">${c.lv >= 10 ? 'Nivel máximo' : `Nivel ${c.lv} · XP ${me.xp}/${me.xpNext}`}${this.rules.crafting && me.slots > Object.keys(me.mut).length ? ' · <b class="glow">¡Mutación disponible! (C)</b>' : ''}</div>`;
+    } else if (this.rules.ultCharge) {
+      const full = me.ult >= 1;
+      progress = `<div class="xp ult${full ? ' full' : ''}" data-part="ult"><div style="width:${Math.round(me.ult * 100)}%"></div></div>
+      <div class="xpt" data-part="ult">${full ? '<b class="glow">⚡ ¡Ulti lista! (R)</b>' : `⚡ Ulti ${Math.floor(me.ult * 100)}%`}</div>`;
+    } else progress = '';
     const html = `
       <div class="portrait" style="--c:${colorHex(FAMILY_COLORS[fam])}">
-        <div class="lvl">${c.lv}</div>
+        <div class="lvl" data-part="level">${this.rules.progression ? c.lv : iconHtml(`icon.mat.${fam}`, MAT_ICON[fam])}</div>
         <div class="who"><b>${hero.name}</b><span>${FAMILY_NAMES[fam]} · ${hero.role}</span></div>
       </div>
-      <div class="bodystate s${c.st}"><span>${STAGE_NAMES[c.st]}</span><div class="pips">${pips}</div><em>${c.heat}</em></div>
+      <div class="bodystate s${c.st}" data-part="stage"><span>${STAGE_NAMES[c.st]}</span><div class="pips">${pips}</div><em>${c.heat}</em></div>
       ${c.fl & F_SHIELD ? `<div class="shieldtag">🛡️ Escudo ${c.sh}</div>` : ''}
       ${repair}
-      <div class="xp"><div style="width:${xpPct}%"></div></div>
-      <div class="xpt">${c.lv >= 10 ? 'Nivel máximo' : `XP ${me.xp}/${me.xpNext}`}${me.slots > Object.keys(me.mut).length ? ' · <b class="glow">¡Mutación disponible! (C)</b>' : ''}</div>`;
+      ${progress}`;
     if (this.body.innerHTML !== html) this.body.innerHTML = html;
   }
 
@@ -198,18 +230,33 @@ export class Hud {
       let locked = false, lockTxt = '';
       if (slot === 'q' || slot === 'e' || slot === 'f' || slot === 'r') {
         const a = hero.abilities[slot];
-        if (c.lv < a.unlock) { locked = true; lockTxt = `Nv ${a.unlock}`; }
+        const lvl = unlockLevel(this.rules, a);
+        if (c.lv < lvl) { locked = true; lockTxt = `Nv ${lvl}`; }
         const mut = me.mut[slot];
         el.mut.textContent = mut ? ROUTE_NAMES[mut][0] : '';
         el.mut.className = 'mut ' + (mut ?? '');
+        if (usesUltCharge(this.rules, slot)) {
+          // Ulti por carga: el relleno sube desde abajo a medida que se carga.
+          const u = Math.min(1, me.ult);
+          el.cd.style.background = u < 1 ? `linear-gradient(to top, transparent ${u * 100}%, rgba(10,6,20,.72) ${u * 100}%)` : 'none';
+          el.txt.textContent = u < 1 ? `${Math.floor(u * 100)}%` : '';
+          el.txt.classList.toggle('pct', u < 1);
+          el.lock.textContent = '';
+          el.root.classList.remove('locked');
+          return;
+        }
       }
       if (slot.startsWith('i')) {
         const id = me.act[Number(slot[1]) - 1];
         const it = id ? ITEM_BY_ID[id] : null;
-        el.icon.textContent = it ? it.icon : '';
-        el.root.title = it ? `${it.name}\n${it.desc}` : 'Vacío: fabricá un ítem activo en la forja (C).';
+        const key = it ? it.id : '';
+        if (el.icon.dataset.item !== key) {
+          el.icon.dataset.item = key;
+          el.icon.innerHTML = it ? iconHtml(`icon.item.${it.id}`, it.icon) : '';
+        }
         el.root.classList.toggle('empty', !it);
       }
+
       if (slot === 'push') {
         el.root.classList.toggle('charging', c.ch > 0.01 && !!(c.fl & 64));
         el.root.style.setProperty('--charge', String(c.fl & 64 ? c.ch : 0));
@@ -220,11 +267,17 @@ export class Hud {
       el.cd.style.background = frac > 0 ? `conic-gradient(rgba(10,6,20,.72) ${frac * 360}deg, transparent 0)` : 'none';
       el.txt.textContent = rem > 0.05 && max > 1 ? (rem >= 1 ? String(Math.ceil(rem)) : rem.toFixed(1)) : '';
     });
+    const dash = this.slotEls.get('dash');
+    if (dash) {
+      const r = me.dcd;
+      dash.cd.style.background = r > 0 ? `conic-gradient(rgba(10,6,20,.72) ${(r / DASH_CD) * 360}deg, transparent 0)` : 'none';
+    }
   }
 
   private buildMats() {
+    const mine = this.me ? HEROES[this.me.hero].family : 'stone';
     this.matEls = FAMILIES.map((f) => {
-      const el = h('div', { class: 'mat', style: { '--c': colorHex(FAMILY_COLORS[f]) }, title: FAMILY_NAMES[f] }, h('span', null, MAT_ICON[f]), h('b', null, '0'));
+      const el = tip(h('div', { class: 'mat', style: { '--c': colorHex(FAMILY_COLORS[f]) } }, h('span', null, iconNode(`icon.mat.${f}`, MAT_ICON[f])), h('b', null, '0')), () => matTip(f, this.rules, mine));
       this.mats.appendChild(el);
       return el;
     });
@@ -232,6 +285,7 @@ export class Hud {
   }
 
   private renderMats(me: MeFrame) {
+    if (this.rules.pickups !== 'materials') return;
     me.mats.forEach((v, i) => {
       const el = this.matEls[i];
       const b = el.querySelector('b')!;
@@ -239,13 +293,22 @@ export class Hud {
       if (this.prevMats.length && v > (this.prevMats[i] ?? 0)) bump(el);
     });
     this.prevMats = [...me.mats];
-    const html = `${me.pas.map((p) => `<span title="${ITEM_BY_ID[p]?.name}: ${ITEM_BY_ID[p]?.desc}">${ITEM_BY_ID[p]?.icon ?? '?'}</span>`).join('')}${'<span class="empty"></span>'.repeat(3 - me.pas.length)}`;
-    if (this.passEl.innerHTML !== html) this.passEl.innerHTML = html;
+    const key = me.pas.join(',');
+    if (this.passEl.dataset.k !== key) {
+      this.passEl.dataset.k = key;
+      clear(this.passEl);
+      for (const id of me.pas) {
+        const it = ITEM_BY_ID[id];
+        if (it) this.passEl.append(tip(h('span', { html: iconHtml(`icon.item.${id}`, it.icon) }), () => itemTip(it)));
+      }
+      for (let i = me.pas.length; i < 3; i++) this.passEl.append(tip(h('span', { class: 'empty' }), '<b>Pasivo vacío</b><p>Fabricá un ítem pasivo en la forja (C).</p>'));
+    }
   }
 
   /** Un trozo de material vuela desde el mundo hasta el contador (efecto moneda de casino). */
   flyMat(sx: number, sy: number, mat: number) {
-    const target = this.matEls[mat];
+    // Con materiales: vuela al contador. Con carga de ulti: vuela a la tecla R.
+    const target = this.rules.pickups === 'materials' ? this.matEls[mat] : this.slotEls.get('r')?.root;
     if (!target) return;
     const r = target.getBoundingClientRect();
     const el = h('div', { class: 'flycoin' }, MAT_ICON[FAMILIES[mat]]);
@@ -307,7 +370,7 @@ export class Hud {
       }
     });
     this.prevCd = [...me.cd];
-    const ultReady = local.lv >= 5 && me.cd[SLOTS.indexOf('r')] <= 0 && !(local.fl & F_DEAD);
+    const ultReady = (local.fl & F_ULTREADY) !== 0 && !(local.fl & F_DEAD);
     this.slotEls.get('r')?.root.classList.toggle('ultready', ultReady);
     if (ultReady && !this.ultWasReady) {
       this.announce('¡ULTI LISTA!', `${HEROES[this.me.hero].abilities.r.icon} ${HEROES[this.me.hero].abilities.r.name} · apretá R`, 'ult', '¡Ulti lista!');
@@ -449,7 +512,7 @@ export class Hud {
         this.showCenter(`Nivel ${lv}${unlocked ? ` · ¡${hero.abilities[unlocked].name}!` : ''}${mutation ? ' · mutación disponible' : ''}`, 1.8, 'good');
       } break;
       case 'deny': if (e.id === this.localId) { this.deny.textContent = e.w; this.denyT = 1.6; } break;
-      case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? '¡DESTROZADO! Reparate (V)' : 'Quebrado', 1.2, 'bad'); break;
+      case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? '¡DESTROZADO! Reparate (V)' : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
       case 'craft': if (e.id === this.localId) {
         const it = ITEM_BY_ID[e.w];
         this.showCenter(it ? `${it.icon} ${it.name}` : '🧬 ¡Mutación!', 1.2, 'good');
@@ -497,11 +560,11 @@ export class Hud {
             const has = owned.includes(it.id);
             const full = kind === 'passive' ? me.pas.length >= 3 : !me.act.includes(null);
             const afford = (Object.keys(it.cost) as Family[]).every((f) => me.mats[FAMILIES.indexOf(f)] >= (it.cost[f] ?? 0));
-            return h('div', { class: 'item' + (has ? ' has' : '') },
-              h('div', { class: 'iicon' }, it.icon),
+            return tip(h('div', { class: 'item' + (has ? ' has' : '') },
+              h('div', { class: 'iicon', html: iconHtml(`icon.item.${it.id}`, it.icon) }),
               h('div', { class: 'idesc' }, h('b', null, it.name, it.cd ? h('small', null, ` · ${it.cd}s`) : null), h('span', null, it.desc), h('div', { class: 'costs' }, matsOf(it.cost))),
               h('button', { class: 'btn small', disabled: has || full || !afford, onclick: () => this.send({ c: 'craft', id: it.id }) }, has ? 'Tenés' : 'Fabricar'),
-            );
+            ), () => itemTip(it));
           }),
         )),
       );
@@ -516,11 +579,11 @@ export class Hud {
           return h('div', { class: 'mutrow' + (cur ? ' done' : '') },
             h('div', { class: 'mname' }, h('span', { class: 'k' }, s.toUpperCase()), `${a.icon} ${a.name}`, cur ? h('em', { class: 'mut ' + cur }, ` · ${ROUTE_FLAVOR[fam][cur]} (${ROUTE_NAMES[cur]})`) : null),
             h('div', { class: 'routes' }, (['tank', 'carry', 'support'] as Route[]).map((r) =>
-              h('button', {
-                class: 'btn small route ' + r, title: ROUTE_DESC[r],
+              tip(h('button', {
+                class: 'btn small route ' + r,
                 disabled: !!cur || lockedA || free <= 0 || me.mats[FAMILIES.indexOf(fam)] < MUTATION_COST,
                 onclick: () => this.send({ c: 'mutate', slot: s, route: r }),
-              }, `${ROUTE_FLAVOR[fam][r]}`, h('small', null, ROUTE_NAMES[r])))),
+              }, `${ROUTE_FLAVOR[fam][r]}`, h('small', null, ROUTE_NAMES[r])), () => routeTip(r, fam)))),
           );
         }),
         h('div', { class: 'routeinfo' }, (['tank', 'carry', 'support'] as Route[]).map((r) => h('div', null, h('b', { class: 'mut ' + r }, ROUTE_NAMES[r] + ': '), ROUTE_DESC[r]))),

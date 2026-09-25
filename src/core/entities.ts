@@ -1,5 +1,6 @@
 // Entidades de la simulación (solo viven en el host; los clientes ven "frames").
 import type { Obstacle } from './collision';
+import { AIR_DASHES } from './constants';
 import { emptyInput, type InputFrame } from './input';
 import type { Mods } from './mutations';
 import type { V3 } from './math';
@@ -35,6 +36,11 @@ export class Character implements MoveState {
   hitstun = 0;
   stun = 0;
   hitSlide = 0;
+  dashT = 0;
+  dashCd = 0;
+  dashX = 0;
+  dashZ = 0;
+  airDashes = AIR_DASHES;
 
   alive = true;
   respawnT = 0;
@@ -65,6 +71,7 @@ export class Character implements MoveState {
 
   level = 1;
   xp = 0;
+  ult = 0; // carga de ulti 0..1 (reglas con ultCharge)
   mats: Materials = emptyMats();
   passives: string[] = [];
   actives: (string | null)[] = [null, null, null];

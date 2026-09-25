@@ -57,6 +57,11 @@ export class AudioEngine {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /** ¿Hay un sample real cargado para este sonido? (para la galería de assets) */
+  hasSample(name: string) { return this.samples.has(name); }
+  /** ¿La música de este modo viene de un archivo? */
+  hasMusicFile(k: 'menu' | 'match') { return !!this.fileMusic[k]; }
+
   setVolumes(v: Partial<typeof this.volumes>) {
     Object.assign(this.volumes, v);
     this.applyVolumes();
@@ -545,6 +550,7 @@ export class AudioEngine {
       case 'stage': this.play('stage', vol * (e.id === localId ? 1 : 0.7), pan); break;
       case 'ring': this.play('ringout', Math.max(0.6, vol), pan); this.play('crowd', e.last ? 0.9 : 0.6); break;
       case 'jump': this.play(e.air ? 'airjump' : 'jump', vol * (e.id === localId ? 1 : 0.5), pan); break;
+      case 'dash': this.play('whoosh', vol * (e.id === localId ? 0.8 : 0.45), pan, 1.4); break;
       case 'land': this.play('land', vol * Math.min(1, e.p / 20), pan); break;
       case 'slam': this.play('slam', vol, pan); break;
       case 'body': this.play('hitbig', vol, pan); this.play('crowd', 0.35); break;

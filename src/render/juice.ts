@@ -1,10 +1,15 @@
-// "Casino visual": luces dinámicas, bolas de fuego, pilares de luz, haces, anillos HDR y textos flotantes.
-// Todo lo que brilla usa colores HDR (>1) para que el bloom lo haga resplandecer.
+// "Casino visual" contenido: luces de acento, bolas de energía, pilares de ring-out, anillos y arcos de golpe.
+// Reglas de estilo (pedido del jugador): NADA blanco y nada que sature la pantalla. Cada efecto lleva el
+// color de quien lo causa (equipo/héroe) o del material, con mezcla normal (no aditiva) para que diez
+// efectos superpuestos no se vuelvan un manchón blanco. El brillo HDR tiene tope (GLOW_MAX).
 import * as THREE from 'three';
 
-const hdr = (c: number, k: number) => new THREE.Color(c).multiplyScalar(k);
+/** Tope de brillo HDR de los efectos: el bloom solo los realza un poco. */
+export const GLOW_MAX = 1.35;
+const hdr = (c: number, k: number) => new THREE.Color(c).multiplyScalar(Math.min(GLOW_MAX, k));
 /** Las luces dinámicas son acento, no iluminación: si queman la imagen, bajar esto. */
-const LIGHT_SCALE = 0.18;
+const LIGHT_SCALE = 0.08;
+const LIGHT_MAX = 8;
 
 /** Pool fijo de luces puntuales (cantidad fija = sin recompilar shaders). */
 export class LightPool {
@@ -13,15 +18,15 @@ export class LightPool {
 
   constructor(n = 4) {
     for (let i = 0; i < n; i++) {
-      const l = new THREE.PointLight(0xffffff, 0, 12, 1.6);
+      const l = new THREE.PointLight(0xffd23f, 0, 12, 1.6);
       this.group.add(l);
       this.lights.push({ l, t: 1, dur: 1, peak: 0 });
     }
   }
 
-  /** intensity en "puntos de efecto" (escala propia); se convierte a candelas con LIGHT_SCALE. */
+  /** intensity en "puntos de efecto" (escala propia); se convierte con LIGHT_SCALE y tiene tope. */
   flash(x: number, y: number, z: number, color: number, intensity: number, dist = 12, dur = 0.35) {
-    intensity *= LIGHT_SCALE;
+    intensity = Math.min(LIGHT_MAX, intensity * LIGHT_SCALE);
     let slot = this.lights[0];
     for (const s of this.lights) if (s.t / s.dur > slot.t / slot.dur) slot = s;
     slot.l.position.set(x, y + 1, z);
@@ -41,66 +46,80 @@ export class LightPool {
   }
 }
 
-interface Glow { m: THREE.Mesh; t: number; dur: number; kind: 'ball' | 'pillar' | 'beam' | 'ring' | 'star'; s0: number; s1: number }
+type GlowKind = 'ball' | 'pillar' | 'beam' | 'ring' | 'star' | 'arc';
+interface Glow { m: THREE.Mesh; t: number; dur: number; kind: GlowKind; s0: number; s1: number; op: number }
 
-/** Mallas aditivas efímeras: bolas de fuego, pilares de ring-out, haces de spawn, anillos. */
+/** Mallas efímeras de color: bolas de energía, pilares de ring-out, haces, anillos y arcos. */
 export class GlowFX {
   group = new THREE.Group();
   private list: Glow[] = [];
-  private sphere = new THREE.SphereGeometry(1, 20, 14);
+  private sphere = new THREE.IcosahedronGeometry(1, 2);
   private cyl = new THREE.CylinderGeometry(1, 1, 1, 24, 1, true);
   private torus = new THREE.TorusGeometry(1, 0.08, 8, 48);
   private star = new THREE.OctahedronGeometry(1, 0);
 
-  private mat(color: number, k: number, additive = true) {
-    return new THREE.MeshBasicMaterial({ color: hdr(color, k), transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, toneMapped: false, side: THREE.DoubleSide });
+  private mat(color: number, k: number, opacity = 1) {
+    return new THREE.MeshBasicMaterial({ color: hdr(color, k), transparent: true, opacity, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
   }
 
-  fireball(x: number, y: number, z: number, r: number, color: number) {
-    const core = new THREE.Mesh(this.sphere, this.mat(0xffffff, 1.4, false));
-    core.position.set(x, y, z);
-    this.group.add(core);
-    this.list.push({ m: core, t: 0, dur: 0.14, kind: 'ball', s0: Math.min(r * 0.15, 0.6), s1: Math.min(r * 0.35, 1.2) });
-    const m = new THREE.Mesh(this.sphere, this.mat(color, 1.15, false));
-    m.position.set(x, y, z);
+  private push(m: THREE.Mesh, kind: GlowKind, dur: number, s0: number, s1: number, op: number) {
     this.group.add(m);
-    this.list.push({ m, t: 0, dur: 0.3, kind: 'ball', s0: Math.min(r * 0.25, 1), s1: Math.min(r * 0.7, 2.6) });
+    this.list.push({ m, t: 0, dur, kind, s0, s1, op });
   }
 
+  /** Bola de energía que se expande y se desvanece (explosiones). */
+  fireball(x: number, y: number, z: number, r: number, color: number) {
+    const m = new THREE.Mesh(this.sphere, this.mat(color, 1.15, 0.5));
+    m.position.set(x, y, z);
+    this.push(m, 'ball', 0.3, Math.min(r * 0.25, 1), Math.min(r * 0.7, 2.6), 0.5);
+  }
+
+  /** Columna de ring-out: dos cilindros concéntricos del color del equipo (nunca blanco). */
   pillar(x: number, z: number, color: number, height = 40, radius = 2.2, dur = 1.3) {
-    const m = new THREE.Mesh(this.cyl, this.mat(color, 1.8));
+    const m = new THREE.Mesh(this.cyl, this.mat(color, 1.1, 0.45));
     m.position.set(x, -9 + height / 2, z);
     m.scale.set(radius, height, radius);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur, kind: 'pillar', s0: radius, s1: radius * 0.1 });
-    const inner = new THREE.Mesh(this.cyl, this.mat(0xffffff, 2.2));
+    this.push(m, 'pillar', dur, radius, radius * 0.1, 0.45);
+    const inner = new THREE.Mesh(this.cyl, this.mat(color, 1.35, 0.7));
     inner.position.copy(m.position);
     inner.scale.set(radius * 0.35, height, radius * 0.35);
-    this.group.add(inner);
-    this.list.push({ m: inner, t: 0, dur: dur * 0.6, kind: 'pillar', s0: radius * 0.35, s1: 0.02 });
+    this.push(inner, 'pillar', dur * 0.6, radius * 0.35, 0.02, 0.7);
   }
 
   beam(x: number, y: number, z: number, color: number) {
-    const m = new THREE.Mesh(this.cyl, this.mat(color, 2.5));
+    const m = new THREE.Mesh(this.cyl, this.mat(color, 1.25, 0.55));
     m.position.set(x, y + 10, z);
     m.scale.set(0.9, 20, 0.9);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur: 0.8, kind: 'beam', s0: 0.9, s1: 0.05 });
+    this.push(m, 'beam', 0.8, 0.9, 0.05, 0.55);
   }
 
-  ring(x: number, y: number, z: number, r: number, color: number, dur = 0.5, k = 3) {
-    const m = new THREE.Mesh(this.torus, this.mat(color, k));
+  ring(x: number, y: number, z: number, r: number, color: number, dur = 0.5, k = 1.25) {
+    const m = new THREE.Mesh(this.torus, this.mat(color, k, 0.85));
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, y + 0.15, z);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur, kind: 'ring', s0: r * 0.15, s1: r });
+    this.push(m, 'ring', dur, r * 0.15, r, 0.85);
   }
 
+  /** Estrellita geométrica que gira y se achica (impactos chicos, juntar cosas). */
   sparkle(x: number, y: number, z: number, color: number, size = 0.5) {
-    const m = new THREE.Mesh(this.star, this.mat(color, 4));
+    const m = new THREE.Mesh(this.star, this.mat(color, 1.3, 0.95));
     m.position.set(x, y, z);
-    this.group.add(m);
-    this.list.push({ m, t: 0, dur: 0.25, kind: 'star', s0: size, s1: size * 0.1 });
+    this.push(m, 'star', 0.25, size, size * 0.1, 0.95);
+  }
+
+  /**
+   * Estela del puño: una cinta curva que sigue el arco del golpe (no un cono).
+   * yaw = hacia dónde mira el personaje; from/to = ángulos relativos (0 = al frente, + = a la derecha).
+   */
+  swoosh(x: number, y: number, z: number, yaw: number, radius: number, from: number, to: number, color: number, width = 0.16, dur = 0.16) {
+    // RingGeometry: θ = π/2 es "al frente" una vez girada; θ crece hacia el lado +X del modelo.
+    const a0 = Math.min(from, to), len = Math.abs(to - from);
+    const g = new THREE.RingGeometry(Math.max(0.05, radius - width), radius, 18, 1, Math.PI / 2 + a0, len);
+    const m = new THREE.Mesh(g, this.mat(color, 1.3, 0.95));
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = yaw + Math.PI;
+    m.position.set(x, y, z);
+    this.push(m, 'arc', dur, 1, 1.1, 0.95);
   }
 
   update(dt: number) {
@@ -110,22 +129,29 @@ export class GlowFX {
       const mat = g.m.material as THREE.MeshBasicMaterial;
       if (g.kind === 'ball') {
         g.m.scale.setScalar(g.s0 + (g.s1 - g.s0) * (1 - (1 - k) * (1 - k)));
-        mat.opacity = 0.6 * (1 - k) * (1 - k);
+        mat.opacity = g.op * (1 - k) * (1 - k);
       } else if (g.kind === 'pillar' || g.kind === 'beam') {
         const r = g.s0 + (g.s1 - g.s0) * k * k;
         g.m.scale.x = g.m.scale.z = r;
-        mat.opacity = 1 - k * k;
+        mat.opacity = g.op * (1 - k * k);
       } else if (g.kind === 'ring') {
         g.m.scale.setScalar(g.s0 + (g.s1 - g.s0) * Math.sqrt(k));
-        mat.opacity = 1 - k;
+        mat.opacity = g.op * (1 - k);
+      } else if (g.kind === 'arc') {
+        g.m.scale.setScalar(g.s0 + (g.s1 - g.s0) * k);
+        mat.opacity = g.op * (1 - k);
       } else {
         g.m.scale.setScalar(g.s0 + (g.s1 - g.s0) * k);
         g.m.rotation.y += dt * 12;
-        mat.opacity = 1 - k;
+        mat.opacity = g.op * (1 - k);
       }
     }
     const done = this.list.filter((g) => g.t >= g.dur);
-    for (const g of done) { g.m.removeFromParent(); (g.m.material as THREE.Material).dispose(); }
+    for (const g of done) {
+      g.m.removeFromParent();
+      (g.m.material as THREE.Material).dispose();
+      if (g.kind === 'arc') g.m.geometry.dispose();
+    }
     if (done.length) this.list = this.list.filter((g) => g.t < g.dur);
   }
 

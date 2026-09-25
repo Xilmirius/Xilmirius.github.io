@@ -4,7 +4,14 @@ import { BTN } from '../core/input';
 const KEYMAP: Record<string, number> = {
   Space: BTN.JUMP, KeyQ: BTN.Q, KeyE: BTN.E, KeyF: BTN.F, KeyR: BTN.R,
   Digit1: BTN.I1, Digit2: BTN.I2, Digit3: BTN.I3, KeyV: BTN.REPAIR,
+  ShiftLeft: BTN.DASH, ShiftRight: BTN.DASH,
 };
+
+/** Teclas que se "apuntan": mientras se mantienen, se muestra el área; al soltarlas sale la habilidad. */
+export const AIM_KEYS = ['KeyQ', 'KeyE', 'KeyF', 'KeyR', 'Digit1', 'Digit2', 'Digit3'];
+
+/** Clics sobre estos elementos son de la interfaz, no del juego. */
+const UI_TARGET = 'button, input, select, textarea, a, .forge, .results, .modal-wrap, .board, .gallery';
 
 export class LocalInput {
   keys = new Set<string>();
@@ -19,10 +26,11 @@ export class LocalInput {
     window.addEventListener('keydown', this.kd);
     window.addEventListener('keyup', this.ku);
     window.addEventListener('blur', this.blur);
-    el.addEventListener('mousedown', this.md);
+    // En window (no solo el canvas): así pegar con el cursor encima del HUD también cuenta.
+    window.addEventListener('mousedown', this.md);
     window.addEventListener('mouseup', this.mu);
     window.addEventListener('mousemove', this.mm);
-    el.addEventListener('contextmenu', this.cm);
+    window.addEventListener('contextmenu', this.cm);
   }
 
   private typing(e: Event) {
@@ -30,11 +38,18 @@ export class LocalInput {
     return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
   }
 
+  private uiTarget(e: Event) {
+    const t = e.target as HTMLElement | null;
+    return !!t?.closest?.(UI_TARGET);
+  }
+
   private kd = (e: KeyboardEvent) => {
     if (this.typing(e)) return;
     if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
     if (!e.repeat) this.onKey(e.code);
     if (!this.enabled) return;
+    // Re-agregar al final: la última tecla apretada es la que se está apuntando.
+    this.keys.delete(e.code);
     this.keys.add(e.code);
     const b = KEYMAP[e.code];
     if (b) this.latch |= b;
@@ -43,7 +58,7 @@ export class LocalInput {
   private ku = (e: KeyboardEvent) => { this.keys.delete(e.code); };
   private blur = () => { this.keys.clear(); this.mouse.left = this.mouse.right = false; };
   private md = (e: MouseEvent) => {
-    if (!this.enabled) return;
+    if (!this.enabled || this.uiTarget(e)) return;
     if (e.button === 0) { this.mouse.left = true; this.latch |= BTN.BASIC; }
     if (e.button === 2) { this.mouse.right = true; this.latch |= BTN.PUSH; }
   };
@@ -58,9 +73,15 @@ export class LocalInput {
     this.mouse.ndcX = (this.mouse.x / r.width) * 2 - 1;
     this.mouse.ndcY = -(this.mouse.y / r.height) * 2 + 1;
   };
-  private cm = (e: Event) => e.preventDefault();
+  private cm = (e: Event) => { if (!this.typing(e) && !this.uiTarget(e)) e.preventDefault(); };
 
-  get shift() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
+  /** Tecla de habilidad/ítem que se está manteniendo (la última apretada), o null. */
+  aimKey(): string | null {
+    if (!this.enabled) return null;
+    let k: string | null = null;
+    for (const c of this.keys) if (AIM_KEYS.includes(c)) k = c;
+    return k;
+  }
 
   /** Movimiento (-1..1) y botones. Los toques rápidos se registran aunque duren menos de un tick. */
   sample(): { mx: number; mz: number; b: number } {
@@ -85,9 +106,9 @@ export class LocalInput {
     window.removeEventListener('keydown', this.kd);
     window.removeEventListener('keyup', this.ku);
     window.removeEventListener('blur', this.blur);
-    this.el.removeEventListener('mousedown', this.md);
+    window.removeEventListener('mousedown', this.md);
     window.removeEventListener('mouseup', this.mu);
     window.removeEventListener('mousemove', this.mm);
-    this.el.removeEventListener('contextmenu', this.cm);
+    window.removeEventListener('contextmenu', this.cm);
   }
 }

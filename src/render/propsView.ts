@@ -1,5 +1,6 @@
 // Destructibles del mapa, construcciones y trozos de material.
 import * as THREE from 'three';
+import { assetModel } from '../assets/registry';
 import { DESTRUCT_DEF } from '../core/entities';
 import { Rng } from '../core/rng';
 import type { DestructSpawn } from '../core/terrain';
@@ -23,7 +24,19 @@ function rockGeo(r: Rng, s: number) {
   return g;
 }
 
+/** Cobertura destructible: el GLB prop.<familia> si existe, si no la versión procedural. */
 export function buildDestructMesh(kind: Family, seed: number): THREE.Group {
+  const file = assetModel(`prop.${kind}`);
+  if (file) {
+    const g = new THREE.Group();
+    g.add(file);
+    g.rotation.y = (seed * 1.7) % (Math.PI * 2);
+    return g;
+  }
+  return buildDestructProcedural(kind, seed);
+}
+
+export function buildDestructProcedural(kind: Family, seed: number): THREE.Group {
   const r = new Rng(seed * 13 + 7);
   const g = new THREE.Group();
   const def = DESTRUCT_DEF[kind];
@@ -74,7 +87,7 @@ export function buildDestructMesh(kind: Family, seed: number): THREE.Group {
     const b2 = add(new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10), mat));
     b2.position.set(0.45, 0.25, 0.3);
     for (let i = 0; i < 4; i++) {
-      const bub = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xe0ffd0, transparent: true, opacity: 0.7 }));
+      const bub = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xb8ff9a, transparent: true, opacity: 0.7 }));
       bub.position.set(r.range(-0.3, 0.3), r.range(0.3, def.h - 0.2), r.range(-0.3, 0.3));
       g.add(bub);
     }
@@ -140,7 +153,7 @@ export class StructuresView {
       seen.add(s.id);
       let v = this.map.get(s.id);
       if (!v) {
-        v = this.build(s, teamColor(s.tm));
+        v = buildStructureMesh(s.k, s.rot, teamColor(s.tm), this.hazard);
         v.born = time;
         this.group.add(v.g);
         this.map.set(s.id, v);
@@ -161,44 +174,54 @@ export class StructuresView {
     }
   }
 
-  private build(s: StructFrame, color: number) {
-    const g = new THREE.Group();
-    if (s.k === 'turret') {
-      const mat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: tg() });
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.7, 10), new THREE.MeshToonMaterial({ color: 0x6b7784, gradientMap: tg() }));
-      base.position.y = 0.35;
-      const head = new THREE.Group();
-      const hb = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.5), mat);
-      mat.color.set(0xffc94a);
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.6, 8), new THREE.MeshToonMaterial({ color: 0x333a40, gradientMap: tg() }));
-      barrel.rotation.x = Math.PI / 2;
-      barrel.position.z = 0.35;
-      const light = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ color }));
-      light.position.y = 0.22;
-      head.add(hb, barrel, light);
-      head.position.y = 0.9;
-      for (const m of [base, hb]) { m.castShadow = true; }
-      g.add(base, head);
-      return { g, head, mat, born: 0 };
-    }
-    const stone = s.k === 'stonewall';
-    const mat = stone ? new THREE.MeshToonMaterial({ color: 0xb0a090, gradientMap: tg() }) : this.hazard.clone();
-    const m = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 1.1), mat);
-    m.position.y = 0.9;
-    m.castShadow = true;
-    m.receiveShadow = true;
-    g.add(m);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.12, 1.16), new THREE.MeshBasicMaterial({ color }));
-    cap.position.y = 1.8;
-    g.add(cap);
-    g.rotation.y = s.rot;
-    return { g, mat, born: 0 };
-  }
-
   clear() {
     for (const v of this.map.values()) v.g.removeFromParent();
     this.map.clear();
   }
+}
+
+/** Construcción (muro/torreta): el GLB struct.<tipo> si existe, si no la versión procedural. */
+export function buildStructureMesh(kind: string, rot: number, color: number, hazard?: THREE.Material): { g: THREE.Group; head?: THREE.Object3D; mat: THREE.MeshToonMaterial; born: number } {
+  const file = assetModel(`struct.${kind}`);
+  if (file) {
+    const g = new THREE.Group();
+    g.add(file);
+    g.rotation.y = kind === 'turret' ? 0 : rot;
+    // El color de equipo se aplica a los materiales llamados "team" (convención para los GLB).
+    file.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (m && m.name === 'team') m.color?.setHex(color); });
+    return { g, head: file.getObjectByName('head') ?? undefined, mat: new THREE.MeshToonMaterial(), born: 0 };
+  }
+  const g = new THREE.Group();
+  if (kind === 'turret') {
+    const mat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: tg() });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.7, 10), new THREE.MeshToonMaterial({ color: 0x6b7784, gradientMap: tg() }));
+    base.position.y = 0.35;
+    const head = new THREE.Group();
+    const hb = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.5), mat);
+    mat.color.set(0xffc94a);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.6, 8), new THREE.MeshToonMaterial({ color: 0x333a40, gradientMap: tg() }));
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 0.35;
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ color }));
+    light.position.y = 0.22;
+    head.add(hb, barrel, light);
+    head.position.y = 0.9;
+    for (const m of [base, hb]) { m.castShadow = true; }
+    g.add(base, head);
+    return { g, head, mat, born: 0 };
+  }
+  const stone = kind === 'stonewall';
+  const mat = stone ? new THREE.MeshToonMaterial({ color: 0xb0a090, gradientMap: tg() }) : (hazard ?? new THREE.MeshToonMaterial({ map: hazardStripes(), gradientMap: tg() })).clone() as THREE.MeshToonMaterial;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 1.1), mat);
+  m.position.y = 0.9;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  g.add(m);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.12, 1.16), new THREE.MeshBasicMaterial({ color }));
+  cap.position.y = 1.8;
+  g.add(cap);
+  g.rotation.y = rot;
+  return { g, mat, born: 0 };
 }
 
 // ───────────── trozos de material (simulados localmente, cosméticos) ─────────────
@@ -207,6 +230,8 @@ export interface PickupVis { id: number; mat: number; pos: THREE.Vector3; vel: T
 
 export function pickupMesh(mat: number): THREE.Object3D {
   const fam = FAMILIES[mat] as Family;
+  const file = assetModel(`pickup.${fam}`);
+  if (file) return file;
   const color = FAMILY_COLORS[fam];
   let geo: THREE.BufferGeometry;
   if (fam === 'stone') geo = new THREE.DodecahedronGeometry(0.2);

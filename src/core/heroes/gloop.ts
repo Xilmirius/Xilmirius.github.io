@@ -28,7 +28,7 @@ export const gloop: HeroDef = {
   },
   abilities: {
     q: {
-      name: 'Charco', icon: '🫧', cd: 8, unlock: 1, range: 10, aim: 'point', radius: 3, bot: 'zone',
+      name: 'Charco', icon: '🫧', cd: 8, unlock: 1, range: 10, aim: 'point', radius: 3, shape: { k: 'circle', r: 3 }, bot: 'zone',
       desc: 'Tira un charco pegajoso: los enemigos adentro van 55% más lentos y se derriten de a poco. Tus aliados van más rápido.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 10);
@@ -49,7 +49,7 @@ export const gloop: HeroDef = {
       },
     },
     e: {
-      name: 'Rebote', icon: '🏀', cd: 10, unlock: 2, range: 14, aim: 'dir', bot: 'engage',
+      name: 'Rebote', icon: '🏀', cd: 10, unlock: 2, range: 14, aim: 'dir', shape: { k: 'line', w: 1.2 }, bot: 'engage',
       desc: 'Te hacés pelota y rodás a toda velocidad rebotando en las paredes. Atropellás enemigos y no te pueden empujar.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 10);
@@ -59,7 +59,7 @@ export const gloop: HeroDef = {
       },
     },
     f: {
-      name: 'Burbuja', icon: '🛡️', cd: 12, unlock: 3, range: 8, aim: 'ally', bot: 'buff',
+      name: 'Burbuja', icon: '🛡️', cd: 12, unlock: 3, range: 8, aim: 'ally', shape: { k: 'point', r: 1 }, bot: 'buff',
       desc: 'Envuelve al aliado más cercano al cursor (o a vos) en una burbuja que absorbe 35 de heat y reduce el empuje.',
       cast(sim, ch, ax, az, m) {
         const t = sim.allyNearPoint(ch, ax, az, 8) ?? ch;
@@ -67,7 +67,7 @@ export const gloop: HeroDef = {
       },
     },
     r: {
-      name: 'Marea', icon: '🌊', cd: 45, unlock: 5, range: 16, aim: 'dir', bot: 'finisher',
+      name: 'Marea', icon: '🌊', cd: 45, unlock: 5, range: 16, aim: 'dir', shape: { k: 'line', w: 4.8 }, bot: 'finisher',
       desc: 'Una ola de goo que avanza arrastrando a todos los enemigos. Ideal para sacarlos del mapa.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 16);

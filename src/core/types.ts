@@ -17,7 +17,7 @@ export const FAMILY_COLORS: Record<Family, number> = {
 export const FAMILY_CRACK: Record<Family, number> = {
   stone: 0xff6a1a,
   metal: 0xff3b2f,
-  crystal: 0xffffff,
+  crystal: 0xb070ff,
   goo: 0x1f5c14,
 };
 
@@ -30,11 +30,13 @@ export type Route = 'tank' | 'carry' | 'support';
 export const ROUTE_NAMES: Record<Route, string> = { tank: 'Tanque', carry: 'Carry', support: 'Support' };
 
 export type ModeId = 'stock' | 'kills' | 'koth';
+export type { RulesetId } from './rules';
 export type HeroId = 'canto' | 'prisma' | 'gloop' | 'remache';
 export const HERO_IDS: HeroId[] = ['canto', 'prisma', 'gloop', 'remache'];
 
 export interface MatchSettings {
   mode: ModeId;
+  rules: import('./rules').RulesetId; // sistemas prendidos (ver rules.ts)
   map: string;
   teams: 'teams' | 'ffa';
   lives: number; // stock
@@ -48,6 +50,7 @@ export interface MatchSettings {
 
 export const DEFAULT_SETTINGS: MatchSettings = {
   mode: 'stock',
+  rules: 'brawl',
   map: 'cantera',
   teams: 'teams',
   lives: 3,

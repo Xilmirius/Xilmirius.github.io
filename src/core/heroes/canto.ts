@@ -24,7 +24,7 @@ export const canto: HeroDef = {
   },
   abilities: {
     q: {
-      name: 'Embestida', icon: '🐏', cd: 7, unlock: 1, range: 8, aim: 'dir', bot: 'engage',
+      name: 'Embestida', icon: '🐏', cd: 7, unlock: 1, range: 8, aim: 'dir', shape: { k: 'line', w: 1.2 }, bot: 'engage',
       desc: 'Carga hacia adelante. El primer enemigo que toca queda aturdido y sale despedido. Rompe lo que encuentra.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 8);
@@ -38,7 +38,7 @@ export const canto: HeroDef = {
       },
     },
     e: {
-      name: 'Rompemuros', icon: '🔨', cd: 9, unlock: 2, range: 4, aim: 'dir', bot: 'poke',
+      name: 'Rompemuros', icon: '🔨', cd: 9, unlock: 2, range: 4, aim: 'dir', shape: { k: 'cone', deg: 70 }, bot: 'poke',
       desc: 'Golpe al piso en cono. Destroza cobertura y baldosas frágiles, y empuja fuerte.',
       cast(sim, ch, _ax, _az, m) {
         sim.windup(ch, 0.22, () => {
@@ -47,7 +47,7 @@ export const canto: HeroDef = {
       },
     },
     f: {
-      name: 'Piel de roca', icon: '🪨', cd: 14, unlock: 3, range: 0, aim: 'self', bot: 'buff',
+      name: 'Piel de roca', icon: '🪨', cd: 14, unlock: 3, range: 0, aim: 'self', shape: { k: 'self', r: 0 }, bot: 'buff',
       desc: 'Te endurecés: 2.2 s sin knockback y 35% menos heat.',
       cast(sim, ch, _ax, _az, m) {
         const d = 2.2 * m.dur;
@@ -58,7 +58,7 @@ export const canto: HeroDef = {
       },
     },
     r: {
-      name: 'Avalancha', icon: '⛰️', cd: 45, unlock: 5, range: 11, aim: 'point', radius: 4, bot: 'finisher',
+      name: 'Avalancha', icon: '⛰️', cd: 45, unlock: 5, range: 11, aim: 'point', radius: 4, shape: { k: 'circle', r: 4 }, bot: 'finisher',
       desc: 'Salto enorme al punto marcado. Al caer, onda sísmica que lanza a todos y abre agujeros en el piso frágil.',
       cast(sim, ch, ax, az, m) {
         const a = sim.clampAim(ch, ax, az, 11);
