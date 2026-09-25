@@ -8,6 +8,7 @@ import { DT, KILL_Y, LEVEL_H, STAGE_AT, ULT_PER_HEAT } from '../src/core/constan
 import { emptyInput, BTN } from '../src/core/input';
 import { MAPS } from '../src/core/maps';
 import { DASH_IDLE, defaultMoveParams, newMoveOut, stepMove, type MoveState } from '../src/core/movement';
+import { NO_MODS } from '../src/core/mutations';
 import { Simulation } from '../src/core/sim';
 import { buildWorldFrame, decodeWorld, encodeWorld, buildMeFrame } from '../src/core/snapshot';
 import { Terrain } from '../src/core/terrain';
@@ -290,6 +291,33 @@ describe('eventos con tick', () => {
     expect(typeof msgs[0].tx).toBe('string');
     expect(msgs[0].tx).toContain('30');
     expect(typeof msgs[0].t).toBe('number');
+  });
+});
+
+describe('construcciones', () => {
+  it('una torreta o un muro que aparece encima tuyo no te deja trabado', () => {
+    for (const kind of ['turret', 'wall'] as const) {
+      for (const [ox, oz] of [[0.6, 0], [-0.55, 0.3], [0, 0.7], [0.2, -0.65]]) {
+        const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, map: 'cantera' }, roster: roster(2, ['remache', 'canto']), seed: 4 });
+        sim.phase = 'play';
+        const [a] = sim.chars;
+        a.pos = { x: -8, y: 0, z: 2 }; a.ppos = { ...a.pos };
+        for (let i = 0; i < 5; i++) sim.step();
+        if (kind === 'turret') sim.buildTurret(a, a.pos.x + ox, a.pos.z + oz, 70, 8, NO_MODS);
+        else sim.buildWall(a, 'wall', 'metal', a.pos.x + ox, a.pos.z + oz, 1, 0, 60, 8, 3);
+        // Probar las cuatro direcciones: en alguna tiene que poder salir (y alejarse bastante).
+        let best = 0;
+        for (const [mx, mz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const start = { ...a.pos };
+          a.input = { ...emptyInput(), mx, mz, ax: a.pos.x + mx, az: a.pos.z + mz };
+          for (let i = 0; i < 40; i++) sim.step();
+          best = Math.max(best, Math.hypot(a.pos.x - start.x, a.pos.z - start.z));
+          a.input = emptyInput();
+        }
+        expect(best, `${kind} en (${ox}, ${oz})`).toBeGreaterThan(1.5);
+        expect(sim.cw.blockAt(a.pos.x, a.pos.z, 0.5, a.pos.y)?.obstacle ?? null, `${kind} sigue encimado`).toBe(null);
+      }
+    }
   });
 });
 

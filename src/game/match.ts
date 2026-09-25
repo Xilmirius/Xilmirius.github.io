@@ -25,6 +25,7 @@ import type { HostSession } from '../net/host';
 import { GameView } from '../render/gameView';
 import { Hud } from '../ui/hud';
 import type { CastCheck, CastKey } from './castControl';
+import { actionOf, keyName, onBindsChange } from './keybinds';
 import { LocalInput } from './localInput';
 import { applyMatch } from './profile';
 import { Ticker } from './ticker';
@@ -76,6 +77,7 @@ export class MatchRunner {
   private teamColor = TEAM_COLORS[0];
   private heartT = 0;
   private lowFpsT = 0;
+  private offBinds: () => void = () => {};
   /** Centro de tu base (Asedio: la forja solo funciona ahí). */
   private baseAt: { x: number; z: number } | null = null;
 
@@ -103,6 +105,7 @@ export class MatchRunner {
     audio.announcer = prefs.announcer;
     this.input = new LocalInput(this.view.renderer.domElement, (k) => this.castCheck(k), (_k, why) => this.castDeny(why));
     this.input.cast.quick = prefs.quickCast;
+    this.offBinds = onBindsChange(() => this.hud.refreshKeys());
     this.input.onKey = (code) => this.onKey(code);
     this.frames = session.isHost ? (session as HostSession).frames : new FrameBuffer();
     this.ticker = new Ticker(() => this.step());
@@ -125,8 +128,9 @@ export class MatchRunner {
   private onResize = () => this.view.resize();
 
   private onKey(code: string) {
-    if (code === 'KeyC' && this.rules.crafting) this.hud.toggleForge();
-    else if (code === 'Tab') { this.boardHeld = true; this.hud.showBoard(true); }
+    const a = actionOf(code);
+    if (a === 'forge' && this.rules.crafting) this.hud.toggleForge();
+    else if (a === 'board') { this.boardHeld = true; this.hud.showBoard(true); }
     else if (code === 'Escape') {
       if (this.input.cast.cancel()) return;
       if (this.hud.forgeOpen) this.hud.toggleForge(false);
@@ -135,7 +139,7 @@ export class MatchRunner {
   }
 
   private onKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Tab' && this.boardHeld) { this.boardHeld = false; this.hud.showBoard(false); }
+    if (actionOf(e.code) === 'board' && this.boardHeld) { this.boardHeld = false; this.hud.showBoard(false); }
   };
 
   private command(c: Command) {
@@ -281,7 +285,7 @@ export class MatchRunner {
     if (!this.rules.crafting) return 'Estas reglas no tienen ítems';
     const id = me.act[n];
     const it = id ? ITEM_BY_ID[id] : null;
-    if (!it) return `Espacio ${n + 1} vacío: forjá un ítem activo (C)`;
+    if (!it) return `Espacio ${n + 1} vacío: forjá un ítem activo (${keyName('forge')})`;
     const cd = me.cd[SLOTS.indexOf(k as 'i1' | 'i2' | 'i3')];
     if (cd > ARM_EARLY) return `${it.name}: listo en ${Math.ceil(cd)} s`;
     return !it.shape || it.shape.k === 'self' ? 'now' : 'aim';
@@ -424,6 +428,7 @@ export class MatchRunner {
     cancelAnimationFrame(this.raf);
     this.ticker.stop();
     this.input.dispose();
+    this.offBinds();
     this.hud.dispose();
     this.view.dispose();
     window.removeEventListener('resize', this.onResize);

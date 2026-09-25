@@ -3,6 +3,7 @@ import { audio } from './audio/audio';
 import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs } from './config';
 import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
+import { ACTIONS, applyPreset, currentPreset, getBinds, keyLabel, keyName, PRESETS, RESERVED, setBind } from './game/keybinds';
 import { ARENA_MAP_IDS, MAPS } from './core/maps';
 import { MODE_INFO } from './core/modes';
 import type { LobbyState, MatchInit, MatchResultInfo } from './core/protocol';
@@ -16,6 +17,7 @@ import { ClientSession } from './net/client';
 import { HostSession, MAX_PLAYERS } from './net/host';
 import { createDirectory, type Directory, type RoomInfo } from './net/signaling';
 import { clear, colorHex, fmtTime, h, modal, toast } from './ui/dom';
+import { fullscreenButton, fullscreenSupported, isFullscreen, toggleFullscreen } from './ui/fullscreen';
 import { HeroPreview } from './ui/heroPreview';
 import { THEMES } from './render/themes';
 import { rulesFor, RULESETS, RULESET_IDS, unlockLevel, type RulesetId } from './core/rules';
@@ -117,10 +119,11 @@ export class App {
           h('button', { class: 'btn ghost', onclick: () => this.showAchievements() }, '🏅 Logros'),
           h('button', { class: 'btn ghost', onclick: () => this.showSettings() }, '⚙️ Ajustes'),
           h('button', { class: 'btn ghost', title: 'Todo lo que hoy es procedural y cómo reemplazarlo por archivos', onclick: () => openGallery() }, '🧩 Assets'),
+          fullscreenButton(),
         ),
         netInfo,
       ),
-      h('div', { class: 'credits' }, 'WASD mover · Espacio saltar · Clic pegar · Clic derecho empujar (mantené) · Q E F R apuntar y clic lanzar'),
+      h('div', { class: 'credits' }, `${keyName('up')}${keyName('left')}${keyName('down')}${keyName('right')} mover · ${keyName('jump')} saltar · Clic pegar · Clic derecho empujar (mantené) · ${keyName('q')} ${keyName('e')} ${keyName('f')} ${keyName('r')} apuntar y clic lanzar`),
     ));
     if (!getPrefs().seenHelp) { savePrefs({ seenHelp: true }); setTimeout(() => this.showHelp(), 600); }
     if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
@@ -307,7 +310,7 @@ export class App {
         ...(['q', 'e', 'f', 'r'] as const).map((k) => {
           const a = sel.abilities[k];
           const meta = k === 'r' && rules.ultCharge ? ' (se carga pegando)' : rules.progression ? ` (nv ${unlockLevel(rules, a)}, ${a.cd}s)` : ` (${a.cd}s)`;
-          return tip(h('li', null, h('b', null, `${k.toUpperCase()} · ${a.icon} ${a.name}`, h('small', null, meta), ': '), a.desc), () => abilityTip(sel.id, k, rules));
+          return tip(h('li', null, h('b', null, `${keyName(k)} · ${a.icon} ${a.name}`, h('small', null, meta), ': '), a.desc), () => abilityTip(sel.id, k, rules));
         }),
       ),
     );
@@ -406,6 +409,7 @@ export class App {
     const close = modal('Pausa', body, [
       { label: 'Seguir jugando', kind: 'primary', onClick: () => { this.escMenu = null; } },
       { label: '⚙️ Ajustes', onClick: () => { this.escMenu = null; this.showSettings(); } },
+      { label: isFullscreen() ? '🗗 Salir de pantalla completa' : '⛶ Pantalla completa', onClick: () => { this.escMenu = null; void toggleFullscreen(); } },
       { label: isHost ? 'Cerrar sala' : 'Salir', kind: 'danger', onClick: () => { this.escMenu = null; void this.leave(); } },
     ]);
     this.escMenu = close;
@@ -475,21 +479,23 @@ export class App {
   }
 
   private showHelp() {
+    const K = keyName;
     const body = h('div', { class: 'help' });
     body.innerHTML = `
       <div class="help-grid">
         <div>
           <h4>Controles</h4>
           <table>
-            <tr><td><kbd>W A S D</kbd></td><td>Moverte (hacia donde mirás es más rápido)</td></tr>
+            <tr><td><kbd>${K('up')} ${K('left')} ${K('down')} ${K('right')}</kbd></td><td>Moverte (hacia donde mirás es más rápido)</td></tr>
             <tr><td><kbd>Mouse</kbd></td><td>Apuntar: siempre mirás al cursor</td></tr>
-            <tr><td><kbd>Espacio</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
+            <tr><td><kbd>${K('jump')}</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
             <tr><td><kbd>Clic</kbd></td><td>Ataque básico: <b>rompe</b> (suma heat)</td></tr>
             <tr><td><kbd>Clic derecho</kbd></td><td><b>Empujón</b>: mantené para cargar, soltá para <b>sacar</b></td></tr>
-            <tr><td><kbd>Q E F</kbd> <kbd>R</kbd></td><td>Habilidades y ulti: la tecla <b>apunta</b> (ves el área), <b>clic izquierdo</b> la lanza, <b>clic derecho</b> o <kbd>Esc</kbd> cancela. Las que no apuntan salen al toque.</td></tr>
-            <tr><td><kbd>Shift</kbd></td><td><b>Dash</b>: ráfaga corta (en el aire, después del segundo salto)</td></tr>
-            <tr><td><kbd>Tab</kbd></td><td>Tabla de jugadores</td></tr>
-            <tr><td colspan="2" class="muted small">Con reglas <b>Completo</b> o en el <b>Asedio</b>: <kbd>1 2 3</kbd> ítems activos · <kbd>C</kbd> forja · <kbd>V</kbd> reparar · <kbd>B</kbd> volver a la base (Asedio)</td></tr>
+            <tr><td><kbd>${K('q')} ${K('e')} ${K('f')}</kbd> <kbd>${K('r')}</kbd></td><td>Habilidades y ulti (<kbd>${K('r')}</kbd>): la tecla <b>apunta</b> (ves el área), <b>clic izquierdo</b> la lanza, <b>clic derecho</b> o <kbd>Esc</kbd> cancela. Las que no apuntan salen al toque.</td></tr>
+            <tr><td><kbd>${K('dash')}</kbd></td><td><b>Dash</b>: ráfaga corta (en el aire, después del segundo salto)</td></tr>
+            <tr><td><kbd>${K('board')}</kbd></td><td>Tabla de jugadores</td></tr>
+            <tr><td colspan="2" class="muted small">Con reglas <b>Completo</b> o en el <b>Asedio</b>: <kbd>${K('i1')} ${K('i2')} ${K('i3')}</kbd> ítems activos · <kbd>${K('forge')}</kbd> forja · <kbd>${K('repair')}</kbd> reparar · <kbd>${K('recall')}</kbd> volver a la base (Asedio)</td></tr>
+            <tr><td colspan="2" class="muted small">Todas las teclas se cambian en <b>⚙️ Ajustes → Controles</b>.</td></tr>
           </table>
           <p class="muted small">Pasá el mouse por cualquier ícono (habilidades, ítems, tu cuerpo, héroes) para ver qué hace.</p>
         </div>
@@ -503,7 +509,7 @@ export class App {
           <p><b>🧬 Completo</b>: niveles, materiales, forja de ítems y mutaciones, reparación.</p>
           <h4>🏰 Asedio (MOBA)</h4>
           <p>Dos bases unidas por puentes sobre el vacío: <b>1 línea</b> hasta 2v2, <b>2 líneas</b> en 3v3. Cada 24 s sale una oleada de esbirros; acompañala, rematá esbirros (te dan su material y sueltan un trozo) y rompé las torres rivales cuando tu oleada las tanquea. Gana quien destruye el <b>núcleo</b> rival.</p>
-          <p>No hay barra de vida tampoco acá: te agrietás y tu base te enfría. <kbd>B</kbd> te lleva a casa (4 s quieto) y la forja solo funciona ahí. El <b>Coloso</b> del centro bendice a los esbirros de quien lo derriba.</p>
+          <p>No hay barra de vida tampoco acá: te agrietás y tu base te enfría. <kbd>${K('recall')}</kbd> te lleva a casa (4 s quieto) y la forja solo funciona ahí. El <b>Coloso</b> del centro bendice a los esbirros de quien lo derriba.</p>
           <p>Ojo: el piso frágil se rompe y deja agujeros.</p>
         </div>
       </div>`;
@@ -516,7 +522,7 @@ export class App {
       return h('div', { class: 'hm', style: { '--c': colorHex(FAMILY_COLORS[hd.family]) } },
         h('h3', null, hd.name, h('small', null, ` · ${FAMILY_NAMES[hd.family]} · ${hd.role}`)),
         h('p', null, hd.desc), h('p', { class: 'passive' }, hd.passive),
-        h('ul', null, (['q', 'e', 'f', 'r'] as const).map((k) => h('li', null, h('b', null, `${k.toUpperCase()} ${hd.abilities[k].icon} ${hd.abilities[k].name}: `), hd.abilities[k].desc))));
+        h('ul', null, (['q', 'e', 'f', 'r'] as const).map((k) => h('li', null, h('b', null, `${keyName(k)} ${hd.abilities[k].icon} ${hd.abilities[k].name}: `), hd.abilities[k].desc))));
     }));
     modal('Héroes', body, [{ label: 'Cerrar' }], 'wide');
   }
@@ -540,6 +546,53 @@ export class App {
       h('table', null, recent.map((m) => h('tr', null, h('td', null, new Date(m.ended_at).toLocaleString()), h('td', null, MODE_INFO[m.mode as ModeId]?.name ?? m.mode), h('td', null, MAPS[m.map]?.name ?? m.map), h('td', null, fmtTime(m.duration_s)),
         h('td', null, m.draw ? 'Empate' : `Ganó ${TEAM_NAMES[m.winner_team ?? 0] ?? m.winner_team}`)))),
     );
+  }
+
+  /** Editor de teclas: cada acción con su tecla; clic para cambiarla (si choca con otra, se intercambian). */
+  private controlsEditor(): HTMLElement {
+    const box = h('div', { class: 'controls' });
+    let capture: ((e: KeyboardEvent) => void) | null = null;
+    const stop = () => { if (capture) window.removeEventListener('keydown', capture, true); capture = null; };
+    const render = () => {
+      clear(box);
+      const binds = getBinds();
+      const preset = currentPreset();
+      const presetSel = h('select', { class: 'input', onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (PRESETS[v]) { applyPreset(v); render(); } } },
+        ...Object.entries(PRESETS).map(([id, pr]) => h('option', { value: id, selected: id === preset }, pr.name)),
+        preset ? null : h('option', { value: '', selected: true }, 'Personalizada'),
+      );
+      const groups = [...new Set(ACTIONS.map((a) => a.group))];
+      box.append(
+        h('div', { class: 'srow' }, h('label', null, 'Distribución'), presetSel),
+        h('p', { class: 'muted small' }, 'Hacé clic en una tecla y apretá la nueva (Esc cancela). Si ya la usaba otra acción, se intercambian.'),
+        ...groups.map((g) => h('div', { class: 'kgroup' }, h('h4', null, g),
+          ...ACTIONS.filter((a) => a.group === g).map((a) => {
+            const btn = h('button', { class: 'btn small keybtn' }, keyLabel(binds[a.id]));
+            btn.onclick = () => {
+              stop();
+              btn.textContent = 'Apretá una tecla…';
+              btn.classList.add('listening');
+              capture = (e: KeyboardEvent) => {
+                // Captura antes que el juego y que el modal (Esc no cierra Ajustes acá).
+                e.preventDefault();
+                e.stopPropagation();
+                stop();
+                if (e.code !== 'Escape' && !RESERVED.has(e.code)) setBind(a.id, e.code);
+                render();
+              };
+              window.addEventListener('keydown', capture, true);
+            };
+            return h('div', { class: 'krow' }, h('span', null, a.label), btn);
+          }))),
+        h('div', { class: 'kgroup' }, h('h4', null, 'Mouse (fijo)'),
+          h('div', { class: 'krow' }, h('span', null, 'Ataque básico / lanzar lo armado'), h('kbd', null, 'Clic')),
+          h('div', { class: 'krow' }, h('span', null, 'Empujón / cancelar lo armado'), h('kbd', null, 'Clic derecho')),
+          h('div', { class: 'krow' }, h('span', null, 'Menú / cancelar'), h('kbd', null, 'Esc'))),
+        h('button', { class: 'btn small ghost', onclick: () => { applyPreset('recomendado'); render(); } }, 'Restablecer las recomendadas'),
+      );
+    };
+    render();
+    return box;
   }
 
   private showSettings(advanced = false) {
@@ -578,6 +631,8 @@ export class App {
       check('Locutor (voz que anuncia combos y rachas)', p.announcer, (x) => { savePrefs({ announcer: x }); audio.announcer = x; }),
       check('Lanzamiento rápido: las habilidades salen al apretar la tecla, sin clic (para expertos)', p.quickCast, (x) => savePrefs({ quickCast: x })),
       h('p', { class: 'muted small' }, 'Sombras y resolución se aplican en la próxima partida.'),
+      fullscreenSupported() ? h('div', { class: 'srow' }, h('label', null, 'Pantalla'), fullscreenButton('btn small')) : null,
+      h('details', { class: 'controls-box', open: true }, h('summary', null, '🎮 Controles'), this.controlsEditor()),
       adv,
     );
     modal('Ajustes', body, [{ label: 'Listo', kind: 'primary' }]);

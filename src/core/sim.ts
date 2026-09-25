@@ -1543,7 +1543,8 @@ export class Simulation {
         const u = norm2(c.pos.x - x, c.pos.z - z);
         const ux = u.x || 1, uz = u.z;
         if (c.team !== owner.team) this.hit(c, owner, { heat: 3, kb: 8, dirX: ux, dirZ: uz, fx: 'metal' });
-        else { c.pos.y = st.obstacle.top + 0.01; c.grounded = false; }
+        // Aliado con el centro adentro: queda parado arriba. Si solo lo roza, el movimiento lo saca al costado (depenetrate).
+        else if (c.pos.x > st.obstacle.minX && c.pos.x < st.obstacle.maxX && c.pos.z > st.obstacle.minZ && c.pos.z < st.obstacle.maxZ) { c.pos.y = st.obstacle.top + 0.01; c.grounded = false; }
       }
     }
     return st;

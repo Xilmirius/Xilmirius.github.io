@@ -127,3 +127,13 @@ Donde el GDD dejaba una pregunta abierta, acá está la respuesta **provisoria**
 
 **DW-48 · Asedio (MOBA): 1 línea hasta 2v2, 2 líneas en 3v3.** El mapa se elige solo al empezar según el equipo más grande. Diseño completo, números y por qué en [MOBA.md](MOBA.md). Decisiones clave: sin barra de vida para los héroes (pregunta abierta, ver MOBA.md A-1), esbirros como cuerpos con la misma física (se los puede tirar al vacío), oro que es escombro, forja solo en la base, `B` para volver, piso frágil que se rearma y oleadas "enfurecidas" en líneas abiertas para cerrar partidas.
 
+**DW-49 · Teclas asignables; por defecto habilidades en Q 2 3 y la ulti en E, ítems en 1 R F.** Pedido del jugador: las habilidades quedan bajo los dedos sin estirar la mano y la ulti en una tecla aparte. Todas las acciones se reasignan en Ajustes → Controles (si la tecla ya se usaba, se intercambian); hay una distribución "anterior" (Q E F R · 1 2 3). Todo lo que muestra una tecla (HUD, tooltips, ayuda, lobby) la lee de `src/game/keybinds.ts`. El mouse y Esc son fijos.
+
+**DW-50 · El clic derecho nunca abre el menú del navegador**, en ningún lado (menú, lobby, HUD, forja). Solo se deja en campos de texto.
+
+**DW-51 · Nada queda trabado adentro de una construcción.** Si un muro o una torreta aparece encima de alguien, el movimiento lo saca por la cara libre más cercana con piso (o lo sube arriba si no hay salida). Corre en el movimiento compartido, así host y predicción del cliente hacen lo mismo.
+
+**DW-52 · Pantalla completa** desde el menú, la pausa, Ajustes y un botón chico en la partida. En Chrome/Edge se "traba" Esc para que siga siendo del juego (para salir se mantiene apretado).
+
+**DW-53 · Forja en cuadrícula por tipos.** Los ítems tienen un tipo (Defensa, Ataque, Movilidad, Control): la forja muestra lo equipado como casilleros, filtros por tipo y tarjetas con ícono, costo y estado (se puede comprar, te falta, en tu base); el detalle está en el tooltip.
+

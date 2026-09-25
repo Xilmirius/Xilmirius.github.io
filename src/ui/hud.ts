@@ -1,9 +1,9 @@
-// HUD de partida + Forja (C) + Tabla (Tab) + pantalla de resultados.
+// HUD de partida + Forja + Tabla + pantalla de resultados. Las teclas que muestra salen de game/keybinds.ts.
 import { DASH_CD, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
 import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
-import { ITEMS, ITEM_BY_ID } from '../core/items';
+import { ITEMS, ITEM_BY_ID, ITEM_TAGS, type ItemTag } from '../core/items';
 import { MODE_INFO } from '../core/modes';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
 import type { MatchResultInfo, PlayerResult, RosterInfo } from '../core/protocol';
@@ -19,12 +19,15 @@ import { ACH_BY_ID, unlock, xpToNext, type MatchReward } from '../game/profile';
 import { HAT_BY_ID } from '../core/cosmetics';
 import { clear, colorHex, fmtTime, h } from './dom';
 import { Minimap } from './minimap';
+import { fullscreenButton } from './fullscreen';
+import { keyName, type ActionId } from '../game/keybinds';
 import type { Terrain } from '../core/terrain';
 import { F_RECALL } from '../core/snapshot';
 import { RECALL_TIME } from '../core/constants';
 
 const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
-const KEYS: Record<string, string> = { basic: 'Clic', push: 'Clic D', dash: 'Shift', recall: 'B', q: 'Q', e: 'E', f: 'F', r: 'R', i1: '1', i2: '2', i3: '3' };
+/** Tecla que se muestra en cada casillero: el mouse es fijo, el resto sale de las teclas asignadas. */
+const keyFor = (slot: string) => (slot === 'basic' ? 'Clic' : slot === 'push' ? 'Clic D' : keyName(slot as ActionId));
 
 export class Hud {
   root: HTMLDivElement;
@@ -46,6 +49,7 @@ export class Hud {
   private lastMe: MeFrame | null = null;
   private lastLocal: CharFrame | null = null;
   private forgeTab: 'items' | 'mut' = 'items';
+  private forgeFilter: ItemTag | 'all' = 'all';
   private forgeKey = '';
   private centerT = 0;
   private denyT = 0;
@@ -89,7 +93,9 @@ export class Hud {
     const bottom = h('div', { class: 'hud-bottom' }, this.body, h('div', { class: 'hud-mid' }, this.deny, this.bar, this.hint), h('div', { class: 'hud-right' }, this.mats));
     this.forge = h('div', { class: 'forge hidden' });
     this.board = h('div', { class: 'board hidden' });
-    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, this.comboEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    // Botón chico de pantalla completa arriba a la derecha (el menú de pausa también lo tiene).
+    const fs = fullscreenButton('fs-mini');
+    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, this.comboEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
     parent.appendChild(this.root);
     this.buildBar();
     if (rules.pickups === 'materials') this.buildMats();
@@ -99,8 +105,7 @@ export class Hud {
       this.minimap.setTeams(new Map(roster.map((r) => [r.id, r.team])));
       this.mats.parentElement?.prepend(this.minimap.el);
     }
-    const hints = ['<b>Q E F R</b> apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela', rules.dash && '<b>Shift</b> dash', rules.recall && '<b>B</b> volver a la base', rules.crafting && (rules.forgeAtBase ? '<b>C</b> forja (en tu base)' : '<b>C</b> forja'), rules.repair && '<b>V</b> reparar', '<b>Tab</b> tabla', '<b>Esc</b> menú'];
-    this.hint.innerHTML = hints.filter(Boolean).join(' · ');
+    this.renderHints();
     tip(this.body, () => this.bodyTip());
     this.body.addEventListener('mouseover', (e) => {
       const part = (e.target as HTMLElement).closest?.('[data-part]') as HTMLElement | null;
@@ -119,6 +124,22 @@ export class Hud {
   }
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
+
+  private renderHints() {
+    const r = this.rules;
+    const k = (a: ActionId) => `<b>${keyName(a)}</b>`;
+    const hints = [`${k('q')} ${k('e')} ${k('f')} ${k('r')} apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela`, r.dash && `${k('dash')} dash`, r.recall && `${k('recall')} volver a la base`, r.crafting && `${k('forge')} forja${r.forgeAtBase ? ' (en tu base)' : ''}`, r.repair && `${k('repair')} reparar`, `${k('board')} tabla`, '<b>Esc</b> menú'];
+    this.hint.innerHTML = hints.filter(Boolean).join(' · ');
+  }
+
+  /** Se cambiaron las teclas (Ajustes): actualizar lo que las muestra. */
+  refreshKeys() {
+    for (const [slot, el] of this.slotEls) {
+      const key = el.root.querySelector('.key');
+      if (key) key.textContent = keyFor(slot);
+    }
+    this.renderHints();
+  }
 
   private minimap: Minimap | null = null;
   /** ¿Tu personaje está en tu base? (Asedio: la forja solo funciona ahí). Lo actualiza la partida. */
@@ -149,7 +170,7 @@ export class Hud {
       const lock = h('div', { class: 'lock' });
       const ic = h('div', { class: 'ic' }, icon);
       const mut = h('div', { class: 'mut' });
-      const root = tip(h('div', { class: 'slot ' + extra }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, KEYS[slot])), content);
+      const root = tip(h('div', { class: 'slot ' + extra }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, keyFor(slot))), content);
       this.slotEls.set(slot, { root, cd, txt, lock, icon: ic, mut });
       return root;
     };
@@ -257,11 +278,11 @@ export class Hud {
     if (this.rules.progression) {
       const xpPct = me.xpNext > me.xpPrev ? Math.min(100, ((me.xp - me.xpPrev) / (me.xpNext - me.xpPrev)) * 100) : 100;
       progress = `<div class="xp" data-part="level"><div style="width:${xpPct}%"></div></div>
-      <div class="xpt" data-part="level">${c.lv >= 10 ? 'Nivel máximo' : `Nivel ${c.lv} · XP ${me.xp}/${me.xpNext}`}${this.rules.crafting && me.slots > Object.keys(me.mut).length ? ' · <b class="glow">¡Mutación disponible! (C)</b>' : ''}</div>`;
+      <div class="xpt" data-part="level">${c.lv >= 10 ? 'Nivel máximo' : `Nivel ${c.lv} · XP ${me.xp}/${me.xpNext}`}${this.rules.crafting && me.slots > Object.keys(me.mut).length ? ` · <b class="glow">¡Mutación disponible! (${keyName('forge')})</b>` : ''}</div>`;
     } else if (this.rules.ultCharge) {
       const full = me.ult >= 1;
       progress = `<div class="xp ult${full ? ' full' : ''}" data-part="ult"><div style="width:${Math.round(me.ult * 100)}%"></div></div>
-      <div class="xpt" data-part="ult">${full ? '<b class="glow">⚡ ¡Ulti lista! (R)</b>' : `⚡ Ulti ${Math.floor(me.ult * 100)}%`}</div>`;
+      <div class="xpt" data-part="ult">${full ? `<b class="glow">⚡ ¡Ulti lista! (${keyName('r')})</b>` : `⚡ Ulti ${Math.floor(me.ult * 100)}%`}</div>`;
     } else progress = '';
     const html = `
       <div class="portrait" style="--c:${colorHex(FAMILY_COLORS[fam])}">
@@ -360,7 +381,7 @@ export class Hud {
         const it = ITEM_BY_ID[id];
         if (it) this.passEl.append(tip(h('span', { html: iconHtml(`icon.item.${id}`, it.icon) }), () => itemTip(it)));
       }
-      for (let i = me.pas.length; i < 3; i++) this.passEl.append(tip(h('span', { class: 'empty' }), '<b>Pasivo vacío</b><p>Fabricá un ítem pasivo en la forja (C).</p>'));
+      for (let i = me.pas.length; i < 3; i++) this.passEl.append(tip(h('span', { class: 'empty' }), `<b>Pasivo vacío</b><p>Fabricá un ítem pasivo en la forja (${keyName('forge')}).</p>`));
     }
   }
 
@@ -432,7 +453,7 @@ export class Hud {
     const ultReady = (local.fl & F_ULTREADY) !== 0 && !(local.fl & F_DEAD);
     this.slotEls.get('r')?.root.classList.toggle('ultready', ultReady);
     if (ultReady && !this.ultWasReady) {
-      this.announce('¡ULTI LISTA!', `${HEROES[this.me.hero].abilities.r.icon} ${HEROES[this.me.hero].abilities.r.name} · apretá R`, 'ult', '¡Ulti lista!');
+      this.announce('¡ULTI LISTA!', `${HEROES[this.me.hero].abilities.r.icon} ${HEROES[this.me.hero].abilities.r.name} · apretá ${keyName('r')}`, 'ult', '¡Ulti lista!');
       audio.play('ultready', 0.9);
     }
     this.ultWasReady = ultReady;
@@ -573,7 +594,7 @@ export class Hud {
       case 'deny': if (e.id === this.localId) { this.deny.textContent = e.w; this.denyT = 1.6; } break;
       case 'alert': this.onAlert(e.w, e.tm); break;
       case 'recall': if (e.id === this.localId && e.s === 0) this.localDeny('Se cortó la vuelta a la base'); break;
-      case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? '¡DESTROZADO! Reparate (V)' : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
+      case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? `¡DESTROZADO! Reparate (${keyName('repair')})` : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
       case 'craft': if (e.id === this.localId) {
         const it = ITEM_BY_ID[e.w];
         this.showCenter(it ? `${it.icon} ${it.name}` : '🧬 ¡Mutación!', 1.2, 'good');
@@ -618,7 +639,7 @@ export class Hud {
     const me = this.lastMe, c = this.lastLocal;
     if (!me || !c || !this.me) return;
     const locked = this.rules.forgeAtBase && !this.atBase && !(c.fl & F_DEAD);
-    const key = JSON.stringify([this.forgeTab, me.mats, me.pas, me.act, me.mut, me.slots, c.lv, locked]);
+    const key = JSON.stringify([this.forgeTab, this.forgeFilter, me.mats, me.pas, me.act, me.mut, me.slots, c.lv, locked]);
     if (key === this.forgeKey) return;
     this.forgeKey = key;
     clear(this.forge);
@@ -637,22 +658,51 @@ export class Hud {
     let content: HTMLElement;
     if (this.forgeTab === 'items') {
       const owned = [...me.pas, ...me.act.filter(Boolean) as string[]];
+      // Lo equipado: 3 casilleros de pasivos y 3 de activos (clic = desarmar, devuelve 50%).
+      const slotCell = (id: string | null, label: string) => id
+        ? tip(h('button', { class: 'eqslot full', onclick: () => this.send({ c: 'sell', id }) }, h('span', { html: iconHtml(`icon.item.${id}`, ITEM_BY_ID[id].icon) }), h('em', null, '✕')), () => itemTip(ITEM_BY_ID[id]) + '<p class="tt-hint">Clic: desarmar (te devuelve la mitad).</p>')
+        : h('div', { class: 'eqslot' }, h('small', null, label));
+      const equipped = h('div', { class: 'equipped' },
+        h('div', null, h('span', { class: 'eqlabel' }, 'Pasivos'), ...[0, 1, 2].map((i) => slotCell(me.pas[i] ?? null, ''))),
+        h('div', null, h('span', { class: 'eqlabel' }, 'Activos'), ...[0, 1, 2].map((i) => slotCell(me.act[i] ?? null, keyName((['i1', 'i2', 'i3'] as const)[i])))),
+      );
+      // Filtro por tipo.
+      const filters = h('div', { class: 'ifilters' },
+        h('button', { class: 'chip' + (this.forgeFilter === 'all' ? ' on' : ''), onclick: () => { this.forgeFilter = 'all'; this.forgeKey = ''; this.renderForge(); } }, 'Todos'),
+        ...ITEM_TAGS.map((t) => h('button', {
+          class: 'chip' + (this.forgeFilter === t.id ? ' on' : ''), style: { '--c': colorHex(t.color) },
+          onclick: () => { this.forgeFilter = t.id; this.forgeKey = ''; this.renderForge(); },
+        }, `${t.icon} ${t.name}`)),
+      );
+      const card = (it: (typeof ITEMS)[number]) => {
+        const has = owned.includes(it.id);
+        const full = it.kind === 'passive' ? me.pas.length >= 3 : !me.act.includes(null);
+        const afford = (Object.keys(it.cost) as Family[]).every((f) => me.mats[FAMILIES.indexOf(f)] >= (it.cost[f] ?? 0));
+        const tag = ITEM_TAGS.find((t) => t.id === it.tag)!;
+        const can = !has && !full && afford && !locked;
+        const state = has ? '✔ Tenés' : locked ? '🔒 En tu base' : full ? 'Sin lugar' : !afford ? 'Te falta' : 'Fabricar';
+        // div (no <button disabled>): los botones deshabilitados no reciben hover y el tooltip tiene que andar siempre.
+        return tip(h('div', {
+          class: 'icard' + (has ? ' has' : can ? ' can' : ' cant'), style: { '--c': colorHex(tag.color) }, role: 'button', 'aria-disabled': String(!can),
+          onclick: () => { if (can) this.send({ c: 'craft', id: it.id }); },
+        },
+        h('span', { class: 'itag', title: tag.name }, tag.icon),
+        h('div', { class: 'iicon', html: iconHtml(`icon.item.${it.id}`, it.icon) }),
+        h('b', null, it.name),
+        h('div', { class: 'costs' }, matsOf(it.cost)),
+        h('small', { class: 'istate' }, state),
+        ), () => itemTip(it));
+      };
+      const shown = ITEMS.filter((it) => this.forgeFilter === 'all' || it.tag === this.forgeFilter);
       content = h('div', { class: 'items' },
-        h('div', { class: 'owned' }, h('span', null, 'Equipado:'),
-          owned.length ? owned.map((id) => h('button', { class: 'chip', title: 'Desarmar (devuelve 50%)', onclick: () => this.send({ c: 'sell', id }) }, `${ITEM_BY_ID[id].icon} ${ITEM_BY_ID[id].name} ✕`)) : h('em', null, 'nada todavía')),
-        ...(['passive', 'active'] as const).map((kind) => h('div', { class: 'group' },
-          h('h4', null, kind === 'passive' ? `Pasivos (${me.pas.length}/3)` : `Activos (${me.act.filter(Boolean).length}/3) · teclas 1-2-3`),
-          ITEMS.filter((it) => it.kind === kind).map((it) => {
-            const has = owned.includes(it.id);
-            const full = kind === 'passive' ? me.pas.length >= 3 : !me.act.includes(null);
-            const afford = (Object.keys(it.cost) as Family[]).every((f) => me.mats[FAMILIES.indexOf(f)] >= (it.cost[f] ?? 0));
-            return tip(h('div', { class: 'item' + (has ? ' has' : '') },
-              h('div', { class: 'iicon', html: iconHtml(`icon.item.${it.id}`, it.icon) }),
-              h('div', { class: 'idesc' }, h('b', null, it.name, it.cd ? h('small', null, ` · ${it.cd}s`) : null), h('span', null, it.desc), h('div', { class: 'costs' }, matsOf(it.cost))),
-              h('button', { class: 'btn small', disabled: has || full || !afford || locked, onclick: () => this.send({ c: 'craft', id: it.id }) }, has ? 'Tenés' : locked ? '🔒 En tu base' : 'Fabricar'),
-            ), () => itemTip(it));
-          }),
-        )),
+        equipped, filters,
+        ...(['passive', 'active'] as const).map((kind) => {
+          const list = shown.filter((it) => it.kind === kind);
+          if (!list.length) return null;
+          return h('div', { class: 'group' },
+            h('h4', null, kind === 'passive' ? `Pasivos (${me.pas.length}/3) · siempre activos` : `Activos (${me.act.filter(Boolean).length}/3) · teclas ${keyName('i1')} ${keyName('i2')} ${keyName('i3')}`),
+            h('div', { class: 'igrid' }, list.map(card)));
+        }),
       );
     } else {
       const free = me.slots - Object.keys(me.mut).length;
@@ -675,7 +725,7 @@ export class Hud {
         h('div', { class: 'routeinfo' }, (['tank', 'carry', 'support'] as Route[]).map((r) => h('div', null, h('b', { class: 'mut ' + r }, ROUTE_NAMES[r] + ': '), ROUTE_DESC[r]))),
       );
     }
-    const banner = locked ? h('div', { class: 'forge-lock' }, '🔒 La fragua solo funciona en tu base (o mientras esperás para volver). Apretá ', h('kbd', null, 'B'), ` y quedate quieto ${RECALL_TIME} s para volver. Podés mirar y planear tu compra.`) : null;
+    const banner = locked ? h('div', { class: 'forge-lock' }, '🔒 La fragua solo funciona en tu base (o mientras esperás para volver). Apretá ', h('kbd', null, keyName('recall')), ` y quedate quieto ${RECALL_TIME} s para volver. Podés mirar y planear tu compra.`) : null;
     this.forge.append(tabs, ...(banner ? [banner] : []), matsRow, content,
       h('div', { class: 'forge-foot' }, `V (mantener): reparar tu cuerpo · ${REPAIR_COST} ${MAT_ICON[fam]} → −${REPAIR_AMOUNT} heat. Rompé cobertura del mapa para juntar materiales.`));
   }

@@ -9,7 +9,8 @@ Arena brawler isométrico para jugar **en el navegador con amigos**: sesiones co
 - Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación).
 - 3 modos de arena: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
 - **🏰 Asedio (MOBA)**: bases, torres, núcleo y oleadas de esbirros; 1 línea hasta 2v2 y 2 líneas en 3v3, el Coloso, campamentos, minimapa, `B` para volver a la base y forja en la base. Sin barra de vida: los puentes están sobre el vacío. Diseño en [docs/MOBA.md](docs/MOBA.md).
-- Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela.
+- Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela. Por defecto habilidades en **Q 2 3**, ulti en **E** e ítems en **1 R F**; todas las teclas se reasignan en Ajustes → Controles.
+- Pantalla completa desde el menú, la pausa o la partida.
 - **Mantené la tecla para apuntar**: cada habilidad dibuja en el piso su área, línea, cono o muro antes de usarla. **Tooltips** en todo (habilidades, ítems, tu cuerpo, niveles, héroes, reglas).
 - Bots para practicar, completar equipos y reemplazar a quien se desconecta.
 - Multijugador **P2P por WebRTC** (host autoritativo en el navegador) con signaling en **Supabase Realtime**. Cero servidores propios.
@@ -152,7 +153,7 @@ src/
   assets/        Catálogo de piezas reemplazables (catalog.ts) y cargador con fallback a lo procedural (registry.ts)
   audio/         Síntesis de sonido y música generativa (WebAudio)
   ui/            Menú, lobby, HUD, forja, minimapa, tooltips (tooltip.ts, tips.ts), galería de assets, estilos
-  game/          Bucle de partida (hitstop visual cortito), input y lanzamiento (castControl.ts), ticker en Worker, menú animado, perfil y logros
+  game/          Bucle de partida (hitstop visual cortito), input, teclas asignables (keybinds.ts) y lanzamiento (castControl.ts), ticker en Worker, menú animado, perfil y logros
   db/            Persistencia en Postgres (historial)
 supabase/migrations/   SQL del esquema
 tests/                 Unit tests + partidas headless de bots + E2E con Playwright

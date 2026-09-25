@@ -178,6 +178,10 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
 
   if (!s.grounded && !p.noGravity && !dashing) s.vel.y = Math.max(-TERMINAL_V, s.vel.y - GRAVITY * dt);
 
+  // Si quedó encimado con un obstáculo (un muro o una torreta que apareció encima), sacarlo primero:
+  // si no, cada paso seguiría chocando y el personaje quedaría trabado.
+  depenetrate(s, cw);
+
   // Horizontal, con subpasos para que los cuerpos rápidos no atraviesen cosas.
   const dx = s.vel.x * dt, dz = s.vel.z * dt;
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz)) / MAX_SUBSTEP));
@@ -211,6 +215,44 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
         s.airJumps = p.maxAirJumps;
         s.airDashes = AIR_DASHES;
         s.coyote = 0;
+      }
+    }
+  }
+}
+
+/** Distancia máxima que se "empuja" un cuerpo para sacarlo de un obstáculo (más que eso no es encimarse). */
+const DEPEN_MAX = 1.6;
+
+/**
+ * Saca un cuerpo de adentro de un obstáculo (no del terreno) hacia la cara libre más cercana, prefiriendo
+ * caer en piso firme. Si no hay salida al costado, lo sube arriba del obstáculo. Determinista: host y
+ * predicción del cliente hacen exactamente lo mismo.
+ */
+export function depenetrate(s: MoveState, cw: CollisionWorld) {
+  const b = cw.blockAt(s.pos.x, s.pos.z, CHAR_RADIUS, s.pos.y);
+  if (!b || !b.obstacle) return;
+  const e = CHAR_RADIUS + 0.02;
+  const opts = [
+    { x: b.minX - e, z: s.pos.z }, { x: b.maxX + e, z: s.pos.z },
+    { x: s.pos.x, z: b.minZ - e }, { x: s.pos.x, z: b.maxZ + e },
+  ].map((o) => ({ ...o, d: Math.hypot(o.x - s.pos.x, o.z - s.pos.z) })).sort((a, c) => a.d - c.d);
+  for (const solid of [true, false]) {
+    for (const o of opts) {
+      if (o.d > DEPEN_MAX) continue;
+      if (solid && cw.groundAt(o.x, o.z, s.pos.y + STEP_UP) === -Infinity) continue;
+      if (cw.blockAt(o.x, o.z, CHAR_RADIUS, s.pos.y)) continue;
+      s.pos.x = o.x;
+      s.pos.z = o.z;
+      return;
+    }
+    if (solid) {
+      // Sin salida con piso al costado: subirlo arriba del obstáculo antes que tirarlo al vacío.
+      const g = cw.groundAt(s.pos.x, s.pos.z, b.top + 0.05);
+      if (g >= b.top - 0.05) {
+        s.pos.y = g;
+        s.vel.y = 0;
+        s.grounded = true;
+        return;
       }
     }
   }

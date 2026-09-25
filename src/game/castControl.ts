@@ -1,5 +1,5 @@
 // Lanzamiento de habilidades e ítems activos, estilo MOBA:
-//   tecla (Q E F R / 1 2 3) → la habilidad queda "armada" y se ve su área en el cursor;
+//   tecla (asignable; por defecto Q 2 3 y E la ulti, ítems 1 R F) → la habilidad queda "armada" y se ve su área;
 //   clic izquierdo → se lanza ahí;  clic derecho o Esc → se cancela.
 // Las que no se apuntan (solo te afectan a vos o salen a tu alrededor) se lanzan al apretar la tecla.
 // Volver a apretar la misma tecla con la habilidad armada también la lanza (para los que prefieren teclado).
@@ -12,10 +12,6 @@ export const CAST_KEYS: CastKey[] = ['q', 'e', 'f', 'r', 'i1', 'i2', 'i3'];
 
 export const CAST_BIT: Record<CastKey, number> = {
   q: BTN.Q, e: BTN.E, f: BTN.F, r: BTN.R, i1: BTN.I1, i2: BTN.I2, i3: BTN.I3,
-};
-
-export const CAST_CODE: Record<string, CastKey> = {
-  KeyQ: 'q', KeyE: 'e', KeyF: 'f', KeyR: 'r', Digit1: 'i1', Digit2: 'i2', Digit3: 'i3',
 };
 
 /**

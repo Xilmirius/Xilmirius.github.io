@@ -1,13 +1,15 @@
-// Teclado + mouse → InputFrame. Todo al alcance de una mano (GDD §4).
+// Teclado + mouse → InputFrame. Todo al alcance de una mano (GDD §4). Las teclas son asignables (keybinds.ts).
 // Habilidades e ítems: tecla = armar (se ve el área), clic izquierdo = lanzar, clic derecho/Esc = cancelar
 // (ver castControl.ts). Las teclas de habilidad no se mandan "mantenidas": salen como un pulso al lanzar.
 import { BTN } from '../core/input';
-import { CAST_CODE, CastControl, type CastCheck, type CastKey } from './castControl';
+import { CastControl, type CastCheck, type CastKey } from './castControl';
+import { actionOf, type ActionId } from './keybinds';
 
-const KEYMAP: Record<string, number> = {
-  Space: BTN.JUMP, KeyV: BTN.REPAIR, KeyB: BTN.RECALL,
-  ShiftLeft: BTN.DASH, ShiftRight: BTN.DASH,
-};
+/** Acciones que se mantienen y van como bits del input. */
+const HOLD_BITS: Partial<Record<ActionId, number>> = { jump: BTN.JUMP, dash: BTN.DASH, repair: BTN.REPAIR, recall: BTN.RECALL };
+const CAST_ACTIONS = new Set<ActionId>(['q', 'e', 'f', 'r', 'i1', 'i2', 'i3']);
+/** Las flechas siempre mueven, además de las teclas asignadas. */
+const ARROWS: Record<string, ActionId> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
 /** Clics sobre estos elementos son de la interfaz, no del juego. */
 const UI_TARGET = 'button, input, select, textarea, a, .forge, .results, .modal-wrap, .board, .gallery';
@@ -35,7 +37,6 @@ export class LocalInput {
     window.addEventListener('mousedown', this.md);
     window.addEventListener('mouseup', this.mu);
     window.addEventListener('mousemove', this.mm);
-    window.addEventListener('contextmenu', this.cm);
   }
 
   private typing(e: Event) {
@@ -48,15 +49,20 @@ export class LocalInput {
     return !!t?.closest?.(UI_TARGET);
   }
 
+  private action(code: string): ActionId | null {
+    return ARROWS[code] ?? actionOf(code);
+  }
+
   private kd = (e: KeyboardEvent) => {
     if (this.typing(e)) return;
-    if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+    const a = this.action(e.code);
+    // Teclas del juego: que no hagan lo del navegador (Tab cambia el foco, Espacio baja la página...).
+    if (a || e.code === 'Tab' || e.code === 'Space') e.preventDefault();
     if (!e.repeat) this.onKey(e.code);
     if (!this.enabled) return;
-    const ck = CAST_CODE[e.code];
-    if (ck) { if (!e.repeat) this.cast.key(ck); return; }
+    if (a && CAST_ACTIONS.has(a)) { if (!e.repeat) this.cast.key(a as CastKey); return; }
     this.keys.add(e.code);
-    const b = KEYMAP[e.code];
+    const b = a ? HOLD_BITS[a] : undefined;
     if (b) this.latch |= b;
   };
 
@@ -86,7 +92,6 @@ export class LocalInput {
     this.mouse.ndcX = (this.mouse.x / r.width) * 2 - 1;
     this.mouse.ndcY = -(this.mouse.y / r.height) * 2 + 1;
   };
-  private cm = (e: Event) => { if (!this.typing(e) && !this.uiTarget(e)) e.preventDefault(); };
 
   /** Habilidad/ítem armado (se está apuntando), o null. */
   armed(): CastKey | null {
@@ -96,14 +101,15 @@ export class LocalInput {
   /** Movimiento (-1..1) y botones. Los toques rápidos se registran aunque duren menos de un tick. */
   sample(): { mx: number; mz: number; b: number } {
     if (!this.enabled) { this.latch = 0; this.cast.take(); this.cast.cancel(); return { mx: 0, mz: 0, b: 0 }; }
-    const k = this.keys;
+    const held = new Set<ActionId>();
+    for (const code of this.keys) { const a = this.action(code); if (a) held.add(a); }
     let mx = 0, mz = 0;
-    if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
-    if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
-    if (k.has('KeyW') || k.has('ArrowUp')) mz -= 1;
-    if (k.has('KeyS') || k.has('ArrowDown')) mz += 1;
+    if (held.has('left')) mx -= 1;
+    if (held.has('right')) mx += 1;
+    if (held.has('up')) mz -= 1;
+    if (held.has('down')) mz += 1;
     let b = 0;
-    for (const [code, bit] of Object.entries(KEYMAP)) if (k.has(code)) b |= bit;
+    for (const a of held) b |= HOLD_BITS[a] ?? 0;
     if (this.mouse.left && !this.eatLeft) b |= BTN.BASIC;
     if (this.mouse.right && !this.eatRight) b |= BTN.PUSH;
     // Un toque que empezó y terminó entre dos ticks se cuenta como mantenido en este tick.
@@ -121,6 +127,5 @@ export class LocalInput {
     window.removeEventListener('mousedown', this.md);
     window.removeEventListener('mouseup', this.mu);
     window.removeEventListener('mousemove', this.mm);
-    window.removeEventListener('contextmenu', this.cm);
   }
 }
