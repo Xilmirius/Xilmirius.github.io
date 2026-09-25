@@ -51,7 +51,8 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await wait(400);
   await p.screenshot({ path: `${OUT}/hero-${hero}-0.png` });
   // Apuntar: la tecla arma la habilidad y muestra el área; el clic izquierdo la lanza.
-  await p.keyboard.press('KeyR');
+  // Teclas por defecto: habilidades Q 2 3, ulti E.
+  await p.keyboard.press('KeyE');
   await wait(250);
   await p.screenshot({ path: `${OUT}/hero-${hero}-aimR.png` });
   await p.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.47);
@@ -63,7 +64,7 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   const slot = await p.$('.hud-bar .slot.ult');
   if (slot) { await slot.hover(); await wait(400); await p.screenshot({ path: `${OUT}/hero-${hero}-tooltip.png` }); }
   await p.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.47);
-  for (const [i, key] of ['KeyQ', 'KeyE', 'KeyR'].entries()) {
+  for (const [i, key] of ['KeyQ', 'Digit2', 'KeyE'].entries()) {
     await p.keyboard.press(key);
     await wait(120);
     await p.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.47);

@@ -44,6 +44,19 @@ try {
   await wait(500);
   await p.screenshot({ path: `${OUT}/01-menu.png` });
   step('menú ok');
+  // Ajustes → Controles: la ulti viene en E y se puede reasignar.
+  await p.click('text=⚙️ Ajustes');
+  await p.waitForSelector('.controls .keybtn');
+  const ult = p.locator('.controls .krow:has-text("Ulti") .keybtn');
+  if ((await ult.textContent()) !== 'E') throw new Error('La ulti no viene en E por defecto');
+  await ult.click();
+  await p.keyboard.press('KeyG');
+  await wait(200);
+  if ((await p.locator('.controls .krow:has-text("Ulti") .keybtn').textContent()) !== 'G') throw new Error('No se pudo reasignar la ulti');
+  await p.screenshot({ path: `${OUT}/01b-controles.png` });
+  await p.click('text=Restablecer las recomendadas');
+  await p.click('.modal-buttons .btn');
+  step('controles ok');
   await p.click('text=Práctica vs bots');
   await p.waitForSelector('.lobby');
   await wait(800);

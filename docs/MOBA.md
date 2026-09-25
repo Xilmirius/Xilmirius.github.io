@@ -35,14 +35,16 @@ Los dos gigantes comparten supuestos que nadie discute: vida que baja, oro abstr
 
 ### Controles (todos los modos)
 
-| Tecla | Acción |
+| Tecla (por defecto) | Acción |
 |---|---|
-| **Q E F R** | **Arman** la habilidad: se ve el área en el cursor |
+| **Q 2 3** y **E** (ulti) | **Arman** la habilidad: se ve el área en el cursor |
 | **Clic izquierdo** | Lanza la habilidad armada (si no hay nada armado, es el ataque básico) |
 | **Clic derecho** / **Esc** | Cancela la habilidad armada (si no hay nada armado, es el empujón) |
-| **1 2 3** | Ítems activos, con el mismo esquema |
+| **1 R F** | Ítems activos, con el mismo esquema |
 | **B** | Volver a la base (4 s quieto; se corta si te movés, atacás o te pegan) |
 | **C** | Forja (en el Asedio solo funciona en tu base) |
+
+Todas las teclas se cambian en **Ajustes → Controles**.
 
 Las habilidades sin objetivo (las que solo te afectan a vos) salen al apretar la tecla. En Ajustes está el **lanzamiento rápido** (todo sale al apretar la tecla, directo al cursor) para quien lo prefiera.
 

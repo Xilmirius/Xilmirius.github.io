@@ -73,11 +73,20 @@ async function match(bots, tag) {
   await p.mouse.click(cx + 200, cy);
   if (!(await gone())) errors.push(`[${tag}] el clic izquierdo no lanzó`);
   step(`${tag}: lanzamiento con clic ok`);
-  // Forja lejos de la base: bloqueada.
+  // Forja lejos de la base: bloqueada, pero se puede mirar (cuadrícula por tipos con filtros).
   await p.keyboard.press('KeyC');
   await wait(400);
   const locked = await p.$('.forge-lock');
   if (!locked) errors.push(`[${tag}] la forja no avisa que es solo en la base`);
+  const cards = await p.$$eval('.forge .icard', (els) => els.length);
+  if (cards < 10) errors.push(`[${tag}] la forja no muestra la cuadrícula de ítems (${cards})`);
+  await p.click('.forge .ifilters .chip:has-text("Movilidad")');
+  await wait(300);
+  const mob = await p.$$eval('.forge .icard', (els) => els.length);
+  if (mob >= cards || mob === 0) errors.push(`[${tag}] el filtro de la forja no filtra (${mob}/${cards})`);
+  await p.hover('.forge .icard');
+  await wait(400);
+  if (!(await p.$('.tooltip.on'))) errors.push(`[${tag}] los ítems de la forja no muestran tooltip`);
   await p.screenshot({ path: `${OUT}/moba-${tag}-forge.png` });
   await p.keyboard.press('Escape');
   // Pelear un rato en la línea
@@ -96,6 +105,14 @@ async function match(bots, tag) {
   await wait(300);
   await p.screenshot({ path: `${OUT}/moba-${tag}-board.png` });
   await p.keyboard.up('Tab');
+  // Clic derecho nunca abre el menú del navegador (ni sobre el HUD).
+  const blocked = await p.evaluate(() => {
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    (document.querySelector('.hud-bar .slot') ?? document.body).dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  if (!blocked) errors.push(`[${tag}] el clic derecho abre el menú del navegador`);
+  if (!(await p.$('.hud .fs-mini'))) errors.push(`[${tag}] falta el botón de pantalla completa`);
   if (tag === '2v2') {
     // Forzar el final (gana Azul): nadie se mueve ni dispara, unos festejan y otros lloran.
     await p.evaluate(() => { const sim = window.__rubble.session.sim; sim.mode.winner = 0; });

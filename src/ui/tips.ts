@@ -2,7 +2,7 @@
 // así si cambia el balance, el tooltip se actualiza solo).
 import { iconHtml } from '../assets/registry';
 import {
-  DASH_CD, MUTATION_LEVELS, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
+  DASH_CD, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
 } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
@@ -12,6 +12,7 @@ import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR, ROUTE_MODS } from '../core/mut
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
 import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, type ModeId, type Route } from '../core/types';
 import { esc } from './tooltip';
+import { keyName, type ActionId } from '../game/keybinds';
 
 export const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
 const m = (v: number) => `${+v.toFixed(1)} m`;
@@ -39,7 +40,8 @@ export function shapeText(shape: AimShape, range: number, area = 1): string {
   }
 }
 
-const KEY: Record<AbilitySlot, string> = { q: 'Q', e: 'E', f: 'F', r: 'R' };
+/** Tecla asignada a cada habilidad (se lee cada vez: si cambia en Ajustes, el tooltip se actualiza). */
+const KEY = new Proxy({} as Record<AbilitySlot, string>, { get: (_t, slot: string) => keyName(slot as ActionId) });
 
 export function abilityTip(heroId: HeroId, slot: AbilitySlot, rules: Ruleset, o: { mut?: Route; level?: number; ult?: number } = {}) {
   const hero = HEROES[heroId];
@@ -72,7 +74,7 @@ export function basicTip(heroId: HeroId) {
 }
 
 export function recallTip() {
-  return head(iconHtml('icon.recall', '🏠'), 'Volver a la base', 'B')
+  return head(iconHtml('icon.recall', '🏠'), 'Volver a la base', keyName('recall'))
     + tags([`${s(RECALL_TIME)} quieto`])
     + p('Te teletransporta a tu base. En la base te enfriás rápido (se te va el heat) y podés forjar.')
     + p('Se corta si te movés, atacás, lanzás algo o te pegan. Elegí bien cuándo: en medio de una pelea no llega.', 'tt-hint');
@@ -80,13 +82,13 @@ export function recallTip() {
 
 export function pushTip() {
   return head(iconHtml('icon.push', '🫸'), 'Empujón', 'Clic D')
-    + tags([`Carga hasta ${s(PUSH_MAX_CHARGE)}`, 'Cono de 95°'])
-    + p('Mantené para cargar y soltá para empujar. Cuanto más cargado y más roto está el rival, más lejos vuela: <b>es lo que saca del mapa</b>.')
+    + tags([`Carga hasta ${s(PUSH_MAX_CHARGE)}`, 'Cono de 95°', `Heat ${PUSH_HEAT[0]}–${PUSH_HEAT[1]}`])
+    + p('Mantené para cargar y soltá para empujar. Cuanto más cargado y más roto está el rival, más lejos vuela: <b>es lo que saca del mapa</b>. Cargado también pega más fuerte.')
     + p('El cono en el piso avisa que lo estás cargando (se pone rojo a carga máxima).', 'tt-hint');
 }
 
 export function dashTip() {
-  return head(iconHtml('icon.dash', '💨'), 'Dash', 'Shift')
+  return head(iconHtml('icon.dash', '💨'), 'Dash', keyName('dash'))
     + tags(['≈ 4 m', `Enfriamiento ${s(DASH_CD)}`])
     + p('Ráfaga corta hacia donde caminás (o hacia donde mirás si estás quieto). Sirve para entrar, esquivar y recuperarte.')
     + p('En el aire tenés uno. No corta un lanzamiento: primero usá el segundo salto (Espacio) y después el dash.', 'tt-hint');
@@ -95,21 +97,21 @@ export function dashTip() {
 export function itemTip(it: ItemDef, extra = '') {
   const cost = Object.entries(it.cost).map(([f, n]) => `${iconHtml(`icon.mat.${f}`, MAT_ICON[f as Family])} ${n}`).join(' ');
   return head(iconHtml(`icon.item.${it.id}`, it.icon), it.name)
-    + tags([it.kind === 'passive' ? 'Pasivo' : 'Activo · teclas 1-2-3', it.cd ? `Enfriamiento ${s(it.cd)}` : null, it.shape ? shapeText(it.shape, it.range ?? 0) : null, `Costo ${cost}`])
+    + tags([it.kind === 'passive' ? 'Pasivo' : `Activo · teclas ${keyName('i1')} ${keyName('i2')} ${keyName('i3')}`, it.cd ? `Enfriamiento ${s(it.cd)}` : null, it.shape ? shapeText(it.shape, it.range ?? 0) : null, `Costo ${cost}`])
     + p(it.desc) + extra;
 }
 
 export function itemIdTip(id: string | null) {
   const it = id ? ITEM_BY_ID[id] : null;
-  return it ? itemTip(it) : head('▫️', 'Espacio vacío') + p('Fabricá un ítem activo en la forja (C) y queda en esta tecla.');
+  return it ? itemTip(it) : head('▫️', 'Espacio vacío') + p(`Fabricá un ítem activo en la forja (${keyName('forge')}) y queda en esta tecla.`);
 }
 
 export function matTip(f: Family, rules: Ruleset, mine: Family) {
   return head(iconHtml(`icon.mat.${f}`, MAT_ICON[f]), FAMILY_NAMES[f])
     + p(`Sale de romper coberturas de ${FAMILY_NAMES[f].toLowerCase()} del mapa.`)
-    + (rules.crafting ? p('Se usa en la forja (C) para fabricar ítems.') : '')
+    + (rules.crafting ? p(`Se usa en la forja (${keyName('forge')}) para fabricar ítems.`) : '')
     + (f === mine && rules.crafting ? p(`Es <b>tu material</b>: mutar una habilidad cuesta ${MUTATION_COST}.`, 'tt-note') : '')
-    + (f === mine && rules.repair ? p(`<kbd>V</kbd> (mantener): ${REPAIR_COST} → −${REPAIR_AMOUNT} de heat.`, 'tt-note') : '');
+    + (f === mine && rules.repair ? p(`<kbd>${keyName('repair')}</kbd> (mantener): ${REPAIR_COST} → −${REPAIR_AMOUNT} de heat.`, 'tt-note') : '');
 }
 
 export function stageTip(stage: number, heat: number) {
@@ -131,7 +133,7 @@ export function levelTip(level: number, xp: number, next: number, heroId: HeroId
 
 export function ultBarTip(ult: number) {
   return head('⚡', `Ulti: ${Math.floor(ult * 100)}%`)
-    + p('Se llena pegando, juntando los trozos que sueltan las coberturas y de a poco sola. Cuando está llena, <kbd>R</kbd>.');
+    + p(`Se llena pegando, juntando los trozos que sueltan las coberturas y de a poco sola. Cuando está llena, <kbd>${keyName('r')}</kbd>.`);
 }
 
 export function routeTip(route: Route, fam: Family) {
@@ -150,7 +152,7 @@ export function rulesTip(id: RulesetId) {
   const r = RULESETS[id];
   const on = (b: boolean, t: string) => `<li class="${b ? 'on' : 'off'}">${b ? '✔' : '✖'} ${t}</li>`;
   return head(r.icon, r.name) + p(r.desc)
-    + `<ul class="tt-list checks">${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, 'Reparar (V)')}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, 'Dash (Shift)')}${r.recall ? on(true, 'Volver a la base (B)') : ''}</ul>`;
+    + `<ul class="tt-list checks">${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar (${keyName('repair')})`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash (${keyName('dash')})`)}${r.recall ? on(true, `Volver a la base (${keyName('recall')})`) : ''}</ul>`;
 }
 
 export function modeTip(id: ModeId) {
@@ -161,7 +163,7 @@ export function modeTip(id: ModeId) {
         <li><b>Oleadas</b> de esbirros cada 24 s: Guijarros (cuerpo a cuerpo), Chispas (a distancia) y un Ariete cada 3 oleadas. Se los puede tirar al vacío.</li>
         <li><b>Economía</b>: rematar un esbirro te da su material al toque, y el esbirro suelta un trozo que junta el que esté cerca.</li>
         <li><b>Torres</b>: la exterior protege a la interior; las dos protegen al núcleo. Sin esbirros cerca reciben menos daño.</li>
-        <li><b>Tu base</b> te enfría rápido y es donde se forja. <kbd>B</kbd>: volver (4 s quieto).</li>
+        <li><b>Tu base</b> te enfría rápido y es donde se forja. <kbd>${keyName('recall')}</kbd>: volver (4 s quieto).</li>
         <li><b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.</li>
       </ul>`;
   }

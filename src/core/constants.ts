@@ -59,6 +59,8 @@ export const TILE_CRUMBLE = 0.8;
 // Empujón universal (clic derecho): mantener carga (D-0028)
 export const PUSH_MAX_CHARGE = 0.8;
 export const PUSH_CD = 0.5;
+/** Heat del empujón: sin cargar / cargado a fondo (el básico rompe más; el empujón es para sacar). */
+export const PUSH_HEAT = [3, 8] as const;
 
 // Dash universal (Shift): ráfaga corta, predicha en el cliente igual que el salto.
 export const DASH_SPEED = 24;
