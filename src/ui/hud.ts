@@ -12,15 +12,19 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, dashTip, itemIdTip, itemTip, levelTip, matTip, pushTip, routeTip, stageTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, dashTip, itemIdTip, itemTip, levelTip, matTip, pushTip, recallTip, routeTip, stageTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchReward } from '../game/profile';
 import { HAT_BY_ID } from '../core/cosmetics';
 import { clear, colorHex, fmtTime, h } from './dom';
+import { Minimap } from './minimap';
+import type { Terrain } from '../core/terrain';
+import { F_RECALL } from '../core/snapshot';
+import { RECALL_TIME } from '../core/constants';
 
 const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
-const KEYS: Record<string, string> = { basic: 'Clic', push: 'Clic D', dash: 'Shift', q: 'Q', e: 'E', f: 'F', r: 'R', i1: '1', i2: '2', i3: '3' };
+const KEYS: Record<string, string> = { basic: 'Clic', push: 'Clic D', dash: 'Shift', recall: 'B', q: 'Q', e: 'E', f: 'F', r: 'R', i1: '1', i2: '2', i3: '3' };
 
 export class Hud {
   root: HTMLDivElement;
@@ -78,6 +82,7 @@ export class Hud {
     private localId: number,
     private rules: Ruleset,
     private send: (c: Command) => void,
+    terrain?: Terrain,
   ) {
     for (const r of roster) this.byId.set(r.id, r);
     this.root = h('div', { class: 'hud' });
@@ -89,7 +94,12 @@ export class Hud {
     this.buildBar();
     if (rules.pickups === 'materials') this.buildMats();
     else this.mats.style.display = 'none';
-    const hints = ['<b>Mantené Q E F R</b> para apuntar', rules.dash && '<b>Shift</b> dash', rules.crafting && '<b>C</b> forja', rules.repair && '<b>V</b> reparar', '<b>Tab</b> tabla', '<b>Esc</b> menú'];
+    if (terrain && terrain.cores.length) {
+      this.minimap = new Minimap(terrain, this.me?.team ?? 0);
+      this.minimap.setTeams(new Map(roster.map((r) => [r.id, r.team])));
+      this.mats.parentElement?.prepend(this.minimap.el);
+    }
+    const hints = ['<b>Q E F R</b> apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela', rules.dash && '<b>Shift</b> dash', rules.recall && '<b>B</b> volver a la base', rules.crafting && (rules.forgeAtBase ? '<b>C</b> forja (en tu base)' : '<b>C</b> forja'), rules.repair && '<b>V</b> reparar', '<b>Tab</b> tabla', '<b>Esc</b> menú'];
     this.hint.innerHTML = hints.filter(Boolean).join(' · ');
     tip(this.body, () => this.bodyTip());
     this.body.addEventListener('mouseover', (e) => {
@@ -110,6 +120,25 @@ export class Hud {
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
 
+  private minimap: Minimap | null = null;
+  /** ¿Tu personaje está en tu base? (Asedio: la forja solo funciona ahí). Lo actualiza la partida. */
+  atBase = true;
+
+  /** Aviso local (no hace falta ir al host): "no se puede lanzar esto ahora". */
+  localDeny(text: string) {
+    this.deny.textContent = text;
+    this.denyT = 1.6;
+  }
+
+  private armedKey: string | null = null;
+  /** Resalta la habilidad/ítem armado (se está apuntando). */
+  setArmed(k: string | null) {
+    if (k === this.armedKey) return;
+    if (this.armedKey) this.slotEls.get(this.armedKey)?.root.classList.remove('armed');
+    this.armedKey = k;
+    if (k) this.slotEls.get(k)?.root.classList.add('armed');
+  }
+
   private buildBar() {
     const me = this.me;
     if (!me) { this.bar.style.display = 'none'; return; }
@@ -129,6 +158,7 @@ export class Hud {
       mk('basic', iconNode(`icon.basic.${me.hero}`, hero.basic.kind === 'melee' ? '👊' : '🎯'), () => basicTip(me.hero), 'small'),
       mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
       this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
+      this.rules.recall ? mk('recall', iconNode('icon.recall', '🏠'), recallTip, 'small') : null,
       h('div', { class: 'sep' }),
       ...(['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => mk(s, iconNode(`icon.ability.${me.hero}.${s}`, hero.abilities[s].icon), abilityContent(s), s === 'r' ? 'ult' : '')),
       this.rules.crafting ? [
@@ -143,6 +173,7 @@ export class Hud {
     this.lastLocal = local;
     this.renderTop(w);
     this.renderCenter(w, local, dt);
+    this.minimap?.draw(w, this.localId, dt);
     if (local && me) {
       this.renderBody(local, me);
       this.renderBar(local, me);
@@ -158,6 +189,7 @@ export class Hud {
 
   private renderTop(w: WorldFrame) {
     const m = w.mode;
+    if (m.moba) { this.renderMobaTop(w); return; }
     const teams = m.scores.map((s, i) => {
       const r = this.roster.find((x) => x.team === i);
       const label = this.roster.length && this.isFfa() ? (r?.name ?? `J${i + 1}`) : TEAM_NAMES[i];
@@ -165,6 +197,27 @@ export class Hud {
     }).join('');
     const zone = m.zone ? `<div class="zone-info">${m.zone.contested ? '⚔️ Disputada' : m.zone.owner >= 0 ? 'Zona de ' + (this.isFfa() ? this.roster.find((x) => x.team === m.zone!.owner)?.name : TEAM_NAMES[m.zone.owner]) : 'Zona libre'} · se mueve en ${Math.ceil(m.zone.next)} s</div>` : '';
     const html = `<div class="mode">${MODE_INFO[m.id]?.name ?? m.title} · <span class="time">${fmtTime(m.time)}</span> · meta ${m.target} ${m.label}</div><div class="scores">${teams}</div>${zone}`;
+    if (this.top.innerHTML !== html) this.top.innerHTML = html;
+  }
+
+  /** Asedio: torres y núcleo de cada equipo, próxima oleada y estado del Coloso. */
+  private renderMobaTop(w: WorldFrame) {
+    const m = w.mode, mb = m.moba!;
+    const side = (t: number) => {
+      const col = colorHex(TEAM_COLORS[t % TEAM_COLORS.length]);
+      const towers = w.structs.filter((s) => s.k === 'tower' && s.tm === t);
+      const core = w.structs.find((s) => s.k === 'core' && s.tm === t);
+      const lost = Math.max(0, m.target - 1 - towers.length);
+      const pips = towers.map((s) => `<i class="tw${s.fl & 1 ? ' prot' : ''}" title="Torre" style="--h:${Math.round(s.hp * 100)}%"></i>`).join('') + '<i class="tw down"></i>'.repeat(lost);
+      const coreTxt = core ? `<span class="core${core.fl & 1 ? ' prot' : ''}"><em style="width:${Math.round(core.hp * 100)}%"></em>${core.fl & 1 ? '🛡️' : '💠'} ${Math.round(core.hp * 100)}%</span>` : '<span class="core down">💥</span>';
+      return `<span class="side" style="--c:${col}"><b>${TEAM_NAMES[t]}</b>${pips}${coreTxt}</span>`;
+    };
+    const [alive, colosoT, bless, blessT] = mb.coloso;
+    const extra = mb.sudden ? '<b class="bad">⚠️ ¡MUERTE SÚBITA! Núcleos expuestos</b>'
+      : bless >= 0 ? `✨ Bendición del Coloso: <b style="color:${colorHex(TEAM_COLORS[bless])}">${TEAM_NAMES[bless]}</b> · ${fmtTime(blessT)}`
+      : alive ? '🗿 <b>¡El Coloso está despierto!</b>' : colosoT > 0 ? `🗿 Coloso en ${fmtTime(colosoT)}` : '';
+    const html = `<div class="mode">Asedio · <span class="time">${fmtTime(m.time)}</span> · oleada en ${mb.wave} s</div>
+      <div class="moba-bar">${side(0)}<span class="vs">⚔️</span>${side(1)}</div>${extra ? `<div class="zone-info">${extra}</div>` : ''}`;
     if (this.top.innerHTML !== html) this.top.innerHTML = html;
   }
 
@@ -183,6 +236,7 @@ export class Hud {
       else if (w.phase !== 'end') sub = `Volvés en ${Math.ceil(local.rt)}…`;
     }
     if (!local) sub = 'Espectando';
+    else if (local.fl & F_RECALL) sub = `🏠 Volviendo a la base… ${Math.max(0, (1 - local.ch) * RECALL_TIME).toFixed(1)} s`;
     if (this.sub.textContent !== sub) this.sub.textContent = sub;
   }
 
@@ -267,6 +321,11 @@ export class Hud {
       el.cd.style.background = frac > 0 ? `conic-gradient(rgba(10,6,20,.72) ${frac * 360}deg, transparent 0)` : 'none';
       el.txt.textContent = rem > 0.05 && max > 1 ? (rem >= 1 ? String(Math.ceil(rem)) : rem.toFixed(1)) : '';
     });
+    const rc = this.slotEls.get('recall');
+    if (rc) {
+      const on = (c.fl & F_RECALL) !== 0;
+      rc.cd.style.background = on ? `conic-gradient(rgba(79, 209, 255, .55) ${c.ch * 360}deg, transparent 0)` : 'none';
+    }
     const dash = this.slotEls.get('dash');
     if (dash) {
       const r = me.dcd;
@@ -435,7 +494,7 @@ export class Hud {
     const me = this.localId;
     switch (e.k) {
       case 'hit':
-        if (e.a === me && me >= 0 && e.h > 0 && e.id !== me) this.onComboHit();
+        if (e.a === me && me >= 0 && e.h > 0 && e.id !== me && this.byId.has(e.id)) this.onComboHit();
         if (e.l && e.a === me && me >= 0) audio.say('¡Letal!', true);
         break;
       case 'body': if (e.a === me && me >= 0) this.achievement('billiards'); break;
@@ -512,11 +571,37 @@ export class Hud {
         this.showCenter(`Nivel ${lv}${unlocked ? ` · ¡${hero.abilities[unlocked].name}!` : ''}${mutation ? ' · mutación disponible' : ''}`, 1.8, 'good');
       } break;
       case 'deny': if (e.id === this.localId) { this.deny.textContent = e.w; this.denyT = 1.6; } break;
+      case 'alert': this.onAlert(e.w, e.tm); break;
+      case 'recall': if (e.id === this.localId && e.s === 0) this.localDeny('Se cortó la vuelta a la base'); break;
       case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? '¡DESTROZADO! Reparate (V)' : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
       case 'craft': if (e.id === this.localId) {
         const it = ITEM_BY_ID[e.w];
         this.showCenter(it ? `${it.icon} ${it.name}` : '🧬 ¡Mutación!', 1.2, 'good');
       } break;
+    }
+  }
+
+  /** Avisos del Asedio, contados desde tu equipo. */
+  private onAlert(w: string, team: number) {
+    const my = this.me?.team ?? -1;
+    const ours = team === my;
+    switch (w) {
+      case 'wave': this.once('wave1', () => this.announce('¡SALEN LOS ESBIRROS!', 'acompañá a tu oleada y empujá la línea', 'good', 'Salen los esbirros')); break;
+      case 'tower_down':
+        if (ours) this.announce('¡PERDIMOS UNA TORRE!', 'defendé la línea', 'bad', 'Perdimos una torre');
+        else this.announce('¡TORRE RIVAL DESTRUIDA!', '+1 de cada material para tu equipo', 'good', 'Torre destruida');
+        break;
+      case 'core_open':
+        if (ours) this.announce('¡NUESTRO NÚCLEO ESTÁ EXPUESTO!', 'volvé a defender la base', 'matchpoint', 'Núcleo expuesto');
+        else this.announce('¡NÚCLEO RIVAL EXPUESTO!', 'a romperlo', 'good', 'Núcleo expuesto');
+        break;
+      case 'coloso_up': this.announce('¡EL COLOSO DESPERTÓ!', 'derrotalo: tus esbirros pegan y aguantan más', 'ult', 'El Coloso despertó'); break;
+      case 'coloso_down':
+        if (ours) this.announce('¡BENDICIÓN DEL COLOSO!', 'tus esbirros pegan y aguantan más por 90 s', 'good', 'Bendición del Coloso');
+        else this.announce('EL RIVAL TIENE LA BENDICIÓN', 'sus esbirros vienen más fuertes', 'bad');
+        break;
+      case 'sudden': this.announce('¡MUERTE SÚBITA!', 'los núcleos quedan expuestos', 'matchpoint', 'Muerte súbita'); break;
+      case 'tower_hit': if (ours) this.localDeny('⚠️ ¡Nuestra torre está bajo ataque!'); break;
     }
   }
 
@@ -532,7 +617,8 @@ export class Hud {
   private renderForge() {
     const me = this.lastMe, c = this.lastLocal;
     if (!me || !c || !this.me) return;
-    const key = JSON.stringify([this.forgeTab, me.mats, me.pas, me.act, me.mut, me.slots, c.lv]);
+    const locked = this.rules.forgeAtBase && !this.atBase && !(c.fl & F_DEAD);
+    const key = JSON.stringify([this.forgeTab, me.mats, me.pas, me.act, me.mut, me.slots, c.lv, locked]);
     if (key === this.forgeKey) return;
     this.forgeKey = key;
     clear(this.forge);
@@ -563,7 +649,7 @@ export class Hud {
             return tip(h('div', { class: 'item' + (has ? ' has' : '') },
               h('div', { class: 'iicon', html: iconHtml(`icon.item.${it.id}`, it.icon) }),
               h('div', { class: 'idesc' }, h('b', null, it.name, it.cd ? h('small', null, ` · ${it.cd}s`) : null), h('span', null, it.desc), h('div', { class: 'costs' }, matsOf(it.cost))),
-              h('button', { class: 'btn small', disabled: has || full || !afford, onclick: () => this.send({ c: 'craft', id: it.id }) }, has ? 'Tenés' : 'Fabricar'),
+              h('button', { class: 'btn small', disabled: has || full || !afford || locked, onclick: () => this.send({ c: 'craft', id: it.id }) }, has ? 'Tenés' : locked ? '🔒 En tu base' : 'Fabricar'),
             ), () => itemTip(it));
           }),
         )),
@@ -581,7 +667,7 @@ export class Hud {
             h('div', { class: 'routes' }, (['tank', 'carry', 'support'] as Route[]).map((r) =>
               tip(h('button', {
                 class: 'btn small route ' + r,
-                disabled: !!cur || lockedA || free <= 0 || me.mats[FAMILIES.indexOf(fam)] < MUTATION_COST,
+                disabled: !!cur || lockedA || free <= 0 || me.mats[FAMILIES.indexOf(fam)] < MUTATION_COST || locked,
                 onclick: () => this.send({ c: 'mutate', slot: s, route: r }),
               }, `${ROUTE_FLAVOR[fam][r]}`, h('small', null, ROUTE_NAMES[r])), () => routeTip(r, fam)))),
           );
@@ -589,7 +675,8 @@ export class Hud {
         h('div', { class: 'routeinfo' }, (['tank', 'carry', 'support'] as Route[]).map((r) => h('div', null, h('b', { class: 'mut ' + r }, ROUTE_NAMES[r] + ': '), ROUTE_DESC[r]))),
       );
     }
-    this.forge.append(tabs, matsRow, content,
+    const banner = locked ? h('div', { class: 'forge-lock' }, '🔒 La fragua solo funciona en tu base (o mientras esperás para volver). Apretá ', h('kbd', null, 'B'), ` y quedate quieto ${RECALL_TIME} s para volver. Podés mirar y planear tu compra.`) : null;
+    this.forge.append(tabs, ...(banner ? [banner] : []), matsRow, content,
       h('div', { class: 'forge-foot' }, `V (mantener): reparar tu cuerpo · ${REPAIR_COST} ${MAT_ICON[fam]} → −${REPAIR_AMOUNT} heat. Rompé cobertura del mapa para juntar materiales.`));
   }
 
@@ -603,9 +690,10 @@ export class Hud {
     const rows = [...this.roster].sort((a, b) => a.team - b.team).map((r) => {
       const c = w.chars.find((x) => x.id === r.id);
       const col = colorHex(TEAM_COLORS[r.team % TEAM_COLORS.length]);
-      return `<tr class="${r.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${esc(r.name)}${r.bot ? ' 🤖' : ''}</td><td>${HEROES[r.hero].name}</td><td>${c?.lv ?? 1}</td><td>${c?.k ?? 0}</td><td>${c?.d ?? 0}</td><td>${c?.a ?? 0}</td><td>${w.mode.id === 'stock' ? (c?.lives ?? 0) : '–'}</td></tr>`;
+      const last = w.mode.id === 'moba' ? (c?.cs ?? 0) : w.mode.id === 'stock' ? (c?.lives ?? 0) : '–';
+      return `<tr class="${r.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${esc(r.name)}${r.bot ? ' 🤖' : ''}</td><td>${HEROES[r.hero].name}</td><td>${c?.lv ?? 1}</td><td>${c?.k ?? 0}</td><td>${c?.d ?? 0}</td><td>${c?.a ?? 0}</td><td>${last}</td></tr>`;
     }).join('');
-    this.board.innerHTML = `<table><thead><tr><th>Jugador</th><th>Héroe</th><th>Nv</th><th>Sacó</th><th>Cayó</th><th>Asist.</th><th>Vidas</th></tr></thead><tbody>${rows}</tbody></table>`;
+    this.board.innerHTML = `<table><thead><tr><th>Jugador</th><th>Héroe</th><th>Nv</th><th>Sacó</th><th>Cayó</th><th>Asist.</th><th>${w.mode.id === 'moba' ? 'Esbirros' : 'Vidas'}</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   // ───────────── resultados ─────────────
@@ -632,6 +720,7 @@ export class Hud {
     };
     const awards = [
       award('💥', 'Rey del ring-out', (p) => p.kills, (v) => `${v} sacados`),
+      award('🧹', 'Farmeador', (p) => p.cs ?? 0, (v) => `${v} esbirros rematados`),
       award('☠️', 'Verdugo', (p) => p.lethals, (v) => `${v} golpes letales`),
       award('🎱', 'Billarista', (p) => p.billiards, (v) => `${v} carambolas`),
       award('🚀', 'Cañón humano', (p) => p.bestLaunch, (v) => `lanzó a ${v} m/s`),

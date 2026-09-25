@@ -2,7 +2,7 @@
 
 > **Generado** desde `src/assets/catalog.ts` con `npm run assets:doc`. No editar a mano.
 
-Todo lo que el juego dibuja o suena por código tiene un **id** y un **archivo esperado**. Hoy: **0 de 159** piezas usan archivo.
+Todo lo que el juego dibuja o suena por código tiene un **id** y un **archivo esperado**. Hoy: **0 de 171** piezas usan archivo.
 
 **Cómo reemplazar una pieza (de a una):**
 
@@ -83,7 +83,7 @@ Convenciones de modelos: GLB, 1 unidad = 1 m, origen en la base, mirando a +Z, e
 | ⬜ | Cielo: Atardecer | `sky.atardecer` | `textures/sky/atardecer.jpg` | JPG equirectangular 2048×1024 (panorama 360°). Se ve sobre todo hacia abajo (el abismo): que no tenga horizonte muy marcado. | src/render/gameView.ts → buildBackdrop (color plano + rocas y cristales) |
 | ⬜ | Cielo: Noche | `sky.noche` | `textures/sky/noche.jpg` | JPG equirectangular 2048×1024 (panorama 360°). Se ve sobre todo hacia abajo (el abismo): que no tenga horizonte muy marcado. | src/render/gameView.ts → buildBackdrop (color plano + rocas y cristales) |
 
-## Proyectiles (0/8)
+## Proyectiles (0/12)
 
 | ✔ | Pieza | Id | Archivo | Especificación | Hoy (código) |
 |---|---|---|---|---|---|
@@ -95,8 +95,24 @@ Convenciones de modelos: GLB, 1 unidad = 1 m, origen en la base, mirando a +Z, e
 | ⬜ | Marea (Gloop R) | `proj.wave` | `models/projectiles/wave.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
 | ⬜ | Gancho (Remache F) | `proj.hook` | `models/projectiles/hook.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
 | ⬜ | Bala de torreta | `proj.bolt` | `models/projectiles/bolt.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
+| ⬜ | Disparo de torre (Asedio) | `proj.tbolt` | `models/projectiles/tbolt.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
+| ⬜ | Disparo del núcleo (Asedio) | `proj.coreshot` | `models/projectiles/coreshot.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
+| ⬜ | Chispa (esbirro a distancia) | `proj.spark` | `models/projectiles/spark.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
+| ⬜ | Cañonazo del Ariete | `proj.cannon` | `models/projectiles/cannon.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Centrado, apuntando a +Z (dirección de vuelo). Chico y legible desde arriba; emisivo con el color del efecto. | src/render/fx.ts → buildProjectileMesh |
 
-## Íconos (0/39)
+## Asedio (0/7)
+
+| ✔ | Pieza | Id | Archivo | Especificación | Hoy (código) |
+|---|---|---|---|---|---|
+| ⬜ | Esbirro Guijarro (cuerpo a cuerpo) | `unit.melee` | `models/units/melee.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. ≈ 1.0 m de alto. Golemcito de piedra; lo que lleva el color del equipo con material "team". ≤ 1.200 tris (se ven muchos a la vez). | src/render/mobaView.ts → buildUnitMesh |
+| ⬜ | Esbirro Chispa (a distancia) | `unit.ranged` | `models/units/ranged.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. ≈ 1.3 m. Cristal que flota sobre una base; anillo con material "team". ≤ 1.200 tris (se ven muchos a la vez). | src/render/mobaView.ts → buildUnitMesh |
+| ⬜ | Esbirro Ariete (asedio) | `unit.siege` | `models/units/siege.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. ≈ 1.3 m, huella 1 × 1.1 m. Carro con cañón apuntando a +Z; franja con material "team". ≤ 1.200 tris (se ven muchos a la vez). | src/render/mobaView.ts → buildUnitMesh |
+| ⬜ | Babosa (campamento neutral) | `unit.neutral` | `models/units/neutral.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. ≈ 0.9 m. Gota de goo con ojos. ≤ 1.200 tris (se ven muchos a la vez). | src/render/mobaView.ts → buildUnitMesh |
+| ⬜ | El Coloso (objetivo neutral) | `unit.coloso` | `models/units/coloso.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. ≈ 3 m de alto. Gólem de piedra con cristales; que se lea como jefe desde lejos. ≤ 1.200 tris (se ven muchos a la vez). | src/render/mobaView.ts → buildUnitMesh |
+| ⬜ | Torre | `struct.tower` | `models/structures/tower.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Huella 1.8 × 1.8 m, alto 4 m (la colisión usa eso). Lo del color del equipo con material "team"; lo que gira arriba en un nodo "spin". | src/render/mobaView.ts → buildFixedMesh |
+| ⬜ | Núcleo | `struct.core` | `models/structures/core.glb` | GLB, 1 unidad = 1 m, origen en la base, mirando a +Z. Estilo toon/low-poly. Huella 3.2 × 3.2 m, alto 3.4 m. Material "team" y nodo "spin" como la torre. | src/render/mobaView.ts → buildFixedMesh |
+
+## Íconos (0/40)
 
 | ✔ | Pieza | Id | Archivo | Especificación | Hoy (código) |
 |---|---|---|---|---|---|
@@ -122,6 +138,7 @@ Convenciones de modelos: GLB, 1 unidad = 1 m, origen en la base, mirando a +Z, e
 | ⬜ | Remache R: Imán | `icon.ability.remache.r` | `icons/abilities/remache_r.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/core/heroes/remache.ts (icon: 🧲) |
 | ⬜ | Empujón | `icon.push` | `icons/abilities/push.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/ui/hud.ts → buildBar (🫸) |
 | ⬜ | Dash | `icon.dash` | `icons/abilities/dash.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/ui/hud.ts → buildBar (💨) |
+| ⬜ | Volver a la base (Asedio) | `icon.recall` | `icons/abilities/recall.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/ui/hud.ts → buildBar (🏠) |
 | ⬜ | Ítem: Coraza | `icon.item.coraza` | `icons/items/coraza.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/core/items.ts (icon: 🛡️) |
 | ⬜ | Ítem: Lastre | `icon.item.lastre` | `icons/items/lastre.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/core/items.ts (icon: ⚓) |
 | ⬜ | Ítem: Suela de goma | `icon.item.suela` | `icons/items/suela.png` | PNG 128×128 con fondo transparente, borde grueso, legible a 40 px. | src/core/items.ts (icon: 👟) |

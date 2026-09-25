@@ -116,3 +116,14 @@ Donde el GDD dejaba una pregunta abierta, acá está la respuesta **provisoria**
 **DW-43 · Todo lo procedural es reemplazable de a una pieza.** Cada modelo, textura, ícono y sonido generado por código tiene un id en `src/assets/catalog.ts` con el archivo esperado y su especificación. Si el archivo está listado en `public/assets/manifest.json`, el juego lo usa; si no (o si falla), cae a lo procedural. La galería del menú (🧩 Assets) muestra cada pieza girando, su estado y qué archivo crear; la checklist [ASSETS_CATALOGO.md](ASSETS_CATALOGO.md) se genera del catálogo y un test avisa si quedó desactualizada.
 
 **DW-44 · El directorio de salas usa un solo canal por pestaña.** `supabase.channel(nombre)` devuelve el canal existente si ya hay uno con ese nombre; el menú y el host abrían cada uno el suyo sobre `rubble-lobby` y el segundo intentaba agregar listeners a un canal ya suscripto ("cannot add presence callbacks after subscribe"). Ahora hay un canal compartido con contador de usos y `freshChannel` limpia restos viejos antes de crear uno.
+
+## Tercera ronda: el Asedio (MOBA) y ajustes de control
+
+**DW-45 · Tecla arma, clic izquierdo lanza, clic derecho cancela.** Reemplaza a DW-41. Las habilidades e ítems con objetivo se **arman** con su tecla (se ve el área en el cursor y el ícono se resalta), el **clic izquierdo** las lanza y el **clic derecho** o **Esc** las cancela. Las que no tienen objetivo salen al toque. Si no está lista, avisa por qué y no se arma. El cliente resuelve el apuntado (`src/game/castControl.ts`, lógica pura con tests) y manda un pulso de un tick; la simulación lanza en el flanco (`pressed`). Opción "lanzamiento rápido" en Ajustes para quien quiera todo al apretar la tecla.
+
+**DW-46 · Los disparos básicos no empujan.** Probado en partida: el empuje de cada disparo básico a distancia (Esquirla, Pegote, torreta de Remache) hacía casi imposible que el cuerpo a cuerpo se acercara. Ahora suman heat pero no mueven; el knockback queda para habilidades, cuerpo a cuerpo y el empujón. El Pegote frena menos (15% por 0.6 s).
+
+**DW-47 · Fin de partida: se festeja, no se sigue jugando.** Al terminar se apagan proyectiles, zonas y lo programado, nadie se mueve ni ataca (tampoco los esbirros ni las torres) y los personajes miran a cámara: los ganadores saltan con los brazos arriba y papelitos, los perdedores lloran (lágrimas azules, nada blanco) y en empate se encogen de hombros. Vale para todos los modos.
+
+**DW-48 · Asedio (MOBA): 1 línea hasta 2v2, 2 líneas en 3v3.** El mapa se elige solo al empezar según el equipo más grande. Diseño completo, números y por qué en [MOBA.md](MOBA.md). Decisiones clave: sin barra de vida para los héroes (pregunta abierta, ver MOBA.md A-1), esbirros como cuerpos con la misma física (se los puede tirar al vacío), oro que es escombro, forja solo en la base, `B` para volver, piso frágil que se rearma y oleadas "enfurecidas" en líneas abiertas para cerrar partidas.
+

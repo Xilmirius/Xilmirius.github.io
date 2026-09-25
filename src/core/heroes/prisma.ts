@@ -14,7 +14,7 @@ export const prisma: HeroDef = {
   passive: 'Cristal: +15% heat infligido, volás 10% más. Al quedar Destrozado, estallás una vez empujando a todos.',
   basic: {
     name: 'Esquirla',
-    desc: 'Disparo de cristal a distancia. Suma heat.',
+    desc: 'Disparo de cristal a distancia. Suma heat (no empuja: los disparos básicos rompen, no alejan).',
     kind: 'ranged',
     cd: 0.38,
     range: 14,
@@ -24,7 +24,7 @@ export const prisma: HeroDef = {
       for (const s of spreads) {
         const c = Math.cos(s), sn = Math.sin(s);
         sim.fireProjectile(ch, {
-          kind: 'shard', speed: 25, range: 14, radius: 0.3, heat: 4, kb: 4, destruct: 8,
+          kind: 'shard', speed: 25, range: 14, radius: 0.3, heat: 4, kb: 0, destruct: 8,
           dirX: a.dx * c - a.dz * sn, dirZ: a.dx * sn + a.dz * c,
         }, NO_MODS);
       }

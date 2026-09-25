@@ -6,8 +6,10 @@ Arena brawler isométrico para jugar **en el navegador con amigos**: sesiones co
 
 - 4 héroes, uno por familia de material: **Canto** (Piedra), **Prisma** (Cristal), **Gloop** (Goo), **Remache** (Metal).
 - Mapa que se rompe: cobertura destructible, pisos frágiles que dejan agujeros, materiales para farmear.
-- Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación: la base del futuro modo MOBA).
-- 3 modos de victoria: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
+- Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación).
+- 3 modos de arena: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
+- **🏰 Asedio (MOBA)**: bases, torres, núcleo y oleadas de esbirros; 1 línea hasta 2v2 y 2 líneas en 3v3, el Coloso, campamentos, minimapa, `B` para volver a la base y forja en la base. Sin barra de vida: los puentes están sobre el vacío. Diseño en [docs/MOBA.md](docs/MOBA.md).
+- Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela.
 - **Mantené la tecla para apuntar**: cada habilidad dibuja en el piso su área, línea, cono o muro antes de usarla. **Tooltips** en todo (habilidades, ítems, tu cuerpo, niveles, héroes, reglas).
 - Bots para practicar, completar equipos y reemplazar a quien se desconecta.
 - Multijugador **P2P por WebRTC** (host autoritativo en el navegador) con signaling en **Supabase Realtime**. Cero servidores propios.
@@ -133,7 +135,8 @@ Detalle completo, flujo de mensajes y cómo escalar a servidor dedicado: [docs/a
 src/
   core/          Simulación pura (sin Three.js ni DOM): se puede correr en Node o en un server dedicado
     sim.ts         Simulación autoritativa: combate, knockback, proyectiles, zonas, materiales
-    rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo)
+    rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo, Asedio)
+    moba/          Asedio (MOBA): números (defs.ts), oleadas, IA de esbirros y torres, base, Coloso (mode.ts)
     movement.ts    Movimiento compartido (host y predicción del cliente usan el mismo código, dash incluido)
     terrain.ts     Terreno como grilla de alturas; baldosas frágiles
     collision.ts   Colisión terreno + obstáculos
@@ -141,15 +144,15 @@ src/
     items.ts       Ítems pasivos/activos
     mutations.ts   Rutas de mutación (Tanque/Carry/Support)
     modes.ts       Modos de juego (interfaz agnóstica)
-    bots.ts        IA (A* sobre la grilla, recuperación, crafteo)
+    bots.ts        IA (A* sobre la grilla, recuperación, crafteo; en Asedio: línea, remate, torres, volver a la base)
     snapshot.ts    Frames de mundo, codificación de red e interpolación
     maps/          Mapas en ASCII
   net/           Signaling (Supabase / local), WebRTC, sesiones host y cliente
-  render/        Three.js: terreno, beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), temas
+  render/        Three.js: terreno, beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), Asedio (mobaView.ts), temas
   assets/        Catálogo de piezas reemplazables (catalog.ts) y cargador con fallback a lo procedural (registry.ts)
   audio/         Síntesis de sonido y música generativa (WebAudio)
-  ui/            Menú, lobby, HUD, forja, tooltips (tooltip.ts, tips.ts), galería de assets, estilos
-  game/          Bucle de partida (hitstop visual cortito), input, ticker en Worker, menú animado, perfil y logros
+  ui/            Menú, lobby, HUD, forja, minimapa, tooltips (tooltip.ts, tips.ts), galería de assets, estilos
+  game/          Bucle de partida (hitstop visual cortito), input y lanzamiento (castControl.ts), ticker en Worker, menú animado, perfil y logros
   db/            Persistencia en Postgres (historial)
 supabase/migrations/   SQL del esquema
 tests/                 Unit tests + partidas headless de bots + E2E con Playwright
@@ -159,7 +162,7 @@ tests/                 Unit tests + partidas headless de bots + E2E con Playwrig
 
 - **Modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (victoria en `modes.ts` + reglas en `rules.ts` + mapa).
 - **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
-- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo). El test `mapas` valida que tenga spawns, zonas y frágiles.
+- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo). El test `mapas` valida que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; el test verifica que las líneas sean transitables y que el mapa esté espejado.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
 - **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
 
@@ -170,6 +173,7 @@ npm test                 # unit tests + partidas completas de bots en headless (
 npm run assets:doc       # regenera docs/ASSETS_CATALOGO.md desde el catálogo
 npm run build
 npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente por WebRTC real en 2 pestañas
+node tests/e2e/moba.mjs  # Chromium: Asedio 2v2 y 3v3 (lanzar con clic, cancelar, B, forja en base, fin de partida)
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
 VITEST_TOOLS=1 npx vitest run # herramientas de balance (tabla de knockback, estadísticas de bots)
 ```

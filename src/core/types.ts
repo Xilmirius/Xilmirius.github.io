@@ -29,7 +29,7 @@ export const ABILITY_SLOTS: AbilitySlot[] = ['q', 'e', 'f', 'r'];
 export type Route = 'tank' | 'carry' | 'support';
 export const ROUTE_NAMES: Record<Route, string> = { tank: 'Tanque', carry: 'Carry', support: 'Support' };
 
-export type ModeId = 'stock' | 'kills' | 'koth';
+export type ModeId = 'stock' | 'kills' | 'koth' | 'moba';
 export type { RulesetId } from './rules';
 export type HeroId = 'canto' | 'prisma' | 'gloop' | 'remache';
 export const HERO_IDS: HeroId[] = ['canto', 'prisma', 'gloop', 'remache'];

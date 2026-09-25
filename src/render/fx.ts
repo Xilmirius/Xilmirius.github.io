@@ -91,20 +91,24 @@ export class Particles {
 
 export const PROJ_COLORS: Record<string, number> = {
   shard: 0x4fd1ff, lance: 0x3fb4ff, glob: 0x7bea4f, wave: 0x4fdc4a, hook: 0x8fa3b8, bolt: 0xffc629, nova: 0x9d7bff, goolob: 0x7bea4f,
+  tbolt: 0xff5a4a, coreshot: 0xff5a4a, spark: 0x7fe3ff, cannon: 0x3a4048,
 };
+/** Proyectiles que toman el color del equipo que dispara (torres, núcleo, esbirros). */
+const TEAM_TINT = new Set(['tbolt', 'coreshot', 'spark']);
 
 /** Malla de un proyectil: el GLB proj.<tipo> si existe, si no la versión procedural. */
-export function buildProjectileMesh(kind: string, radius: number): THREE.Object3D {
+export function buildProjectileMesh(kind: string, radius: number, tint?: number): THREE.Object3D {
   const file = assetModel(`proj.${kind}`);
   if (file) {
     if (kind === 'wave') file.scale.set(radius, 1, radius * 0.5);
+    if (tint !== undefined) file.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (m && m.name === 'team') m.color?.setHex(tint); });
     return file;
   }
-  return buildProjectileProcedural(kind, radius);
+  return buildProjectileProcedural(kind, radius, tint);
 }
 
-function buildProjectileProcedural(kind: string, radius: number): THREE.Object3D {
-  const c = PROJ_COLORS[kind] ?? 0xffc629;
+function buildProjectileProcedural(kind: string, radius: number, tint?: number): THREE.Object3D {
+  const c = tint ?? PROJ_COLORS[kind] ?? 0xffc629;
   const glow = (k = 1.3) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(Math.min(1.35, k)), toneMapped: false });
   const tg = toonGradient();
   switch (kind) {
@@ -135,6 +139,22 @@ function buildProjectileProcedural(kind: string, radius: number): THREE.Object3D
       m.scale.set(1, 1.6, 1);
       return m;
     }
+    case 'tbolt': case 'coreshot': {
+      // Disparo de torre: rombo brillante del color del equipo con un anillo.
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(kind === 'coreshot' ? 0.36 : 0.3), glow(1.35));
+      m.scale.set(0.8, 0.8, 1.8);
+      const r = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.05, 6, 16), glow(1.2));
+      g.add(m, r);
+      return g;
+    }
+    case 'spark': {
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), glow(1.3));
+      m.scale.set(0.7, 0.7, 1.6);
+      return m;
+    }
+    case 'cannon':
+      return new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 0), new THREE.MeshToonMaterial({ color: c, gradientMap: tg }));
     default:
       return new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.12, radius), 8, 6), glow(1.3));
   }
@@ -145,15 +165,16 @@ export class ProjectilesView {
   private map = new Map<number, THREE.Object3D>();
   private chains = new Map<number, THREE.Line>();
 
-  constructor(private particles: Particles) {}
+  constructor(private particles: Particles, private teamColor: (t: number) => number = () => 0xffc629) {}
 
   update(list: ProjFrame[], ownerPos: (id: number) => THREE.Vector3 | null, time: number) {
     const seen = new Set<number>();
     for (const p of list) {
       seen.add(p.id);
       let o = this.map.get(p.id);
+      const tint = TEAM_TINT.has(p.k) ? this.teamColor(p.tm) : undefined;
       if (!o) {
-        o = buildProjectileMesh(p.k, p.r);
+        o = buildProjectileMesh(p.k, p.r, tint);
         this.group.add(o);
         this.map.set(p.id, o);
       }
@@ -163,6 +184,8 @@ export class ProjectilesView {
       if (p.k === 'wave') o.position.y = p.y - 0.6;
       if (p.k === 'shard' || p.k === 'lance' || p.k === 'nova') this.particles.trail(p.x, p.y, p.z, PROJ_COLORS[p.k], p.k === 'nova' ? 0.2 : 0.07, 0.25);
       if (p.k === 'glob' || p.k === 'wave') { if (Math.random() < 0.5) this.particles.trail(p.x, p.y - 0.2, p.z, 0x7bea4f, 0.1, 0.4); }
+      if (tint !== undefined && p.k !== 'spark') this.particles.trail(p.x, p.y, p.z, tint, 0.12, 0.3);
+      if (p.k === 'tbolt' || p.k === 'coreshot') o.rotation.z = time * 10;
       if (p.k === 'hook') {
         // Cadena desde el dueño
         let line = this.chains.get(p.id);

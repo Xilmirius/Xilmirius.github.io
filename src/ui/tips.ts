@@ -2,7 +2,7 @@
 // así si cambia el balance, el tooltip se actualiza solo).
 import { iconHtml } from '../assets/registry';
 import {
-  DASH_CD, MUTATION_LEVELS, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP,
+  DASH_CD, MUTATION_LEVELS, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
 } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
@@ -57,14 +57,25 @@ export function abilityTip(heroId: HeroId, slot: AbilitySlot, rules: Ruleset, o:
     + p(a.desc)
     + (o.mut ? p(`🧬 <b>${ROUTE_FLAVOR[hero.family][o.mut]}</b> (${ROUTE_NAMES[o.mut]}): ${ROUTE_DESC[o.mut]}`, 'tt-mut') : '')
     + (ult ? p(`La ulti se llena pegando (≈${Math.round(1 / ULT_PER_HEAT)} de heat), con los trozos que soltás al romper cosas (+${Math.round(ULT_PER_PICKUP * 100)}% cada uno) y de a poco sola.`, 'tt-note') : '')
-    + p(`Mantené <kbd>${KEY[slot]}</kbd> para ver el área; soltá para usarla.`, 'tt-hint');
+    + p(a.shape.k === 'self'
+      ? `<kbd>${KEY[slot]}</kbd>: sale al toque.`
+      : `<kbd>${KEY[slot]}</kbd> apunta (ves el área) · <b>clic izquierdo</b> la lanza · <b>clic derecho</b> cancela.`, 'tt-hint');
 }
 
 export function basicTip(heroId: HeroId) {
   const b = HEROES[heroId].basic;
   return head(iconHtml(`icon.basic.${heroId}`, b.kind === 'melee' ? '👊' : '🎯'), b.name, 'Clic')
     + tags([b.kind === 'melee' ? `Cuerpo a cuerpo · ${m(b.range)}` : `A distancia · ${m(b.range)}`, `Cada ${s(b.cd)}`])
-    + p(b.desc) + p('Mantené el clic para seguir pegando. Romper es el primer paso: cada golpe te suma <b>heat</b> al rival.', 'tt-hint');
+    + p(b.desc) + p(b.kind === 'ranged'
+      ? 'Mantené el clic para seguir disparando. Los disparos básicos <b>no empujan</b>: suman heat para que después lo saques con habilidades o el empujón.'
+      : 'Mantené el clic para seguir pegando. Romper es el primer paso: cada golpe te suma <b>heat</b> al rival.', 'tt-hint');
+}
+
+export function recallTip() {
+  return head(iconHtml('icon.recall', '🏠'), 'Volver a la base', 'B')
+    + tags([`${s(RECALL_TIME)} quieto`])
+    + p('Te teletransporta a tu base. En la base te enfriás rápido (se te va el heat) y podés forjar.')
+    + p('Se corta si te movés, atacás, lanzás algo o te pegan. Elegí bien cuándo: en medio de una pelea no llega.', 'tt-hint');
 }
 
 export function pushTip() {
@@ -139,10 +150,21 @@ export function rulesTip(id: RulesetId) {
   const r = RULESETS[id];
   const on = (b: boolean, t: string) => `<li class="${b ? 'on' : 'off'}">${b ? '✔' : '✖'} ${t}</li>`;
   return head(r.icon, r.name) + p(r.desc)
-    + `<ul class="tt-list checks">${on(r.progression, 'Niveles y XP')}${on(r.crafting, 'Forja: ítems y mutaciones')}${on(r.repair, 'Reparar (V)')}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, 'Dash (Shift)')}</ul>`;
+    + `<ul class="tt-list checks">${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, 'Reparar (V)')}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, 'Dash (Shift)')}${r.recall ? on(true, 'Volver a la base (B)') : ''}</ul>`;
 }
 
 export function modeTip(id: ModeId) {
+  if (id === 'moba') {
+    return head('🏰', MODE_INFO[id].name) + p(MODE_INFO[id].desc)
+      + `<ul class="tt-list">
+        <li><b>Sin barra de vida</b>: como siempre, te agrietás y morís si te sacan del mapa. Las líneas son puentes sobre el vacío.</li>
+        <li><b>Oleadas</b> de esbirros cada 24 s: Guijarros (cuerpo a cuerpo), Chispas (a distancia) y un Ariete cada 3 oleadas. Se los puede tirar al vacío.</li>
+        <li><b>Economía</b>: rematar un esbirro te da su material al toque, y el esbirro suelta un trozo que junta el que esté cerca.</li>
+        <li><b>Torres</b>: la exterior protege a la interior; las dos protegen al núcleo. Sin esbirros cerca reciben menos daño.</li>
+        <li><b>Tu base</b> te enfría rápido y es donde se forja. <kbd>B</kbd>: volver (4 s quieto).</li>
+        <li><b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.</li>
+      </ul>`;
+  }
   return head('🏁', MODE_INFO[id].name) + p(MODE_INFO[id].desc);
 }
 

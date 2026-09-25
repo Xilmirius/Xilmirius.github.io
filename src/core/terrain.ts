@@ -17,6 +17,8 @@ export interface Cell {
 }
 
 export interface DestructSpawn { kind: Family; x: number; z: number; y: number }
+/** Pieza fija de un mapa de Asedio (torre o núcleo) de un equipo. */
+export interface TeamPiece { team: number; x: number; z: number }
 
 export const TILE_INTACT = 0, TILE_CRACKED = 1, TILE_BROKEN = 2, TILE_CRUMBLING = 3, TILE_GONE = 4;
 
@@ -36,6 +38,13 @@ export class Terrain {
   readonly destructs: DestructSpawn[] = [];
   readonly zonePoints: V3[] = [];
   readonly fragile: number[] = []; // índices de celda
+  // Asedio (MOBA)
+  readonly towers: TeamPiece[] = [];
+  readonly cores: TeamPiece[] = [];
+  readonly camps: V3[] = [];
+  readonly lairs: V3[] = [];
+  /** Recorrido de cada línea en coordenadas del mundo, de la base A a la base B. */
+  readonly lanes: V3[][] = [];
   tileState: Uint8Array;
   tileHp: Float32Array;
   tileTimer: Float32Array;
@@ -50,6 +59,7 @@ export class Terrain {
     this.originX = (-this.w * CELL) / 2;
     this.originZ = (-this.h * CELL) / 2;
     const zoneCells: [number, number, number][] = [];
+    const lairCells: [number, number, number][] = [];
     for (let iz = 0; iz < this.h; iz++) {
       const row = def.rows[iz];
       for (let ix = 0; ix < this.w; ix++) {
@@ -72,6 +82,12 @@ export class Terrain {
           case '*': this.spawns.ffa.push({ x: c.x, y: 0, z: c.z }); break;
           case 'z': zoneCells.push([ix, iz, 0]); break;
           case 'Z': cell.level = 1; zoneCells.push([ix, iz, 1]); break;
+          case 'X': this.towers.push({ team: 0, x: c.x, z: c.z }); break;
+          case 'x': this.towers.push({ team: 1, x: c.x, z: c.z }); break;
+          case 'K': this.cores.push({ team: 0, x: c.x, z: c.z }); break;
+          case 'k': this.cores.push({ team: 1, x: c.x, z: c.z }); break;
+          case 'n': this.camps.push({ x: c.x, y: 0, z: c.z }); break;
+          case '@': lairCells.push([ix, iz, 0]); break;
           default: {
             const d = DESTRUCT_CHARS[ch];
             if (d) {
@@ -83,31 +99,41 @@ export class Terrain {
         this.cells.push(cell);
       }
     }
-    // Agrupar celdas de zona contiguas en un solo punto.
-    const used = new Set<number>();
-    for (let i = 0; i < zoneCells.length; i++) {
-      if (used.has(i)) continue;
-      const group = [i];
-      used.add(i);
-      for (let k = 0; k < group.length; k++) {
-        const [ax, az] = zoneCells[group[k]];
-        for (let j = 0; j < zoneCells.length; j++) {
-          if (used.has(j)) continue;
-          const [bx, bz] = zoneCells[j];
-          if (Math.abs(ax - bx) + Math.abs(az - bz) === 1) { used.add(j); group.push(j); }
-        }
-      }
-      let x = 0, z = 0, lv = 0;
-      for (const g of group) {
-        const c = this.cellCenter(zoneCells[g][0], zoneCells[g][1]);
-        x += c.x; z += c.z; lv = Math.max(lv, zoneCells[g][2]);
-      }
-      this.zonePoints.push({ x: x / group.length, y: lv * LEVEL_H, z: z / group.length });
+    this.zonePoints.push(...this.groupCells(zoneCells));
+    this.lairs.push(...this.groupCells(lairCells));
+    for (const lane of def.lanes ?? []) {
+      this.lanes.push(lane.map(([ix, iz]) => { const c = this.cellCenter(ix, iz); return { x: c.x, y: 0, z: c.z }; }));
     }
     const n = this.fragile.length;
     this.tileState = new Uint8Array(n);
     this.tileHp = new Float32Array(n).fill(TILE_HP);
     this.tileTimer = new Float32Array(n);
+  }
+
+  /** Agrupa celdas marcadas contiguas en un solo punto (el promedio). */
+  private groupCells(cells: [number, number, number][]): V3[] {
+    const out: V3[] = [];
+    const used = new Set<number>();
+    for (let i = 0; i < cells.length; i++) {
+      if (used.has(i)) continue;
+      const group = [i];
+      used.add(i);
+      for (let k = 0; k < group.length; k++) {
+        const [ax, az] = cells[group[k]];
+        for (let j = 0; j < cells.length; j++) {
+          if (used.has(j)) continue;
+          const [bx, bz] = cells[j];
+          if (Math.abs(ax - bx) + Math.abs(az - bz) === 1) { used.add(j); group.push(j); }
+        }
+      }
+      let x = 0, z = 0, lv = 0;
+      for (const g of group) {
+        const c = this.cellCenter(cells[g][0], cells[g][1]);
+        x += c.x; z += c.z; lv = Math.max(lv, cells[g][2]);
+      }
+      out.push({ x: x / group.length, y: lv * LEVEL_H, z: z / group.length });
+    }
+    return out;
   }
 
   cellCenter(ix: number, iz: number) {

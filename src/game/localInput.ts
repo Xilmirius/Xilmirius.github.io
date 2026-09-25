@@ -1,14 +1,13 @@
 // Teclado + mouse → InputFrame. Todo al alcance de una mano (GDD §4).
+// Habilidades e ítems: tecla = armar (se ve el área), clic izquierdo = lanzar, clic derecho/Esc = cancelar
+// (ver castControl.ts). Las teclas de habilidad no se mandan "mantenidas": salen como un pulso al lanzar.
 import { BTN } from '../core/input';
+import { CAST_CODE, CastControl, type CastCheck, type CastKey } from './castControl';
 
 const KEYMAP: Record<string, number> = {
-  Space: BTN.JUMP, KeyQ: BTN.Q, KeyE: BTN.E, KeyF: BTN.F, KeyR: BTN.R,
-  Digit1: BTN.I1, Digit2: BTN.I2, Digit3: BTN.I3, KeyV: BTN.REPAIR,
+  Space: BTN.JUMP, KeyV: BTN.REPAIR, KeyB: BTN.RECALL,
   ShiftLeft: BTN.DASH, ShiftRight: BTN.DASH,
 };
-
-/** Teclas que se "apuntan": mientras se mantienen, se muestra el área; al soltarlas sale la habilidad. */
-export const AIM_KEYS = ['KeyQ', 'KeyE', 'KeyF', 'KeyR', 'Digit1', 'Digit2', 'Digit3'];
 
 /** Clics sobre estos elementos son de la interfaz, no del juego. */
 const UI_TARGET = 'button, input, select, textarea, a, .forge, .results, .modal-wrap, .board, .gallery';
@@ -19,10 +18,16 @@ export class LocalInput {
   private latch = 0;
   enabled = true;
   onKey: (code: string) => void = () => {};
+  /** Habilidad armada y lanzamientos (la conecta la partida con el estado del personaje). */
+  cast: CastControl;
+  /** Un clic que se usó para lanzar/cancelar no cuenta como ataque/empujón hasta soltarlo. */
+  private eatLeft = false;
+  private eatRight = false;
   private el: HTMLElement;
 
-  constructor(el: HTMLElement) {
+  constructor(el: HTMLElement, check: (k: CastKey) => CastCheck = () => 'aim', deny?: (k: CastKey, why: string) => void) {
     this.el = el;
+    this.cast = new CastControl(check, deny);
     window.addEventListener('keydown', this.kd);
     window.addEventListener('keyup', this.ku);
     window.addEventListener('blur', this.blur);
@@ -48,23 +53,31 @@ export class LocalInput {
     if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
     if (!e.repeat) this.onKey(e.code);
     if (!this.enabled) return;
-    // Re-agregar al final: la última tecla apretada es la que se está apuntando.
-    this.keys.delete(e.code);
+    const ck = CAST_CODE[e.code];
+    if (ck) { if (!e.repeat) this.cast.key(ck); return; }
     this.keys.add(e.code);
     const b = KEYMAP[e.code];
     if (b) this.latch |= b;
   };
 
   private ku = (e: KeyboardEvent) => { this.keys.delete(e.code); };
-  private blur = () => { this.keys.clear(); this.mouse.left = this.mouse.right = false; };
+  private blur = () => { this.keys.clear(); this.mouse.left = this.mouse.right = false; this.cast.cancel(); };
   private md = (e: MouseEvent) => {
     if (!this.enabled || this.uiTarget(e)) return;
-    if (e.button === 0) { this.mouse.left = true; this.latch |= BTN.BASIC; }
-    if (e.button === 2) { this.mouse.right = true; this.latch |= BTN.PUSH; }
+    if (e.button === 0) {
+      this.mouse.left = true;
+      if (this.cast.leftClick()) this.eatLeft = true;
+      else this.latch |= BTN.BASIC;
+    }
+    if (e.button === 2) {
+      this.mouse.right = true;
+      if (this.cast.cancel()) this.eatRight = true;
+      else this.latch |= BTN.PUSH;
+    }
   };
   private mu = (e: MouseEvent) => {
-    if (e.button === 0) this.mouse.left = false;
-    if (e.button === 2) this.mouse.right = false;
+    if (e.button === 0) { this.mouse.left = false; this.eatLeft = false; }
+    if (e.button === 2) { this.mouse.right = false; this.eatRight = false; }
   };
   private mm = (e: MouseEvent) => {
     const r = this.el.getBoundingClientRect();
@@ -75,17 +88,14 @@ export class LocalInput {
   };
   private cm = (e: Event) => { if (!this.typing(e) && !this.uiTarget(e)) e.preventDefault(); };
 
-  /** Tecla de habilidad/ítem que se está manteniendo (la última apretada), o null. */
-  aimKey(): string | null {
-    if (!this.enabled) return null;
-    let k: string | null = null;
-    for (const c of this.keys) if (AIM_KEYS.includes(c)) k = c;
-    return k;
+  /** Habilidad/ítem armado (se está apuntando), o null. */
+  armed(): CastKey | null {
+    return this.enabled ? this.cast.armed : null;
   }
 
   /** Movimiento (-1..1) y botones. Los toques rápidos se registran aunque duren menos de un tick. */
   sample(): { mx: number; mz: number; b: number } {
-    if (!this.enabled) { this.latch = 0; return { mx: 0, mz: 0, b: 0 }; }
+    if (!this.enabled) { this.latch = 0; this.cast.take(); this.cast.cancel(); return { mx: 0, mz: 0, b: 0 }; }
     const k = this.keys;
     let mx = 0, mz = 0;
     if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
@@ -94,11 +104,13 @@ export class LocalInput {
     if (k.has('KeyS') || k.has('ArrowDown')) mz += 1;
     let b = 0;
     for (const [code, bit] of Object.entries(KEYMAP)) if (k.has(code)) b |= bit;
-    if (this.mouse.left) b |= BTN.BASIC;
-    if (this.mouse.right) b |= BTN.PUSH;
+    if (this.mouse.left && !this.eatLeft) b |= BTN.BASIC;
+    if (this.mouse.right && !this.eatRight) b |= BTN.PUSH;
     // Un toque que empezó y terminó entre dos ticks se cuenta como mantenido en este tick.
     b |= this.latch;
     this.latch = 0;
+    // Lanzamientos: un pulso de un tick por habilidad (la simulación lanza al apretar).
+    b |= this.cast.take();
     return { mx, mz, b };
   }
 

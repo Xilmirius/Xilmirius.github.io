@@ -106,6 +106,7 @@ const PROJ: [string, string][] = [
   ['shard', 'Esquirla (Prisma, básico)'], ['lance', 'Lanza de cuarzo (Prisma Q)'], ['nova', 'Supernova (Prisma R)'],
   ['glob', 'Pegote (Gloop, básico)'], ['goolob', 'Frasco / Charco (lanzado)'], ['wave', 'Marea (Gloop R)'],
   ['hook', 'Gancho (Remache F)'], ['bolt', 'Bala de torreta'],
+  ['tbolt', 'Disparo de torre (Asedio)'], ['coreshot', 'Disparo del núcleo (Asedio)'], ['spark', 'Chispa (esbirro a distancia)'], ['cannon', 'Cañonazo del Ariete'],
 ];
 for (const [k, name] of PROJ) {
   add({
@@ -114,6 +115,32 @@ for (const [k, name] of PROJ) {
     code: 'src/render/fx.ts → buildProjectileMesh',
   });
 }
+
+// ───────────── Asedio (MOBA) ─────────────
+const UNIT_ASSETS: [string, string, string][] = [
+  ['melee', 'Esbirro Guijarro (cuerpo a cuerpo)', '≈ 1.0 m de alto. Golemcito de piedra; lo que lleva el color del equipo con material "team".'],
+  ['ranged', 'Esbirro Chispa (a distancia)', '≈ 1.3 m. Cristal que flota sobre una base; anillo con material "team".'],
+  ['siege', 'Esbirro Ariete (asedio)', '≈ 1.3 m, huella 1 × 1.1 m. Carro con cañón apuntando a +Z; franja con material "team".'],
+  ['neutral', 'Babosa (campamento neutral)', '≈ 0.9 m. Gota de goo con ojos.'],
+  ['coloso', 'El Coloso (objetivo neutral)', '≈ 3 m de alto. Gólem de piedra con cristales; que se lea como jefe desde lejos.'],
+];
+for (const [k, name, spec] of UNIT_ASSETS) {
+  add({
+    id: `unit.${k}`, kind: 'model', group: 'Asedio', name, file: `models/units/${k}.glb`,
+    spec: `${MODEL_RULES} ${spec} ≤ 1.200 tris (se ven muchos a la vez).`,
+    code: 'src/render/mobaView.ts → buildUnitMesh',
+  });
+}
+add({
+  id: 'struct.tower', kind: 'model', group: 'Asedio', name: 'Torre', file: 'models/structures/tower.glb',
+  spec: `${MODEL_RULES} Huella 1.8 × 1.8 m, alto 4 m (la colisión usa eso). Lo del color del equipo con material "team"; lo que gira arriba en un nodo "spin".`,
+  code: 'src/render/mobaView.ts → buildFixedMesh',
+});
+add({
+  id: 'struct.core', kind: 'model', group: 'Asedio', name: 'Núcleo', file: 'models/structures/core.glb',
+  spec: `${MODEL_RULES} Huella 3.2 × 3.2 m, alto 3.4 m. Material "team" y nodo "spin" como la torre.`,
+  code: 'src/render/mobaView.ts → buildFixedMesh',
+});
 
 // ───────────── íconos ─────────────
 const ICON_SPEC = 'PNG 128×128 con fondo transparente, borde grueso, legible a 40 px.';
@@ -127,6 +154,7 @@ for (const id of HERO_IDS) {
 }
 add({ id: 'icon.push', kind: 'icon', group: 'Íconos', name: 'Empujón', file: 'icons/abilities/push.png', spec: ICON_SPEC, code: 'src/ui/hud.ts → buildBar (🫸)' });
 add({ id: 'icon.dash', kind: 'icon', group: 'Íconos', name: 'Dash', file: 'icons/abilities/dash.png', spec: ICON_SPEC, code: 'src/ui/hud.ts → buildBar (💨)' });
+add({ id: 'icon.recall', kind: 'icon', group: 'Íconos', name: 'Volver a la base (Asedio)', file: 'icons/abilities/recall.png', spec: ICON_SPEC, code: 'src/ui/hud.ts → buildBar (🏠)' });
 for (const it of ITEMS) {
   add({ id: `icon.item.${it.id}`, kind: 'icon', group: 'Íconos', name: `Ítem: ${it.name}`, file: `icons/items/${it.id}.png`, spec: ICON_SPEC, code: `src/core/items.ts (icon: ${it.icon})` });
 }

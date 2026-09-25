@@ -4,12 +4,13 @@ import { audio } from '../audio/audio';
 import { getPrefs, savePrefs } from '../config';
 import { toast } from '../ui/dom';
 import { CollisionWorld, type Obstacle } from '../core/collision';
-import { DT, INTERP_TICKS } from '../core/constants';
+import { BASE_RADIUS, DT, INTERP_TICKS } from '../core/constants';
 import { DESTRUCT_DEF, SLOTS } from '../core/entities';
 import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
+import { CORE, TOWER } from '../core/moba/defs';
 import { ROUTE_MODS } from '../core/mutations';
-import { getRules, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
+import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { TEAM_COLORS } from '../core/constants';
 import type { AbilitySlot, HeroId } from '../core/types';
 import type { AimView } from '../render/indicator';
@@ -23,13 +24,17 @@ import type { ClientSession } from '../net/client';
 import type { HostSession } from '../net/host';
 import { GameView } from '../render/gameView';
 import { Hud } from '../ui/hud';
+import type { CastCheck, CastKey } from './castControl';
 import { LocalInput } from './localInput';
 import { applyMatch } from './profile';
 import { Ticker } from './ticker';
 
-const STRUCT_DIM: Record<string, [number, number]> = { wall: [0.55, 1.8], stonewall: [0.55, 1.8], turret: [0.4, 1.2] };
-const AIM_SLOT: Record<string, AbilitySlot> = { KeyQ: 'q', KeyE: 'e', KeyF: 'f', KeyR: 'r' };
-const AIM_ITEM: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 2 };
+const STRUCT_DIM: Record<string, [number, number]> = {
+  wall: [0.55, 1.8], stonewall: [0.55, 1.8], turret: [0.4, 1.2], tower: [TOWER.hw, TOWER.h], core: [CORE.hw, CORE.h],
+};
+const ITEM_KEYS: Record<string, number> = { i1: 0, i2: 1, i3: 2 };
+/** Margen de enfriamiento con el que ya se puede armar (el host guarda el lanzamiento un instante). */
+const ARM_EARLY = 0.3;
 
 export interface MatchHooks {
   onEscape(): void;
@@ -71,6 +76,8 @@ export class MatchRunner {
   private teamColor = TEAM_COLORS[0];
   private heartT = 0;
   private lowFpsT = 0;
+  /** Centro de tu base (Asedio: la forja solo funciona ahí). */
+  private baseAt: { x: number; z: number } | null = null;
 
   constructor(
     container: HTMLElement,
@@ -81,18 +88,21 @@ export class MatchRunner {
     const prefs = getPrefs();
     const me = init.roster.find((r) => r.pid === session.localPid);
     this.localId = me ? me.id : -1;
-    this.rules = getRules(init.settings.rules);
+    this.rules = rulesFor(init.settings);
     this.heroId = me ? me.hero : null;
     this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
-    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: getRules(init.settings.rules).pickups });
+    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups });
     this.cw = new CollisionWorld(this.view.terrain);
-    this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c));
+    this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c), this.view.terrain);
+    const spawns = this.view.terrain.spawns.team[me?.team ?? 0] ?? [];
+    if (spawns.length) this.baseAt = { x: spawns.reduce((a, p) => a + p.x, 0) / spawns.length, z: spawns.reduce((a, p) => a + p.z, 0) / spawns.length };
     this.view.onImpact = (stop) => this.impact(stop);
     this.view.onLocalPickup = (sx, sy, mat) => this.hud.flyMat(sx, sy, mat);
     this.hud.onFlash = (c, a) => this.view.flash(c, a);
     audio.tension = 0;
     audio.announcer = prefs.announcer;
-    this.input = new LocalInput(this.view.renderer.domElement);
+    this.input = new LocalInput(this.view.renderer.domElement, (k) => this.castCheck(k), (_k, why) => this.castDeny(why));
+    this.input.cast.quick = prefs.quickCast;
     this.input.onKey = (code) => this.onKey(code);
     this.frames = session.isHost ? (session as HostSession).frames : new FrameBuffer();
     this.ticker = new Ticker(() => this.step());
@@ -118,6 +128,7 @@ export class MatchRunner {
     if (code === 'KeyC' && this.rules.crafting) this.hud.toggleForge();
     else if (code === 'Tab') { this.boardHeld = true; this.hud.showBoard(true); }
     else if (code === 'Escape') {
+      if (this.input.cast.cancel()) return;
       if (this.hud.forgeOpen) this.hud.toggleForge(false);
       else this.hooks.onEscape();
     }
@@ -141,6 +152,8 @@ export class MatchRunner {
 
   private buildInput(): InputFrame {
     const s = this.input.sample();
+    // Terminó la partida: nadie se mueve ni ataca (se festeja).
+    if ((this.latestWorld ?? this.frames.latest())?.phase === 'end') { s.mx = 0; s.mz = 0; s.b = 0; this.input.cast.cancel(); }
     const pos = this.pred ? this.pred.pos : this.localChar();
     const refY = pos ? pos.y : 0;
     this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
@@ -247,24 +260,55 @@ export class MatchRunner {
     this.stopT = Math.max(this.stopT, Math.min(0.1, hitstop));
   }
 
-  /** Qué dibujar mientras mantenés la tecla de una habilidad o ítem (área, línea, cono...). */
+  /** ¿Se puede lanzar/armar esta habilidad o ítem ahora? 'aim' (se apunta), 'now' (sale al toque) o el motivo. */
+  private castCheck(k: CastKey): CastCheck {
+    const me = this.me, local = this.localChar();
+    if (!this.heroId || !me || !local) return 'Todavía no';
+    if (local.fl & F_DEAD) return 'Estás fuera de juego';
+    const n = ITEM_KEYS[k];
+    if (n === undefined) {
+      const slot = k as AbilitySlot;
+      const a = HEROES[this.heroId].abilities[slot];
+      if (local.lv < unlockLevel(this.rules, a)) return `${a.name}: se desbloquea en nivel ${unlockLevel(this.rules, a)}`;
+      if (usesUltCharge(this.rules, slot)) {
+        if (me.ult < 1) return `${a.name}: la ulti se carga pegando (${Math.floor(me.ult * 100)}%)`;
+      } else {
+        const cd = me.cd[SLOTS.indexOf(slot)];
+        if (cd > ARM_EARLY) return `${a.name}: lista en ${Math.ceil(cd)} s`;
+      }
+      return a.shape.k === 'self' ? 'now' : 'aim';
+    }
+    if (!this.rules.crafting) return 'Estas reglas no tienen ítems';
+    const id = me.act[n];
+    const it = id ? ITEM_BY_ID[id] : null;
+    if (!it) return `Espacio ${n + 1} vacío: forjá un ítem activo (C)`;
+    const cd = me.cd[SLOTS.indexOf(k as 'i1' | 'i2' | 'i3')];
+    if (cd > ARM_EARLY) return `${it.name}: listo en ${Math.ceil(cd)} s`;
+    return !it.shape || it.shape.k === 'self' ? 'now' : 'aim';
+  }
+
+  private castDeny(why: string) {
+    this.hud.localDeny(why);
+    audio.play('deny', 0.6);
+  }
+
+  /** Qué dibujar mientras hay una habilidad o ítem armado (área, línea, cono...). */
   private computeAim(local: CharFrame | null): AimView | null {
     const me = this.me;
-    const code = this.input.aimKey();
-    if (!code || !local || !me || !this.heroId || (local.fl & F_DEAD)) return null;
-    const slot = AIM_SLOT[code];
-    if (slot) {
+    this.input.cast.revalidate();
+    const k = this.input.armed();
+    if (!k || !local || !me || !this.heroId || (local.fl & F_DEAD)) return null;
+    const n = ITEM_KEYS[k];
+    if (n === undefined) {
+      const slot = k as AbilitySlot;
       const a = HEROES[this.heroId].abilities[slot];
-      if (local.lv < unlockLevel(this.rules, a)) return null;
       const ready = usesUltCharge(this.rules, slot) ? me.ult >= 1 : me.cd[SLOTS.indexOf(slot)] <= 0;
       const mut = me.mut[slot];
       return { shape: a.shape, range: a.range, area: mut ? ROUTE_MODS[mut].area : 1, ready, color: this.teamColor };
     }
-    const n = AIM_ITEM[code];
-    if (n === undefined || !this.rules.crafting) return null;
     const it = me.act[n] ? ITEM_BY_ID[me.act[n]!] : null;
     if (!it?.shape) return null;
-    return { shape: it.shape, range: it.range ?? 0, area: 1, ready: me.cd[SLOTS.indexOf((['i1', 'i2', 'i3'] as const)[n])] <= 0, color: this.teamColor };
+    return { shape: it.shape, range: it.range ?? 0, area: 1, ready: me.cd[SLOTS.indexOf(k as 'i1' | 'i2' | 'i3')] <= 0, color: this.teamColor };
   }
 
   // ───────────── render (rAF) ─────────────
@@ -349,7 +393,10 @@ export class MatchRunner {
       this.heartT -= dt;
       if (this.heartT <= 0) { audio.play('heart', 0.9); this.heartT = 0.75; }
     } else this.heartT = 0;
+    if (this.rules.forgeAtBase && this.baseAt) this.hud.atBase = !!local && Math.hypot(local.x - this.baseAt.x, local.z - this.baseAt.z) <= BASE_RADIUS;
     this.view.aim = this.computeAim(local);
+    this.hud.setArmed(this.input.armed());
+    this.view.renderer.domElement.classList.toggle('aiming', !!this.view.aim);
     this.view.render(w, worldDt, camChar, this.cursor, dt);
     const ping = this.session.isHost ? 0 : (this.session as ClientSession).rtt;
     this.hud.update(w, local, this.me, dt, { ping, fps: this.fps, showFps: getPrefs().showFps, kind: this.session.isHost ? 'host' : 'client' });

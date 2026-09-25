@@ -50,11 +50,11 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await p.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.47);
   await wait(400);
   await p.screenshot({ path: `${OUT}/hero-${hero}-0.png` });
-  // Apuntar: mantener la tecla muestra el área (sin soltar todavía).
-  await p.keyboard.down('KeyR');
+  // Apuntar: la tecla arma la habilidad y muestra el área; el clic izquierdo la lanza.
+  await p.keyboard.press('KeyR');
   await wait(250);
   await p.screenshot({ path: `${OUT}/hero-${hero}-aimR.png` });
-  await p.keyboard.up('KeyR');
+  await p.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.47);
   await wait(700);
   await p.screenshot({ path: `${OUT}/hero-${hero}-KeyR-cast.png` });
   await p.evaluate(() => { const s = window.__rubble.session; const me = s.sim.charByPid.get(s.localPid); me.ult = 1; me.cds.r = 0; });
@@ -65,6 +65,8 @@ for (const hero of (process.env.HEROES ?? 'canto,prisma,gloop,remache').split(',
   await p.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.47);
   for (const [i, key] of ['KeyQ', 'KeyE', 'KeyR'].entries()) {
     await p.keyboard.press(key);
+    await wait(120);
+    await p.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.47);
     await wait(i === 2 ? 700 : 250);
     await p.screenshot({ path: `${OUT}/hero-${hero}-${key}.png` });
     await wait(500);

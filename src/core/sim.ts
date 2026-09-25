@@ -5,25 +5,25 @@ import {
   BODY_HIT_SPEED, CHAR_HEIGHT, CHAR_RADIUS, DESTRUCT_RESPAWN, DT, HEAT_MAX, KILL_CREDIT_TIME, KILL_Y,
   LAUNCH_THRESHOLD, MAX_LEVEL, MAX_PICKUPS, MUTATION_LEVELS, PICKUP_COLLECT, PICKUP_MAGNET, PICKUP_TTL,
   PUSH_CD, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, REPAIR_TIME, RESPAWN_TIME, SPAWN_INVULN, STAGE_AT,
-  STAGE_KB, TICK_RATE, TILE_CRUMBLE, WALL_SLAM_SPEED, XP_ASSIST, XP_DESTRUCT, XP_KILL, XP_PER_HEAT, XP_PICKUP,
-  XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE,
+  STAGE_KB, TICK_RATE, TILE_CRUMBLE, TILE_HP, WALL_SLAM_SPEED, XP_ASSIST, XP_DESTRUCT, XP_KILL, XP_PER_HEAT, XP_PICKUP,
+  XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE, RECALL_TIME, BASE_RADIUS, ISLAND_BOTTOM,
 } from './constants';
 import {
   baseStats, Character, DESTRUCT_DEF, type BlastSpec, type Destructible, type HitSpec, type Pickup,
-  type Projectile, type Slot, type Structure, type Telegraph, type Zone,
+  type Projectile, type Slot, type Structure, type Telegraph, type UnitKind, type Zone,
 } from './entities';
 import type { SimEvent } from './events';
 import { HEROES } from './heroes';
-import { BTN, held, released } from './input';
+import { BTN, held, pressed, released } from './input';
 import { canAfford, ITEM_BY_ID, pay, refund } from './items';
 import { dirOf, norm2, type V3 } from './math';
 import { createMode, type GameMode, type ModeResult } from './modes';
 import { canAct, DASH_IDLE, defaultMoveParams, newMoveOut, stepMove } from './movement';
 import { MUTATION_COST, NO_MODS, ROUTE_MODS, SUPPORT_RADIUS, SUPPORT_SHIELD, type Mods } from './mutations';
 import { Rng } from './rng';
-import { getRules, unlockLevel, usesUltCharge, type Ruleset } from './rules';
-import { Terrain, TILE_CRUMBLING, TILE_GONE } from './terrain';
-import { FAMILIES, type AbilitySlot, type Family, type MatchSettings, type Route, type RosterEntry } from './types';
+import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from './rules';
+import { Terrain, TILE_CRUMBLING, TILE_GONE, TILE_INTACT } from './terrain';
+import { FAMILIES, type AbilitySlot, type Family, type HeroId, type MatchSettings, type Route, type RosterEntry } from './types';
 
 export interface SimConfig {
   settings: MatchSettings;
@@ -59,6 +59,18 @@ export interface ProjSpec {
   originX?: number;
   originZ?: number;
   originY?: number;
+  /** Teledirigido a este cuerpo (solo le pega a él). */
+  homing?: number;
+}
+
+/** Stats de una unidad nueva (esbirro, neutral). */
+export interface UnitSpec {
+  name: string;
+  family: Family;
+  hp: number;
+  speed: number;
+  kbTaken: number;
+  heatTaken?: number;
 }
 
 interface MeleeSpec {
@@ -90,7 +102,13 @@ export class Simulation {
   readonly mode: GameMode;
   readonly rules: Ruleset;
   readonly teamCount: number;
+  /** Héroes (jugadores y bots). */
   chars: Character[] = [];
+  /** Unidades del modo (esbirros, neutrales): mismos cuerpos y física, con vida e IA propia. */
+  units: Character[] = [];
+  /** Todo lo que tiene cuerpo y se puede golpear: héroes + unidades. */
+  bodies: Character[] = [];
+  /** Héroes y unidades por id. */
   charById = new Map<number, Character>();
   charByPid = new Map<string, Character>();
   projectiles: Projectile[] = [];
@@ -103,6 +121,8 @@ export class Simulation {
   events: SimEvent[] = [];
   result: ModeResult | null = null;
   private nextId = 1;
+  private nextUnitId = 1000;
+  private unitsDirty = false;
   private obstaclesDirty = true;
   private commands: { pid: string; cmd: Command }[] = [];
   private mo = newMoveOut();
@@ -111,14 +131,15 @@ export class Simulation {
   private pendingPickups: number[][] = [];
 
   constructor(cfg: SimConfig) {
-    this.settings = cfg.settings;
-    this.rules = getRules(cfg.settings.rules);
+    // El Asedio siempre es por equipos y con sus reglas (bases, forja en base, volver con B).
+    this.settings = cfg.settings.mode === 'moba' ? { ...cfg.settings, teams: 'teams', rules: 'moba' } : cfg.settings;
+    this.rules = rulesFor(this.settings);
     this.rng = new Rng(cfg.seed);
-    this.terrain = new Terrain(cfg.settings.map);
+    this.terrain = new Terrain(this.settings.map);
     this.cw = new CollisionWorld(this.terrain);
-    this.mode = createMode(cfg.settings.mode);
+    this.mode = createMode(this.settings.mode);
 
-    const ffa = cfg.settings.teams === 'ffa';
+    const ffa = this.settings.teams === 'ffa';
     this.teamCount = ffa ? cfg.roster.length : 2;
     const perTeam = new Array(this.teamCount).fill(0);
     cfg.roster.forEach((r, i) => {
@@ -135,6 +156,7 @@ export class Simulation {
       this.charByPid.set(ch.pid, ch);
     });
 
+    this.bodies = [...this.chars];
     this.terrain.destructs.forEach((d, idx) => {
       const def = DESTRUCT_DEF[d.kind];
       const h = def.size / 2;
@@ -186,7 +208,7 @@ export class Simulation {
   }
 
   enemiesInRadius(team: number, x: number, z: number, r: number, y?: number, dy = 2.5): Character[] {
-    return this.chars.filter((c) => c.alive && c.team !== team && Math.hypot(c.pos.x - x, c.pos.z - z) <= r + CHAR_RADIUS && (y === undefined || Math.abs(c.pos.y - y) <= dy));
+    return this.bodies.filter((c) => c.alive && c.team !== team && Math.hypot(c.pos.x - x, c.pos.z - z) <= r + CHAR_RADIUS && (y === undefined || Math.abs(c.pos.y - y) <= dy));
   }
 
   alliesInRadius(team: number, x: number, z: number, r: number, y?: number, dy = 2.5): Character[] {
@@ -217,6 +239,72 @@ export class Simulation {
   addUlt(ch: Character, amount: number) {
     if (!this.rules.ultCharge || this.phase !== 'play') return;
     ch.ult = Math.min(1, ch.ult + amount);
+  }
+
+  /** Centro de la base de un equipo (el promedio de sus puntos de aparición). */
+  baseCenter(team: number): V3 {
+    const pts = this.terrain.spawns.team[team] ?? [];
+    if (!pts.length) return { x: 0, y: 0, z: 0 };
+    let x = 0, z = 0;
+    for (const p of pts) { x += p.x; z += p.z; }
+    return { x: x / pts.length, y: 0, z: z / pts.length };
+  }
+
+  /** ¿Está en su base? (refugio: se enfría, forja, reaparición). */
+  atBase(ch: Character) {
+    const b = this.baseCenter(ch.team);
+    return Math.hypot(ch.pos.x - b.x, ch.pos.z - b.z) <= BASE_RADIUS;
+  }
+
+  /** Enfría (baja heat) a un héroe: base, cerca de sus torres. */
+  coolHeat(ch: Character, amount: number) {
+    if (ch.unit === 'hero' && ch.heat > 0) this.setHeat(ch, ch.heat - amount);
+  }
+
+  /** Crea una unidad (esbirro, neutral) con cuerpo, física y knockback como un héroe. */
+  addUnit(kind: UnitKind, team: number, x: number, z: number, spec: UnitSpec): Character {
+    const id = this.nextUnitId++;
+    const y = this.groundY(x, z, 0);
+    const u = new Character(id, `u${id}`, spec.name, team, 'canto' as HeroId, spec.family, true, { x, y, z });
+    u.unit = kind;
+    u.hp = u.maxHp = spec.hp;
+    u.airJumps = 0;
+    u.airDashes = 0;
+    const st = baseStats();
+    st.speed = spec.speed;
+    st.kbTaken = spec.kbTaken;
+    st.heatTaken = spec.heatTaken ?? 1;
+    st.maxAirJumps = 0;
+    st.restitution = 0.2;
+    u.stats = st;
+    u.input = { seq: 0, mx: 0, mz: 0, ax: x, az: z + 1, b: 0 };
+    this.units.push(u);
+    this.bodies.push(u);
+    this.charById.set(id, u);
+    return u;
+  }
+
+  /** Mata a una unidad (vida en cero o caída al vacío). */
+  killUnit(u: Character, killer: Character | null, fell: boolean) {
+    if (!u.alive || u.unit === 'hero') return;
+    u.alive = false;
+    u.hp = 0;
+    this.unitsDirty = true;
+    this.emit({ k: 'udie', id: u.id, x: round2(u.pos.x), y: round2(Math.max(u.pos.y, ISLAND_BOTTOM)), z: round2(u.pos.z), tm: u.team, by: killer ? killer.id : -1, fall: fell ? 1 : 0 });
+    this.mode.onUnitDeath?.(this, u, killer, fell);
+  }
+
+  private cleanupUnits() {
+    this.unitsDirty = false;
+    for (const u of this.units) if (!u.alive) this.charById.delete(u.id);
+    this.units = this.units.filter((u) => u.alive);
+    this.bodies = [...this.chars, ...this.units];
+  }
+
+  /** Etapa de knockback de una unidad según la vida que le queda (más rota = vuela más). */
+  private unitStage(u: Character) {
+    const f = u.maxHp > 0 ? u.hp / u.maxHp : 1;
+    return f > 0.66 ? 0 : f > 0.33 ? 1 : 2;
   }
 
   mutationSlots(ch: Character) {
@@ -257,7 +345,7 @@ export class Simulation {
 
   addXp(ch: Character, amount: number) {
     if (!this.rules.progression || ch.level >= MAX_LEVEL) return;
-    ch.xp += amount;
+    ch.xp += amount * this.rules.xpMul;
     let up = false;
     while (ch.level < MAX_LEVEL && ch.xp >= XP_TABLE[ch.level]) { ch.level++; up = true; }
     if (up) {
@@ -289,10 +377,10 @@ export class Simulation {
       if (left <= 10 && left > 0 && Math.ceil(before) !== Math.ceil(left)) this.emit({ k: 'final', n: Math.ceil(left) });
     }
 
-    for (const c of this.chars) { c.ppos.x = c.pos.x; c.ppos.y = c.pos.y; c.ppos.z = c.pos.z; }
+    for (const c of this.bodies) { c.ppos.x = c.pos.x; c.ppos.y = c.pos.y; c.ppos.z = c.pos.z; }
     for (const p of this.projectiles) { p.ppos.x = p.pos.x; p.ppos.y = p.pos.y; p.ppos.z = p.pos.z; }
 
-    if (this.scheduled.length) {
+    if (this.scheduled.length && this.phase !== 'end') {
       const due = this.scheduled.filter((s) => s.at <= this.tick);
       if (due.length) {
         this.scheduled = this.scheduled.filter((s) => s.at > this.tick);
@@ -301,24 +389,49 @@ export class Simulation {
     }
 
     if (this.obstaclesDirty) this.rebuildObstacles();
+    this.mode.preTick?.(this, DT);
+    if (this.unitsDirty) this.cleanupUnits();
     for (const c of this.chars) this.updateChar(c);
+    for (const u of this.units) this.updateUnit(u);
     this.bodyCollisions();
-    this.updateProjectiles();
-    this.updateZones();
-    this.updateStructures();
-    this.updateDestructibles();
-    this.updateTiles();
-    this.updatePickups();
+    if (this.phase !== 'end') {
+      // Terminada la partida no se pelea más: solo física (que caigan al piso) y festejos en el cliente.
+      this.updateProjectiles();
+      this.updateZones();
+      this.updateStructures();
+      this.updateDestructibles();
+      this.updateTiles();
+      this.updatePickups();
+    }
     if (this.obstaclesDirty) this.rebuildObstacles();
 
     this.mode.tick(this, DT);
+    if (this.unitsDirty) this.cleanupUnits();
     if (this.phase === 'play') {
       const r = this.mode.result(this);
       if (r) {
         this.result = r;
         this.phase = 'end';
+        this.freezeForEnd();
         this.emit({ k: 'msg', tx: r.draw ? '¡Empate!' : '¡Fin de la partida!' });
       }
+    }
+  }
+
+  /** Fin de partida: se apagan proyectiles, zonas, lo programado y las acciones en curso. */
+  private freezeForEnd() {
+    this.projectiles = [];
+    this.zones = [];
+    this.telegraphs = [];
+    this.scheduled = [];
+    for (const c of this.bodies) {
+      c.action = null;
+      c.charging = false;
+      c.pushCharge = 0;
+      c.repairT = 0;
+      c.recallT = 0;
+      c.buffered = null;
+      c.invuln = Math.max(c.invuln, 999);
     }
   }
 
@@ -329,6 +442,10 @@ export class Simulation {
     for (const { pid, cmd } of cmds) {
       const ch = this.charByPid.get(pid);
       if (!ch || !this.rules.crafting) continue;
+      if (this.rules.forgeAtBase && ch.alive && !this.atBase(ch) && cmd.c !== 'sell') {
+        this.deny(ch, this.rules.recall ? 'La fragua está en tu base (B para volver)' : 'La fragua está en tu base');
+        continue;
+      }
       if (cmd.c === 'craft') this.craft(ch, cmd.id);
       else if (cmd.c === 'sell') this.sell(ch, cmd.id);
       else if (cmd.c === 'mutate') this.mutate(ch, cmd.slot, cmd.route);
@@ -472,13 +589,13 @@ export class Simulation {
 
     if (ch.action) this.updateAction(ch);
 
-    const playing = this.phase !== 'countdown';
+    const playing = this.phase === 'play';
     const act = playing && canAct(ch) && !(ch.action && ch.action.noCast);
     if (act) {
-      // Las habilidades salen al SOLTAR la tecla: mientras la mantenés, el cliente muestra el área (apuntar).
-      // Un toque rápido sale igual, un tick después.
+      // Las habilidades salen cuando llega el bit (flanco): el cliente ya resolvió el apuntado
+      // (tecla arma, clic izquierdo lanza) y manda un pulso de un tick con el cursor donde se lanzó.
       for (const slot of ['q', 'e', 'f', 'r'] as AbilitySlot[]) {
-        if (released(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
+        if (pressed(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
       }
       if (ch.buffered) {
         ch.buffered.t -= DT;
@@ -489,7 +606,7 @@ export class Simulation {
           if (s === 'q' || s === 'e' || s === 'f' || s === 'r') this.tryAbility(ch, s, false);
         }
       }
-      if (this.rules.crafting) for (let i = 0; i < 3; i++) if (released(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
+      if (this.rules.crafting) for (let i = 0; i < 3; i++) if (pressed(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
 
       // Empujón: mantener carga, soltar empuja (D-0028).
       if (held(inp.b, BTN.PUSH) && ch.cds.push <= 0) {
@@ -519,6 +636,7 @@ export class Simulation {
       ch.pushCharge = 0;
       ch.repairT = 0;
     }
+    if (this.rules.recall) this.updateRecall(ch, act);
 
     if (ch.action && ch.action.direct) {
       ch.prevB = inp.b;
@@ -547,13 +665,96 @@ export class Simulation {
     }
     for (const h of out.wallHits) this.onWallHit(ch, h.speed, h.obstacle, h.x, h.y, h.z, h.nx, h.nz, wasTumble);
 
-    if (ch.pos.y < KILL_Y) this.die(ch);
-    else if (ch.lethalAt >= 0 && ch.grounded && ch.tumble <= 0) {
+    if (ch.pos.y < KILL_Y) {
+      if (this.phase === 'end') { ch.pos.y = KILL_Y; ch.vel.y = 0; }
+      else this.die(ch);
+    } else if (ch.lethalAt >= 0 && ch.grounded && ch.tumble <= 0) {
       // Se salvó de un golpe que lo iba a sacar: ¡salvada épica!
       ch.lethalAt = -1;
       ch.saves++;
       this.emit({ k: 'save', id: ch.id });
     }
+  }
+
+  // ───────────────────────────── volver a la base (B) ─────────────────────────────
+
+  /** Canalizar RECALL_TIME segundos quieto; moverse, atacar, lanzar o recibir un golpe lo corta. */
+  private updateRecall(ch: Character, act: boolean) {
+    const inp = ch.input;
+    if (ch.recallT > 0) {
+      if (!act || this.phase !== 'play' || inp.mx !== 0 || inp.mz !== 0 || (inp.b & ~BTN.RECALL) !== 0 || ch.tumble > 0) {
+        this.cancelRecall(ch);
+        return;
+      }
+      ch.recallT += DT;
+      if (ch.recallT >= RECALL_TIME) {
+        ch.recallT = 0;
+        const p = this.respawnPoint(ch);
+        this.emit({ k: 'recall', id: ch.id, s: 2, x: round2(ch.pos.x), z: round2(ch.pos.z) });
+        ch.pos = { x: p.x, y: p.y, z: p.z };
+        ch.ppos = { ...ch.pos };
+        ch.vel = { x: 0, y: 0, z: 0 };
+        ch.grounded = true;
+      }
+      return;
+    }
+    if (!act || this.phase !== 'play' || !pressed(inp.b, ch.prevB, BTN.RECALL)) return;
+    if (this.atBase(ch)) { this.deny(ch, 'Ya estás en tu base'); return; }
+    if (inp.mx !== 0 || inp.mz !== 0 || !ch.grounded) { this.deny(ch, `Para volver a la base quedate quieto ${RECALL_TIME} s`); return; }
+    ch.recallT = DT;
+    this.emit({ k: 'recall', id: ch.id, s: 1, x: round2(ch.pos.x), z: round2(ch.pos.z) });
+  }
+
+  private cancelRecall(ch: Character) {
+    if (ch.recallT <= 0) return;
+    ch.recallT = 0;
+    this.emit({ k: 'recall', id: ch.id, s: 0, x: round2(ch.pos.x), z: round2(ch.pos.z) });
+  }
+
+  // ───────────────────────────── unidades (esbirros, neutrales) ─────────────────────────────
+
+  /** Física y estados de una unidad. Su input (hacia dónde caminar) lo pone la IA del modo en preTick. */
+  private updateUnit(u: Character) {
+    if (!u.alive) return;
+    u.invuln = Math.max(0, u.invuln - DT);
+    u.kbImmune = Math.max(0, u.kbImmune - DT);
+    if (u.slowT > 0) { u.slowT -= DT; if (u.slowT <= 0) u.slowAmt = 0; }
+    if (u.hasteT > 0) { u.hasteT -= DT; if (u.hasteT <= 0) u.hasteAmt = 0; }
+    if (u.armorT > 0) { u.armorT -= DT; if (u.armorT <= 0) u.armorAmt = 0; }
+    if (u.cds.basic > 0) u.cds.basic = Math.max(0, u.cds.basic - DT);
+    for (const [id, t] of u.bodyHits) if (this.tick - t > 30) u.bodyHits.delete(id);
+    const mp = this.mp;
+    mp.speed = this.charSpeed(u);
+    mp.lock = this.phase !== 'play';
+    if (mp.lock && u.tumble <= 0) { u.vel.x = 0; u.vel.z = 0; }
+    mp.noGravity = false;
+    mp.airControl = 0.4;
+    mp.restitution = u.stats.restitution;
+    mp.maxAirJumps = 0;
+    mp.jumpMul = 1;
+    mp.dash = false;
+    const wasTumble = u.tumble > 0;
+    u.input.b = 0;
+    stepMove(u, u.input, mp, this.cw, DT, this.mo);
+    for (const h of this.mo.wallHits) {
+      if (!wasTumble || h.speed < WALL_SLAM_SPEED) continue;
+      const launcher = this.recentLauncher(u);
+      if (h.obstacle) this.damageObstacle(h.obstacle, h.speed * 1.5, launcher);
+      this.applyHeat(u, launcher, (h.speed - WALL_SLAM_SPEED) * 0.9 + 3);
+      if (!u.alive) return;
+    }
+    if (u.pos.y < KILL_Y) {
+      if (this.phase === 'end') { u.pos.y = KILL_Y; u.vel.y = 0; }
+      else this.killUnit(u, this.recentLauncher(u), true);
+    }
+  }
+
+  /** Quién lanzó a este cuerpo hace poco (para dar crédito si cae o choca). */
+  private recentLauncher(c: Character): Character | null {
+    const l = this.charById.get(c.launcher);
+    if (!l) return null;
+    const t = c.lastHits.get(l.id);
+    return t !== undefined && this.tick - t <= KILL_CREDIT_TIME * TICK_RATE ? l : null;
   }
 
   private onWallHit(ch: Character, speed: number, ob: Obstacle | null, x: number, y: number, z: number, nx: number, nz: number, wasTumble: boolean) {
@@ -594,7 +795,7 @@ export class Simulation {
   }
 
   private bodyCollisions() {
-    const cs = this.chars;
+    const cs = this.bodies;
     for (let i = 0; i < cs.length; i++) {
       const a = cs[i];
       if (!a.alive) continue;
@@ -640,7 +841,8 @@ export class Simulation {
     if (!ch.alive) return;
     ch.alive = false;
     ch.deaths++;
-    ch.respawnT = RESPAWN_TIME;
+    ch.respawnT = this.mode.respawnTime?.(this, ch) ?? RESPAWN_TIME;
+    ch.recallT = 0;
     ch.action = null;
     ch.charging = false;
     ch.pushCharge = 0;
@@ -696,10 +898,26 @@ export class Simulation {
   }
 
   /** Suma heat sin knockback (paredes, daño en el tiempo). */
+  /** Daño de héroe a unidad (el modo lo sube para que limpiar oleadas no sea eterno). */
+  heroVsUnit = 1;
+
+  private damageUnit(u: Character, attacker: Character | null, amount: number) {
+    if (attacker && attacker.team === u.team) return 0;
+    let dmg = amount * u.stats.heatTaken * (u.armorT > 0 ? 1 - u.armorAmt : 1);
+    if (attacker && attacker.unit === 'hero') dmg *= attacker.stats.heatDealt * this.heroVsUnit;
+    u.hp -= dmg;
+    u.lastHitTick = this.tick;
+    if (attacker) u.lastHits.set(attacker.id, this.tick);
+    if (u.hp <= 0) this.killUnit(u, attacker, false);
+    return dmg;
+  }
+
   private applyHeat(t: Character, attacker: Character | null, amount: number) {
     if (!t.alive || t.invuln > 0) return 0;
+    if (t.unit !== 'hero') return this.damageUnit(t, attacker, amount);
+    if (t.recallT > 0) this.cancelRecall(t);
     let heat = amount * t.stats.heatTaken * (t.armorT > 0 ? 1 - t.armorAmt : 1);
-    if (attacker && attacker.team !== t.team) heat *= attacker.stats.heatDealt;
+    if (attacker && attacker.team !== t.team && attacker.unit === 'hero') heat *= attacker.stats.heatDealt;
     if (t.shield > 0) {
       const a = Math.min(t.shield, heat);
       t.shield -= a;
@@ -708,10 +926,15 @@ export class Simulation {
     this.setHeat(t, t.heat + heat);
     t.lastHitTick = this.tick;
     if (attacker && attacker.team !== t.team) {
-      t.lastHits.set(attacker.id, this.tick);
-      attacker.heatDealt += heat;
-      this.addXp(attacker, heat * XP_PER_HEAT);
-      this.addUlt(attacker, heat * ULT_PER_HEAT);
+      if (attacker.unit === 'hero') {
+        t.lastHits.set(attacker.id, this.tick);
+        attacker.heatDealt += heat;
+        attacker.hitHeroTick = this.tick;
+        attacker.hitHeroVictim = t.id;
+        this.addXp(attacker, heat * XP_PER_HEAT);
+        this.addUlt(attacker, heat * ULT_PER_HEAT);
+      }
+      // Esbirros y torres no se llevan el crédito del ring-out: queda para el último héroe que pegó.
     }
     return heat;
   }
@@ -725,9 +948,15 @@ export class Simulation {
     if (attacker && attacker !== t && attacker.team === t.team) return false;
     const hadShield = t.shield > 0;
     const applied = this.applyHeat(t, attacker, spec.heat);
-    const stage = t.stage;
+    const isUnit = t.unit !== 'hero';
+    const stage = isUnit ? this.unitStage(t) : t.stage;
     let lethal = 0;
-    let force = spec.kb * STAGE_KB[stage] * (1 + 0.003 * (t.heat - STAGE_AT[stage])) * t.stats.kbTaken;
+    if (!t.alive) {
+      // La unidad murió con este golpe: solo el efecto.
+      this.emit({ k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: 0, f: spec.fx ?? t.family, id: t.id, a: attacker ? attacker.id : -1, h: Math.round(applied), st: stage, l: 0, dx: 0, dz: 0 });
+      return true;
+    }
+    let force = spec.kb * STAGE_KB[stage] * (isUnit ? 1 : 1 + 0.003 * (t.heat - STAGE_AT[stage])) * t.stats.kbTaken;
     if (hadShield) force *= 0.6;
     if (t.kbImmune > 0) force = 0;
     let dx = spec.dirX, dz = spec.dirZ;
@@ -752,7 +981,7 @@ export class Simulation {
       t.bodyHits.clear();
       interrupt();
       if (attacker) attacker.bestLaunch = Math.max(attacker.bestLaunch, force);
-      if (this.predictLethal(t)) {
+      if (!isUnit && this.predictLethal(t)) {
         lethal = 1;
         t.lethalAt = this.tick;
         if (attacker) attacker.lethals++;
@@ -803,7 +1032,7 @@ export class Simulation {
     const f = dirOf(ch.facing);
     const half = (o.angle * Math.PI) / 360;
     let hits = 0;
-    for (const t of this.chars) {
+    for (const t of this.bodies) {
       if (t === ch || !t.alive || t.team === ch.team) continue;
       const dx = t.pos.x - ch.pos.x, dz = t.pos.z - ch.pos.z;
       const d = Math.hypot(dx, dz);
@@ -852,7 +1081,7 @@ export class Simulation {
 
   blast(owner: Character | null, team: number, x: number, y: number, z: number, s: BlastSpec, _m: Mods): number {
     let hits = 0;
-    for (const t of this.chars) {
+    for (const t of this.bodies) {
       if (!t.alive || t.team === team) continue;
       const dx = t.pos.x - x, dz = t.pos.z - z;
       const d = Math.hypot(dx, dz);
@@ -1077,7 +1306,7 @@ export class Simulation {
         ch.vel.x = d.dx * d.speed;
         ch.vel.z = d.dz * d.speed;
         ch.vel.y = 0;
-        for (const t of this.chars) {
+        for (const t of this.bodies) {
           if (t === ch || !t.alive || t.team === ch.team || d.hit.has(t.id)) continue;
           if (Math.hypot(t.pos.x - ch.pos.x, t.pos.z - ch.pos.z) < CHAR_RADIUS * 2.3 && Math.abs(t.pos.y - ch.pos.y) < 1.3) {
             d.hit.add(t.id);
@@ -1097,7 +1326,7 @@ export class Simulation {
         ch.vel.x = d.dx * d.speed;
         ch.vel.z = d.dz * d.speed;
         ch.facing = Math.atan2(d.dx, d.dz);
-        for (const t of this.chars) {
+        for (const t of this.bodies) {
           if (t === ch || !t.alive || t.team === ch.team || d.hit.has(t.id)) continue;
           if (Math.hypot(t.pos.x - ch.pos.x, t.pos.z - ch.pos.z) < CHAR_RADIUS * 2.4 && Math.abs(t.pos.y - ch.pos.y) < 1.4) {
             d.hit.add(t.id);
@@ -1143,19 +1372,23 @@ export class Simulation {
   // ───────────────────────────── proyectiles ─────────────────────────────
 
   fireProjectile(ch: Character, s: ProjSpec, m: Mods): Projectile {
-    const y = s.originY ?? ch.pos.y + 0.8;
-    const ox = s.originX ?? ch.pos.x + s.dirX * 0.5;
-    const oz = s.originZ ?? ch.pos.z + s.dirZ * 0.5;
+    const p = this.spawnProjectile(ch.id, ch.team, s.originX ?? ch.pos.x + s.dirX * 0.5, s.originY ?? ch.pos.y + 0.8, s.originZ ?? ch.pos.z + s.dirZ * 0.5, s, m);
+    this.emit({ k: 'shoot', id: ch.id, c: s.kind });
+    return p;
+  }
+
+  /** Proyectil sin personaje que dispare (torres): owner -1 = nadie se lleva el crédito. */
+  spawnProjectile(owner: number, team: number, ox: number, y: number, oz: number, s: ProjSpec, m: Mods): Projectile {
     const p: Projectile = {
-      id: this.nextId++, kind: s.kind, owner: ch.id, team: ch.team,
+      id: this.nextId++, kind: s.kind, owner, team,
       pos: { x: ox, y, z: oz }, ppos: { x: ox, y, z: oz },
       vel: { x: s.dirX * s.speed, y: 0, z: s.dirZ * s.speed },
       radius: s.radius, range: s.range, gravity: 0, heat: s.heat, kb: s.kb, up: s.up ?? 0, stun: s.stun ?? 0, slow: s.slow,
       pierce: !!s.pierce, hit: new Set(), destruct: s.destruct ?? 0, tile: s.tile ?? 0, noCharHit: false, explode: s.explode,
       onHit: s.onHit, onSolid: s.onSolid, onEnd: s.onEnd, mods: m, dead: false, ignoreSolid: !!s.ignoreSolid, life: -1,
+      homing: s.homing ?? -1,
     };
     this.projectiles.push(p);
-    this.emit({ k: 'shoot', id: ch.id, c: s.kind });
     return p;
   }
 
@@ -1187,6 +1420,18 @@ export class Simulation {
         if (p.life <= 0) { p.dead = true; p.onEnd?.(p.pos); }
         continue;
       }
+      if (p.homing >= 0) {
+        // Teledirigido: sigue al objetivo; si el objetivo ya no está, se apaga.
+        const tg = this.charById.get(p.homing);
+        if (!tg || !tg.alive) { p.dead = true; continue; }
+        const sp = Math.hypot(p.vel.x, p.vel.z) || 1;
+        const dx = tg.pos.x - p.pos.x, dz = tg.pos.z - p.pos.z, dy = tg.pos.y + 0.8 - p.pos.y;
+        const d = Math.hypot(dx, dz) || 1;
+        p.vel.x = (dx / d) * sp;
+        p.vel.z = (dz / d) * sp;
+        p.pos.y += Math.max(-sp * DT, Math.min(sp * DT, dy));
+        p.range = Math.max(p.range, d + 1);
+      }
       const speed = Math.hypot(p.vel.x, p.vel.z);
       const stepLen = speed * DT;
       const n = Math.max(1, Math.ceil(stepLen / Math.max(0.25, p.radius)));
@@ -1197,13 +1442,14 @@ export class Simulation {
         // Los proyectiles "abrazan" el terreno: si el piso baja, bajan con él (se puede pegar desde lo alto).
         const g = this.terrain.groundAt(p.pos.x, p.pos.z);
         if (g > -Infinity && g + 0.8 < p.pos.y) p.pos.y = Math.max(g + 0.8, p.pos.y - (14 * DT) / n);
-        for (const t of this.chars) {
+        for (const t of this.bodies) {
           if (!t.alive || t.team === p.team || p.hit.has(t.id)) continue;
+          if (p.homing >= 0 && t.id !== p.homing) continue;
           if (Math.hypot(t.pos.x - p.pos.x, t.pos.z - p.pos.z) > p.radius + CHAR_RADIUS) continue;
           if (p.pos.y < t.pos.y - p.radius - 0.3 || p.pos.y > t.pos.y + CHAR_HEIGHT + p.radius) continue;
           p.hit.add(t.id);
           if (p.onHit) p.onHit(t);
-          else this.hit(t, owner, { heat: p.heat, kb: p.kb, dirX: ux, dirZ: uz, up: p.up, stun: p.stun, slow: p.slow, fx: p.kind });
+          else this.hit(t, owner, { heat: p.heat, kb: p.kb, dirX: ux, dirZ: uz, up: p.up, stun: p.stun, slow: p.slow, fx: p.kind, noLaunch: p.homing >= 0 && t.unit !== 'hero' });
           if (!p.pierce) { this.endProjectile(p, owner); break; }
         }
         if (p.dead) break;
@@ -1266,6 +1512,20 @@ export class Simulation {
     if (this.telegraphs.some((t) => t.t >= t.dur)) this.telegraphs = this.telegraphs.filter((t) => t.t < t.dur);
   }
 
+  /** Pieza fija del mapa (torre, núcleo): sin dueño ni vencimiento. */
+  addFixedStructure(team: number, kind: string, family: Family, x: number, z: number, hw: number, h: number, hp: number): Structure {
+    const y = this.groundY(x, z, 0);
+    const id = this.nextId++;
+    const st: Structure = {
+      id, kind, owner: -1, team, family, x, y, z, hw, hd: hw, h, rot: team === 0 ? Math.PI / 2 : -Math.PI / 2,
+      hp, maxHp: hp, t: 0, dur: Infinity, fireT: 1, fixed: true, armor: 1, target: -1,
+      obstacle: { id: 100000 + id, minX: x - hw, maxX: x + hw, minZ: z - hw, maxZ: z + hw, base: y, top: y + h, kind: 's' },
+    };
+    this.structures.push(st);
+    this.obstaclesDirty = true;
+    return st;
+  }
+
   private makeStructure(owner: Character, kind: string, family: Family, x: number, z: number, hw: number, hd: number, h: number, hp: number, dur: number, rot: number): Structure {
     const y = this.groundY(x, z, owner.pos.y);
     const id = this.nextId++;
@@ -1277,7 +1537,7 @@ export class Simulation {
     this.structures.push(st);
     this.obstaclesDirty = true;
     // Empujar a quien quede adentro.
-    for (const c of this.chars) {
+    for (const c of this.bodies) {
       if (!c.alive) continue;
       if (c.pos.x + CHAR_RADIUS > st.obstacle.minX && c.pos.x - CHAR_RADIUS < st.obstacle.maxX && c.pos.z + CHAR_RADIUS > st.obstacle.minZ && c.pos.z - CHAR_RADIUS < st.obstacle.maxZ && c.pos.y < st.obstacle.top && c.pos.y + CHAR_HEIGHT > st.obstacle.base) {
         const u = norm2(c.pos.x - x, c.pos.z - z);
@@ -1311,7 +1571,7 @@ export class Simulation {
     return true;
   }
 
-  private structureOf(o: Obstacle): Structure | null {
+  structureOf(o: Obstacle): Structure | null {
     if (o.kind !== 's') return null;
     return this.structures.find((s) => s.obstacle === o) ?? null;
   }
@@ -1323,7 +1583,7 @@ export class Simulation {
         s.fireT -= DT;
         if (s.fireT <= 0) {
           let best: Character | null = null, bd = 10;
-          for (const c of this.chars) {
+          for (const c of this.bodies) {
             if (!c.alive || c.team === s.team) continue;
             const d = Math.hypot(c.pos.x - s.x, c.pos.z - s.z);
             if (d < bd) { bd = d; best = c; }
@@ -1334,7 +1594,7 @@ export class Simulation {
             if (owner) {
               const u = norm2(best.pos.x - s.x, best.pos.z - s.z);
               this.fireProjectile(owner, {
-                kind: 'bolt', speed: 22, range: 11, radius: 0.25, heat: 3 * m.heat, kb: 3.5 * m.kb, destruct: 4,
+                kind: 'bolt', speed: 22, range: 11, radius: 0.25, heat: 3 * m.heat, kb: 0, destruct: 4,
                 dirX: u.x, dirZ: u.z, originX: s.x + u.x * 0.5, originZ: s.z + u.z * 0.5, originY: s.y + 1.0,
               }, m);
             }
@@ -1389,6 +1649,27 @@ export class Simulation {
     const s = this.structureOf(o);
     if (!s || s.hp <= 0) return false;
     if (by && by.team === s.team) return false;
+    if (s.fixed) {
+      // Torres y núcleos: pueden estar protegidas (invulnerables o con menos daño sin esbirros).
+      if (s.invuln) {
+        if (by?.unit === 'hero' && (s.lastHitTick ?? -999) < this.tick - 20) this.emit({ k: 'shit', id: s.id, h: 0, x: s.x, y: s.y + s.h, z: s.z, by: by.id });
+        s.lastHitTick = this.tick;
+        return false;
+      }
+      const d = dmg * (s.armor ?? 1);
+      s.hp -= d;
+      s.lastHitBy = by ? by.id : -1;
+      s.lastHitTick = this.tick;
+      if (by?.unit === 'hero') this.emit({ k: 'shit', id: s.id, h: Math.max(1, Math.round(d)), x: s.x, y: s.y + s.h, z: s.z, by: by.id });
+      if (s.hp <= 0) {
+        s.hp = 0;
+        this.obstaclesDirty = true;
+        this.emit({ k: 'sdown', id: s.id, kd: s.kind, tm: s.team, x: s.x, z: s.z, by: by ? by.id : -1 });
+        this.mode.onStructureDown?.(this, s, by);
+        return true;
+      }
+      return false;
+    }
     s.hp -= dmg;
     if (s.hp <= 0) {
       this.obstaclesDirty = true;
@@ -1404,7 +1685,7 @@ export class Simulation {
       if (d.stage < 3) continue;
       d.respawnT -= DT;
       if (d.respawnT > 0) continue;
-      const blocked = this.chars.some((c) => c.alive && Math.hypot(c.pos.x - d.x, c.pos.z - d.z) < 1.6 && c.pos.y < d.obstacle.top + 0.5);
+      const blocked = this.bodies.some((c) => c.alive && Math.hypot(c.pos.x - d.x, c.pos.z - d.z) < 1.6 && c.pos.y < d.obstacle.top + 0.5);
       if (blocked) { d.respawnT = 1; continue; }
       d.hp = d.maxHp;
       d.stage = 0;
@@ -1431,7 +1712,21 @@ export class Simulation {
 
   private updateTiles() {
     const t = this.terrain;
+    const regen = this.rules.tileRegen;
     for (let fi = 0; fi < t.fragile.length; fi++) {
+      if (regen > 0 && t.tileState[fi] === TILE_GONE) {
+        // El piso se rearma solo (Asedio): las líneas no quedan cortadas para siempre.
+        t.tileTimer[fi] += DT;
+        if (t.tileTimer[fi] >= TILE_CRUMBLE + regen) {
+          const b = t.cellBounds(t.fragile[fi]);
+          const inside = this.bodies.some((c) => c.alive && c.pos.x > b.minX - 0.5 && c.pos.x < b.maxX + 0.5 && c.pos.z > b.minZ - 0.5 && c.pos.z < b.maxZ + 0.5 && c.pos.y < 0.2);
+          if (inside) { t.tileTimer[fi] -= 1; continue; }
+          t.tileHp[fi] = TILE_HP;
+          t.setTileState(fi, TILE_INTACT);
+          this.emit({ k: 'tile', i: fi, s: TILE_INTACT });
+        }
+        continue;
+      }
       if (t.tileState[fi] !== TILE_CRUMBLING) continue;
       t.tileTimer[fi] += DT;
       if (t.tileTimer[fi] >= TILE_CRUMBLE) {
@@ -1442,12 +1737,12 @@ export class Simulation {
         for (const s of this.structures) {
           if (s.x >= b.minX && s.x <= b.maxX && s.z >= b.minZ && s.z <= b.maxZ) s.hp = 0;
         }
-        for (const c of this.chars) if (c.alive && c.grounded && t.cellIndexAt(c.pos.x, c.pos.z) === t.fragile[fi]) c.grounded = false;
+        for (const c of this.bodies) if (c.alive && c.grounded && t.cellIndexAt(c.pos.x, c.pos.z) === t.fragile[fi]) c.grounded = false;
       }
     }
   }
 
-  private dropMaterials(kind: Family, x: number, y: number, z: number, n: number) {
+  dropMaterials(kind: Family, x: number, y: number, z: number, n: number) {
     if (this.rules.pickups === 'none') return;
     const mat = FAMILIES.indexOf(kind);
     for (let i = 0; i < n; i++) {

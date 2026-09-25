@@ -12,12 +12,13 @@ import type { SimEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
 import type { RosterInfo } from '../core/protocol';
 import { stepPickup } from '../core/sim';
-import { F_DASH, F_DEAD, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
+import { F_DASH, F_DEAD, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
 import { BeanView } from './beanView';
 import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView } from './fx';
 import { AimIndicator, type AimView } from './indicator';
+import { FixedView, NEUTRAL_COLOR, UnitsView } from './mobaView';
 import { Floaters, GlowFX, LightPool } from './juice';
 import { PostFX } from './post';
 import { DestructiblesView, pickupMesh, StructuresView, type PickupVis } from './propsView';
@@ -60,6 +61,7 @@ const FX_COLORS: Record<string, number> = {
   ram: 0xff8a3d, slam: 0xff8a3d, quake: 0xff8a3d, shard: 0x4fd1ff, lance: 0x3fb4ff, crystal: 0x4fd1ff, nova: 0x9d7bff,
   glob: 0x7bea4f, goo: 0x7bea4f, wave: 0x4fdc4a, hook: 0xffc94a, bolt: GOLD, magnet: 0xb070ff, body: GOLD,
   metal: 0x8fa3b8, stone: 0xc9a27a, build: 0xffc94a, buildstone: 0xc9a27a, goolob: 0x7bea4f,
+  minion: 0xc9a27a, fountain: 0xff5a4a, cannon: 0xff8a3d, spark: 0x7fe3ff, tbolt: 0xff5a4a, coreshot: 0xff5a4a,
 };
 /** Efectos que toman el color del atacante (su héroe) en vez de uno fijo. */
 const ATTACKER_FX = new Set(['punch', 'wrench', 'push', 'pushbig']);
@@ -82,6 +84,8 @@ export class GameView {
   private teles = new AreasView();
   private koth = new KothView();
   private aimInd = new AimIndicator();
+  private units = new UnitsView();
+  private fixed: FixedView;
   private beans = new Map<number, BeanView>();
   private pickups = new Map<number, PickupVis>();
   private focus = new THREE.Vector3();
@@ -142,7 +146,8 @@ export class GameView {
     this.sun.castShadow = opts.shadows;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
-    const ext = Math.max(this.terrain.w, this.terrain.h) * 1.15 + 4;
+    // La luz sigue a la cámara: en mapas grandes alcanza con cubrir lo que se ve (sombras más nítidas).
+    const ext = Math.min(34, Math.max(this.terrain.w, this.terrain.h) * 1.15 + 4);
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.0008;
     this.sun.shadow.normalBias = 0.03;
@@ -150,10 +155,12 @@ export class GameView {
 
     this.terrainView = new TerrainView(this.terrain, theme);
     this.destructs = new DestructiblesView(this.terrain.destructs);
-    this.projs = new ProjectilesView(this.sparks);
+    this.projs = new ProjectilesView(this.sparks, this.teamColor);
+    this.fixed = new FixedView(this.terrain, this.teamColor);
     this.scene.add(
       this.terrainView.group, this.destructs.group, this.structs.group, this.particles.mesh, this.sparks.mesh,
       this.glow.group, this.lights.group, this.projs.group, this.zones.group, this.teles.group, this.koth.group, this.aimInd.group,
+      this.units.group, this.fixed.group,
     );
     if (!sky) this.scene.add(this.buildBackdrop(theme.fog ?? def.fog));
 
@@ -236,8 +243,12 @@ export class GameView {
 
   charPos(id: number): THREE.Vector3 | null {
     const b = this.beans.get(id);
-    return b && b.root.visible ? b.root.position : null;
+    if (b) return b.root.visible ? b.root.position : null;
+    return this.units.pos(id);
   }
+
+  /** ¿Es un héroe (no una unidad del Asedio)? */
+  private isHero(id: number) { return this.beans.has(id); }
 
   charFamily(id: number): Family | null {
     return this.beans.get(id)?.family ?? null;
@@ -312,12 +323,28 @@ export class GameView {
         if (sp > 16) this.particles.trail(cf.x, cf.y + 0.7, cf.z, tc, 0.14, 0.3);
       }
       if (cf.fl & F_DASH) this.sparks.trail(cf.x, cf.y + 0.5, cf.z, tc, 0.12, 0.3);
+      if (cf.fl & F_RECALL) {
+        // Volviendo a la base: chispas del equipo que suben en espiral.
+        const a = this.time * 9 + c.id;
+        this.sparks.burst(cf.x + Math.cos(a) * 0.7, cf.y + 0.1, cf.z + Math.sin(a) * 0.7, 1, tc, { speed: 0.2, up: 4 + cf.ch * 3, size: 0.07, life: 0.6, gravity: -1 });
+      }
     }
+    // Fin de partida: los que ganaron festejan (con papelitos), los que perdieron lloran; empate: hombros.
+    if (frame.win !== -2) this.celebrate(frame.win, dt);
     for (const s of this.skyStuff) {
       s.rotation.y += dt * s.userData.spin;
       s.position.y += Math.sin(this.time * 0.6 + s.userData.bob) * dt * 0.4;
     }
-    this.structs.update(frame.structs, this.teamColor, this.time, dt);
+    this.structs.update(frame.structs.filter((st) => st.k !== 'tower' && st.k !== 'core'), this.teamColor, this.time, dt);
+    if (frame.units.length) this.units.update(frame.units, this.camera, this.teamColor, this.time, dt, frame.win);
+    else this.units.clear();
+    const lp = local && !(local.fl & F_DEAD) ? local : null;
+    this.fixed.update(frame.structs, {
+      camera: this.camera, teamColor: this.teamColor, time: this.time, dt,
+      me: lp ? { id: lp.id, team: this.myTeam, x: lp.x, z: lp.z } : null,
+      bodyPos: (id) => this.charPos(id),
+      allyHero: (id) => this.isHero(id) && this.teamOf(id) === this.myTeam,
+    });
     this.projs.update(frame.projs, (id) => this.charPos(id), this.time);
     this.zones.update(frame.zones, 'zone', this.myTeam, this.time, this.sparks);
     this.teles.update(frame.teles, 'tele', this.myTeam, this.time, this.sparks);
@@ -369,6 +396,27 @@ export class GameView {
     this.updateLabels();
     const el = this.renderer.domElement;
     this.floaters.update(realDt, this.camera, el.clientWidth, el.clientHeight);
+  }
+
+  private celebrateT = 0;
+  private celebrate(win: number, dt: number) {
+    this.celebrateT -= dt;
+    const burst = this.celebrateT <= 0;
+    if (burst) this.celebrateT = 0.45;
+    const face = new THREE.Vector3();
+    for (const [id, b] of this.beans) {
+      const team = this.teamOf(id);
+      b.emote = win === -1 ? 'draw' : team === win ? 'win' : 'lose';
+      if (!b.root.visible) continue;
+      const p = b.root.position;
+      if (b.emote === 'win' && burst) this.confetti(p.x, p.y + 1.8, p.z, 10, 3, 6);
+      if (b.emote === 'lose' && Math.random() < dt * 14) {
+        // Lágrimas azules que caen (nada blanco).
+        b.facePos(face);
+        const side = Math.random() < 0.5 ? -0.15 : 0.15;
+        this.sparks.burst(face.x + side, face.y - 0.05, face.z + 0.1, 1, 0x4fa8ff, { speed: 0.4, up: 0.6, size: 0.06, life: 0.7, gravity: 9 });
+      }
+    }
   }
 
   private groundBelow(x: number, y: number, z: number) {
@@ -463,8 +511,10 @@ export class GameView {
           L.flash(e.x, e.y, e.z, col, 25 + p * 2, 10, 0.25);
         }
         this.beans.get(e.id)?.hitFlash(p);
-        // Números de heat: el color es la etapa en la que quedó la víctima.
-        if (e.h > 0 && this.worthText(e.x, e.z, e.a, e.id)) {
+        const unitHit = !this.isHero(e.id);
+        if (unitHit) this.units.hurt(e.id);
+        // Números de heat: el color es la etapa en la que quedó la víctima. A las unidades solo se los ves a los tuyos.
+        if (e.h > 0 && (unitHit ? e.a === me && me >= 0 : this.worthText(e.x, e.z, e.a, e.id))) {
           const mine = e.a === me && me >= 0, hurt = e.id === me;
           const size = Math.min(40, 16 + e.h * 1.0 + (mine ? 5 : 0));
           F.add(e.x, e.y + 0.9, e.z, `${hurt ? '-' : '+'}${e.h}`, hurt ? 'dmg hurt' : mine ? 'dmg mine' : 'dmg', { size, color: hurt ? undefined : STAGE_CSS[e.st] });
@@ -546,8 +596,86 @@ export class GameView {
         break;
       }
       case 'shoot': {
-        // Tiros: estocada con una mano (las torretas no mueven al dueño).
-        if (e.c !== 'bolt') this.beans.get(e.id)?.armMove('throw');
+        // Tiros: estocada con una mano (las torretas no mueven al dueño). Esbirros: su animación de ataque.
+        if (!this.isHero(e.id)) this.units.attack(e.id);
+        else if (e.c !== 'bolt') this.beans.get(e.id)?.armMove('throw');
+        break;
+      }
+      // ── Asedio (MOBA) ──
+      case 'uatk': {
+        this.units.attack(e.id);
+        break;
+      }
+      case 'udie': {
+        const kind = this.units.kind(e.id);
+        const col = e.tm >= 2 ? NEUTRAL_COLOR : this.teamColor(e.tm);
+        if (e.fall) break; // cayó al vacío: ya se lo vio caer
+        const fam: Family = kind === 'ranged' ? 'crystal' : kind === 'siege' ? 'metal' : kind === 'neutral' ? 'goo' : 'stone';
+        const big = kind === 'coloso';
+        P.burst(e.x, e.y + 0.5, e.z, big ? 40 : 10, FAMILY_COLORS[fam], { speed: big ? 7 : 3.5, up: big ? 8 : 4, size: big ? 0.25 : 0.12, life: 0.9 });
+        S.burst(e.x, e.y + 0.6, e.z, big ? 24 : 6, col, { speed: 3, up: 3, size: 0.05, life: 0.4 });
+        if (e.by === me && me >= 0) G.sparkle(e.x, e.y + 0.8, e.z, GOLD, 0.5);
+        if (big) {
+          G.fireball(e.x, e.y + 1.2, e.z, 3, 0xb070ff);
+          G.ring(e.x, e.y, e.z, 5, GOLD, 0.8);
+          L.flash(e.x, e.y, e.z, 0xb070ff, 80, 20, 0.6);
+          F.add(e.x, e.y + 3, e.z, '¡COLOSO DERRIBADO!', 'big boom', { size: 40, life: 1.6 });
+          this.onImpact(HITSTOP.boom);
+        }
+        break;
+      }
+      case 'tshot': {
+        const p = this.fixed.topOf(e.id);
+        if (p) G.sparkle(p.x, p.y, p.z, 0xff5a4a, 0.45);
+        break;
+      }
+      case 'shit': {
+        const col = e.h > 0 ? 0xff8a3d : 0x4fd1ff;
+        S.burst(e.x, e.y - 1.2, e.z, e.h > 0 ? 6 : 10, col, { speed: 3, up: 2, size: 0.06, life: 0.35 });
+        if (e.by === me && me >= 0) {
+          if (e.h > 0) F.add(e.x, e.y + 0.2, e.z, `-${e.h}`, 'dmg mine', { size: Math.min(28, 14 + e.h * 0.3) });
+          else F.add(e.x, e.y + 0.2, e.z, '🛡️', 'dmg', { size: 24 });
+        }
+        break;
+      }
+      case 'sdown': {
+        const col = this.teamColor(e.tm);
+        const core = e.kd === 'core';
+        const y = this.terrain.groundAt(e.x, e.z);
+        const gy = y > -Infinity ? y : 0;
+        G.fireball(e.x, gy + 2, e.z, core ? 4.5 : 3, col);
+        G.ring(e.x, gy + 0.1, e.z, core ? 9 : 6, col, 0.9, 1.2);
+        G.pillar(e.x, e.z, col, core ? 70 : 45, core ? 3.5 : 2.4, 1.4);
+        P.burst(e.x, gy + 2, e.z, core ? 60 : 36, 0x8c8494, { speed: 8, up: 10, size: 0.3, life: 1.4, gravity: 18 });
+        S.burst(e.x, gy + 2.5, e.z, 30, col, { speed: 10, up: 8, size: 0.09, life: 0.9 });
+        L.flash(e.x, gy + 1, e.z, col, 120, 30, 0.8);
+        this.confetti(e.x, gy + 2, e.z, core ? 90 : 40, 8, 14);
+        this.fixed.addRubble(e.x, gy, e.z, core);
+        F.add(e.x, gy + 4.5, e.z, core ? '¡NÚCLEO DESTRUIDO!' : '¡TORRE DESTRUIDA!', 'big ring', { size: core ? 56 : 44, life: 2, rise: 3 });
+        if (this.nearMe(e.x, e.z) < 20) this.post?.flash(col, 0.18);
+        this.onImpact(HITSTOP.boom);
+        break;
+      }
+      case 'recall': {
+        const tc = this.teamColor(this.teamOf(e.id));
+        if (e.s === 1) G.ring(e.x, this.groundOr(e.x, e.z, 0) + 0.05, e.z, 1.3, tc, 0.6);
+        if (e.s === 2) {
+          G.beam(e.x, this.groundOr(e.x, e.z, 0), e.z, tc);
+          S.burst(e.x, 1, e.z, 20, tc, { speed: 2, up: 6, size: 0.07, life: 0.7 });
+          const pos = this.charPos(e.id);
+          if (pos) { G.beam(pos.x, pos.y, pos.z, tc); G.ring(pos.x, pos.y, pos.z, 2, tc, 0.6); }
+        }
+        break;
+      }
+      case 'gold': {
+        if (e.id !== me || me < 0) break;
+        const pos = this.charPos(e.id);
+        if (!pos) break;
+        const txt = e.m === 4 ? `+${e.n} de cada material` : `+${e.n} ${MAT_ICON[e.m]}`;
+        F.add(pos.x, pos.y + 1.9, pos.z, txt, 'mat', { size: 20, life: 0.9, rise: 1.4 });
+        const sc = this.toScreen(pos.x, pos.y + 1, pos.z);
+        if (e.m === 4) for (let m = 0; m < 4; m++) this.onLocalPickup(sc.x, sc.y, m);
+        else for (let k = 0; k < Math.min(3, e.n); k++) this.onLocalPickup(sc.x, sc.y, e.m);
         break;
       }
       case 'dash': {
@@ -588,6 +716,11 @@ export class GameView {
         const b = this.terrain.cellBounds(ci);
         const x = (b.minX + b.maxX) / 2, z = (b.minZ + b.maxZ) / 2;
         const y = this.terrain.cells[ci].level * 1.5;
+        if (e.s === 0) {
+          // El piso se rearmó (Asedio).
+          S.burst(x, y + 0.1, z, 10, 0xc9a27a, { speed: 1.5, up: 3, size: 0.06, spread: 1.6, life: 0.6 });
+          break;
+        }
         P.burst(x, y + 0.1, z, e.s >= 3 ? 26 : 8, 0xc9a27a, { speed: 3, up: 3, size: 0.15, spread: 1.6, life: 0.8 });
         if (e.s >= 4) { S.burst(x, y, z, 16, 0xff5030, { speed: 3, up: 5, size: 0.07, spread: 1.6 }); L.flash(x, y, z, 0xff5030, 25, 8, 0.4); }
         break;

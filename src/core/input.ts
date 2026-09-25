@@ -12,6 +12,7 @@ export const BTN = {
   I3: 512,
   REPAIR: 1024,
   DASH: 2048,
+  RECALL: 4096,
 } as const;
 
 export interface InputFrame {

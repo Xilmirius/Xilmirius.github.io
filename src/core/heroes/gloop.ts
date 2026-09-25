@@ -14,14 +14,14 @@ export const gloop: HeroDef = {
   passive: 'Goo: rebotás contra las paredes sin lastimarte y tenés 60% más control en el aire.',
   basic: {
     name: 'Pegote',
-    desc: 'Bola de goo a distancia media. Suma heat y frena un poco.',
+    desc: 'Bola de goo a distancia media. Suma heat y frena apenas (no empuja).',
     kind: 'ranged',
     cd: 0.5,
     range: 11,
     cast(sim, ch, ax, az) {
       const a = sim.clampAim(ch, ax, az, 11);
       sim.fireProjectile(ch, {
-        kind: 'glob', speed: 17, range: 11, radius: 0.42, heat: 5, kb: 3, slow: [0.25, 1], destruct: 8,
+        kind: 'glob', speed: 17, range: 11, radius: 0.42, heat: 5, kb: 0, slow: [0.15, 0.6], destruct: 8,
         dirX: a.dx, dirZ: a.dz,
       }, NO_MODS);
     },

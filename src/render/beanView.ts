@@ -184,6 +184,8 @@ export class BeanView {
   private labelBar: HTMLDivElement;
   private labelName: HTMLDivElement;
   lastFrame: CharFrame | null = null;
+  /** Fin de partida: festeja (ganó), llora (perdió) o se encoge de hombros (empate). null = jugando. */
+  emote: 'win' | 'lose' | 'draw' | null = null;
 
   constructor(hero: HeroId, public team: number, teamColor: number, name: string, isLocal: boolean, hat = 'none') {
     const def = HEROES[hero];
@@ -581,6 +583,7 @@ export class BeanView {
       (this.aura.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(time * 6) * 0.3;
     }
     this.bodyMat.color.copy(WHITE).lerp(HIT_TINT, this.flash > 0 ? Math.min(1, this.flash / 0.12) : 0);
+    if (this.emote) this.applyEmote(time, f.id);
 
     // Suelo: anillo de equipo y sombra
     const gy = groundY > -100 ? groundY : f.y;
@@ -591,6 +594,58 @@ export class BeanView {
     (this.shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.1, 0.35 - h * 0.02);
     this.ring.visible = groundY > -100;
     this.shadow.visible = groundY > -100;
+  }
+
+  /** Animaciones de fin de partida: mira a la cámara y festeja, llora o se encoge de hombros. */
+  private applyEmote(time: number, seed: number) {
+    const t = time + seed * 0.37;
+    this.root.rotation.y = 0; // de frente a la cámara
+    this.arm = null;
+    this.handL.scale.setScalar(1);
+    this.handR.scale.setScalar(1);
+    this.tilt.rotation.set(0, 0, 0);
+    switch (this.emote) {
+      case 'win': {
+        // Saltitos con los brazos arriba, saludando.
+        const hop = Math.abs(Math.sin(t * 6));
+        this.tilt.position.y = hop * 0.5;
+        this.tilt.scale.set(1 - hop * 0.05, 1 + hop * 0.08, 1 - hop * 0.05);
+        this.tilt.rotation.z = Math.sin(t * 3) * 0.12;
+        const wave = Math.sin(t * 12) * 0.12;
+        this.handL.position.set(-0.38 + wave, 1.5 + hop * 0.1, 0.05);
+        this.handR.position.set(0.38 - wave, 1.5 + hop * 0.1, 0.05);
+        this.footL.position.set(-0.18, 0.08 + hop * 0.1, 0);
+        this.footR.position.set(0.18, 0.08 + hop * 0.1, 0);
+        this.eyes.scale.y = 0.45; // ojos felices (achinados)
+        break;
+      }
+      case 'lose': {
+        // Encorvado, las manos en la cara y sollozando (se sacude un poco).
+        const sob = Math.sin(t * 16) * 0.02 + Math.max(0, Math.sin(t * 2.2)) * 0.03;
+        this.tilt.rotation.x = 0.42;
+        this.tilt.position.y = -0.06 + sob;
+        this.tilt.scale.set(1.04, 0.86, 1.04);
+        this.handL.position.set(-0.13, 0.98 + sob, 0.42);
+        this.handR.position.set(0.13, 0.98 + sob, 0.42);
+        this.eyes.scale.y = 0.2;
+        break;
+      }
+      case 'draw': {
+        // Se encoge de hombros con las palmas para arriba: "y bueno".
+        const shrug = Math.max(0, Math.sin(t * 2.4));
+        this.tilt.rotation.z = Math.sin(t * 1.2) * 0.1;
+        this.tilt.position.y = shrug * 0.06;
+        this.handL.position.set(-0.62, 0.7 + shrug * 0.2, 0.2);
+        this.handR.position.set(0.62, 0.7 + shrug * 0.2, 0.2);
+        this.eyes.scale.y = 0.8;
+        break;
+      }
+    }
+  }
+
+  /** Posición del mundo de la cara (para las lágrimas). */
+  facePos(out: THREE.Vector3) {
+    return this.eyes.getWorldPosition(out);
   }
 
   dispose() {

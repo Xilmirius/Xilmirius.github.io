@@ -9,6 +9,14 @@ import type { AbilitySlot, Family, HeroId, Materials, Route } from './types';
 import { emptyMats } from './types';
 
 export type Slot = AbilitySlot | 'basic' | 'push' | 'i1' | 'i2' | 'i3';
+
+/**
+ * Qué es un cuerpo: un héroe (jugador o bot) o una unidad del modo Asedio (esbirros, neutrales).
+ * Las unidades usan la misma física, knockback y ring-out que los héroes (se pueden tirar al vacío),
+ * pero tienen vida (hp) en vez de heat y las maneja la IA del modo, no un InputFrame de jugador.
+ */
+export type UnitKind = 'hero' | 'melee' | 'ranged' | 'siege' | 'neutral' | 'coloso';
+export const UNIT_KINDS: UnitKind[] = ['hero', 'melee', 'ranged', 'siege', 'neutral', 'coloso'];
 export const SLOTS: Slot[] = ['q', 'e', 'f', 'r', 'basic', 'push', 'i1', 'i2', 'i3'];
 
 export interface ActionState {
@@ -24,6 +32,17 @@ export interface ActionState {
 }
 
 export class Character implements MoveState {
+  unit: UnitKind = 'hero';
+  /** Unidades: vida (los héroes no tienen: se agrietan con heat y mueren por ring-out). */
+  hp = 0;
+  maxHp = 0;
+  /** Unidades: estado de su IA (lo maneja el modo). */
+  ai: any = null;
+  /** Canalizando "volver a la base" (segundos acumulados, 0 = no). */
+  recallT = 0;
+  /** Último tick en que este héroe le pegó a un héroe rival, y a quién (los esbirros acuden). */
+  hitHeroTick = -9999;
+  hitHeroVictim = -1;
   pos: V3;
   ppos: V3;
   vel: V3 = { x: 0, y: 0, z: 0 };
@@ -83,6 +102,7 @@ export class Character implements MoveState {
   kills = 0;
   deaths = 0;
   assists = 0;
+  cs = 0; // unidades rematadas (Asedio)
   heatDealt = 0;
   // Estadísticas para premios y feedback
   destroyed = 0;
@@ -176,6 +196,8 @@ export interface Projectile {
   dead: boolean;
   ignoreSolid: boolean;
   life: number; // ticks restantes para proyectiles parabólicos (-1 = no aplica)
+  /** Teledirigido a este cuerpo (disparos de torre): lo sigue y solo le puede pegar a él. -1 = no. */
+  homing: number;
 }
 
 export interface BlastSpec {
@@ -216,7 +238,7 @@ export interface Telegraph {
 
 export interface Structure {
   id: number;
-  kind: string; // wall | stonewall | turret
+  kind: string; // wall | stonewall | turret | tower | core
   owner: number;
   team: number;
   family: Family;
@@ -230,6 +252,19 @@ export interface Structure {
   fireT: number;
   obstacle: Obstacle;
   mods?: Mods;
+  /** Pieza fija del mapa (torre, núcleo): sin dueño ni vencimiento. */
+  fixed?: boolean;
+  /** No recibe daño (p. ej. torre interior mientras la exterior está en pie). */
+  invuln?: boolean;
+  /** Multiplicador del daño que recibe (p. ej. 0.4 sin esbirros rivales cerca). */
+  armor?: number;
+  /** A quién le está apuntando (torres), -1 nadie. Se ve en el cliente como una línea. */
+  target?: number;
+  /** Último que le pegó y cuándo (para avisos de "tu torre está bajo ataque"). */
+  lastHitBy?: number;
+  lastHitTick?: number;
+  /** Estado del modo (línea, nivel de torre, rampa de daño...). */
+  ai?: any;
 }
 
 export interface Destructible {
