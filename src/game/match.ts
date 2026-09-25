@@ -1,0 +1,354 @@
+// Corre una partida en pantalla, sea como host (simula) o como cliente (predice e interpola).
+import * as THREE from 'three';
+import { audio } from '../audio/audio';
+import { getPrefs, savePrefs } from '../config';
+import { toast } from '../ui/dom';
+import { CollisionWorld, type Obstacle } from '../core/collision';
+import { DT, INTERP_TICKS } from '../core/constants';
+import { DESTRUCT_DEF } from '../core/entities';
+import type { TimedEvent } from '../core/events';
+import { type InputFrame } from '../core/input';
+import type { MatchInit, MatchResultInfo } from '../core/protocol';
+import type { Command } from '../core/sim';
+import { stepMove, newMoveOut, type MoveParams, type MoveState } from '../core/movement';
+import { buildMeFrame, F_DEAD, F_GROUNDED, F_TUMBLE, FrameBuffer, type CharFrame, type MeFrame, type StructFrame, type WorldFrame } from '../core/snapshot';
+import type { ClientSession } from '../net/client';
+import type { HostSession } from '../net/host';
+import { GameView } from '../render/gameView';
+import { Hud } from '../ui/hud';
+import { LocalInput } from './localInput';
+import { applyMatch } from './profile';
+import { Ticker } from './ticker';
+
+const STRUCT_DIM: Record<string, [number, number]> = { wall: [0.55, 1.8], stonewall: [0.55, 1.8], turret: [0.4, 1.2] };
+
+export interface MatchHooks {
+  onEscape(): void;
+}
+
+export class MatchRunner {
+  view: GameView;
+  hud: Hud;
+  input: LocalInput;
+  private ticker: Ticker;
+  private raf = 0;
+  private lastT = performance.now();
+  private frames: FrameBuffer;
+  private events: TimedEvent[] = [];
+  private seq = 0;
+  private localId = -1;
+  private me: MeFrame | null = null;
+  private fps = 60;
+  private cursor = new THREE.Vector3();
+  // Predicción (solo cliente)
+  private pending: InputFrame[] = [];
+  private pred: MoveState | null = null;
+  private predParams: MoveParams | null = null;
+  private offset = new THREE.Vector3();
+  private cw: CollisionWorld;
+  private obsKey = '';
+  private mo = newMoveOut();
+  private clockTick = 0; // tick del servidor estimado (cliente)
+  private clockSynced = false;
+  private lastSnapTick = 0;
+  private latestWorld: WorldFrame | null = null;
+  private disposed = false;
+  private boardHeld = false;
+  // Tiempo visual: hitstop (congelar), cámara lenta y recuperación.
+  private lag = 0;
+  private stopT = 0;
+  private slowT = 0;
+  private slowScale = 1;
+  private heartT = 0;
+  private lowFpsT = 0;
+
+  constructor(
+    container: HTMLElement,
+    private session: HostSession | ClientSession,
+    init: MatchInit,
+    private hooks: MatchHooks,
+  ) {
+    const prefs = getPrefs();
+    const me = init.roster.find((r) => r.pid === session.localPid);
+    this.localId = me ? me.id : -1;
+    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme });
+    this.cw = new CollisionWorld(this.view.terrain);
+    this.hud = new Hud(container, init.roster, this.localId, (c) => this.command(c));
+    this.view.onImpact = (stop, scale, dur) => this.impact(stop, scale, dur);
+    this.view.onLocalPickup = (sx, sy, mat) => this.hud.flyMat(sx, sy, mat);
+    this.hud.onFlash = (c, a) => this.view.flash(c, a);
+    audio.tension = 0;
+    audio.announcer = prefs.announcer;
+    this.input = new LocalInput(this.view.renderer.domElement);
+    this.input.onKey = (code) => this.onKey(code);
+    this.frames = session.isHost ? (session as HostSession).frames : new FrameBuffer();
+    this.ticker = new Ticker(() => this.step());
+    window.addEventListener('resize', this.onResize);
+    window.addEventListener('keyup', this.onKeyUp);
+    audio.setMusic('match');
+    audio.intensity = 0.3;
+  }
+
+  start() {
+    this.ticker.start();
+    const loop = () => {
+      if (this.disposed) return;
+      this.raf = requestAnimationFrame(loop);
+      this.frame();
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  private onResize = () => this.view.resize();
+
+  private onKey(code: string) {
+    if (code === 'KeyC') this.hud.toggleForge();
+    else if (code === 'Tab') { this.boardHeld = true; this.hud.showBoard(true); }
+    else if (code === 'Escape') {
+      if (this.hud.forgeOpen) this.hud.toggleForge(false);
+      else this.hooks.onEscape();
+    }
+  }
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Tab' && this.boardHeld) { this.boardHeld = false; this.hud.showBoard(false); }
+  };
+
+  private command(c: Command) {
+    this.session.command(c);
+    audio.play('ui', 0.6);
+  }
+
+  // ───────────── tick fijo (60 Hz) ─────────────
+
+  private localChar(): CharFrame | null {
+    const w = this.latestWorld ?? this.frames.latest();
+    return w?.chars.find((c) => c.id === this.localId) ?? null;
+  }
+
+  private buildInput(): InputFrame {
+    const s = this.input.sample();
+    const pos = this.pred ? this.pred.pos : this.localChar();
+    const refY = pos ? pos.y : 0;
+    this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
+    return { seq: ++this.seq, mx: s.mx, mz: s.mz, ax: this.cursor.x, az: this.cursor.z, b: s.b };
+  }
+
+  private step() {
+    if (this.disposed) return;
+    if (this.session.isHost) {
+      const host = this.session as HostSession;
+      host.setLocalInput(this.buildInput());
+      host.tick();
+      if (host.sim && this.localId >= 0) {
+        const ch = host.sim.charById.get(this.localId);
+        if (ch) this.me = buildMeFrame(host.sim, ch);
+      }
+      const evs = host.localEvents;
+      if (evs.length) { this.events.push(...evs); host.localEvents = []; }
+      if (this.events.length > 3000) this.events.splice(0, this.events.length - 1500); // pestaña oculta: sin render
+      return;
+    }
+    // Cliente
+    this.clockTick += 1;
+    if (this.localId < 0) return;
+    const f = this.buildInput();
+    this.pending.push(f);
+    if (this.pending.length > 120) this.pending.shift();
+    (this.session as ClientSession).sendInputs(this.pending.slice(-4));
+    if (this.pred && this.predParams) {
+      stepMove(this.pred, f, this.predParams, this.cw, DT, this.mo);
+      if (this.mo.jumped) audio.play('jump', 0.8);
+      if (this.mo.airJumped) audio.play('airjump', 0.8);
+    }
+  }
+
+  // ───────────── red (cliente) ─────────────
+
+  onSnapshot(w: WorldFrame, me: MeFrame | null, ack: number) {
+    if (w.tick <= this.lastSnapTick) return;
+    this.lastSnapTick = w.tick;
+    this.frames.push(w);
+    this.latestWorld = w;
+    // Reloj: estimamos el tick del servidor "ahora".
+    if (!this.clockSynced || Math.abs(this.clockTick - w.tick) > 30) { this.clockTick = w.tick; this.clockSynced = true; }
+    else this.clockTick += (w.tick - this.clockTick) * 0.1;
+    if (me) this.me = me;
+    this.updateObstacles(w);
+    this.reconcile(w, me, ack);
+  }
+
+  onEvents(l: TimedEvent[]) {
+    this.events.push(...l);
+    if (this.events.length > 3000) this.events.splice(0, this.events.length - 1500);
+  }
+
+  private updateObstacles(w: WorldFrame) {
+    const key = w.dst + '|' + w.structs.map((s) => s.id).join(',');
+    if (key === this.obsKey) return;
+    this.obsKey = key;
+    const t = this.view.terrain;
+    if (w.tiles) t.applyTileString(w.tiles);
+    const obs: Obstacle[] = [];
+    t.destructs.forEach((d, i) => {
+      if ((w.dst.charCodeAt(i) - 48) >= 3) return;
+      const def = DESTRUCT_DEF[d.kind];
+      const hs = def.size / 2;
+      obs.push({ id: i, minX: d.x - hs, maxX: d.x + hs, minZ: d.z - hs, maxZ: d.z + hs, base: d.y, top: d.y + def.h, kind: 'd' });
+    });
+    for (const s of w.structs as StructFrame[]) {
+      const [hw, hh] = STRUCT_DIM[s.k] ?? [0.5, 1.5];
+      obs.push({ id: 100000 + s.id, minX: s.x - hw, maxX: s.x + hw, minZ: s.z - hw, maxZ: s.z + hw, base: s.y, top: s.y + hh, kind: 's' });
+    }
+    this.cw.obstacles = obs;
+  }
+
+  private reconcile(w: WorldFrame, me: MeFrame | null, ack: number) {
+    const c = w.chars.find((x) => x.id === this.localId);
+    if (!c || !me) { this.pred = null; return; }
+    this.pending = this.pending.filter((f) => f.seq > ack);
+    const s: MoveState = {
+      pos: { x: c.x, y: c.y, z: c.z }, vel: { x: c.vx, y: me.vy, z: c.vz }, facing: c.f,
+      grounded: !!me.gr, airJumps: me.aj, coyote: me.co, prevB: me.pb, tumble: me.tb, hitstun: me.hs, stun: me.sn, hitSlide: me.hsl,
+    };
+    const p: MoveParams = { speed: me.spd, lock: !!me.lock, airControl: me.air, restitution: me.rest, maxAirJumps: me.maj, jumpMul: me.jm, noGravity: !!me.ng };
+    this.predParams = p;
+    if ((c.fl & F_DEAD) || me.direct) {
+      this.pred = s;
+      this.offset.set(0, 0, 0);
+      return;
+    }
+    for (const f of this.pending) stepMove(s, f, p, this.cw, DT, this.mo);
+    if (this.pred) {
+      const ex = this.pred.pos.x - s.pos.x, ey = this.pred.pos.y - s.pos.y, ez = this.pred.pos.z - s.pos.z;
+      if (Math.hypot(ex, ey, ez) > 4) this.offset.set(0, 0, 0);
+      else this.offset.add(new THREE.Vector3(ex, ey, ez));
+    }
+    this.pred = s;
+  }
+
+  /** Congela el dibujo del mundo (hitstop) y/o lo pone en cámara lenta. Es solo visual: la simulación sigue. */
+  impact(hitstop: number, slowScale?: number, slowDur?: number) {
+    this.stopT = Math.max(this.stopT, hitstop);
+    if (slowScale && slowDur) {
+      this.slowScale = Math.min(this.slowScale, slowScale);
+      this.slowT = Math.max(this.slowT, slowDur);
+    }
+  }
+
+  // ───────────── render (rAF) ─────────────
+
+  private frame() {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - this.lastT) / 1000);
+    this.lastT = now;
+    this.fps = this.fps * 0.95 + (1 / Math.max(0.001, dt)) * 0.05;
+    // Calidad automática: si el postproceso ahoga la PC, se apaga (se puede reactivar en Ajustes).
+    if (this.view.hasPost) {
+      this.lowFpsT = this.fps < 28 ? this.lowFpsT + dt : Math.max(0, this.lowFpsT - dt);
+      if (this.lowFpsT > 4) {
+        this.view.disablePost();
+        savePrefs({ post: false });
+        toast('Bajamos los brillos para que vaya fluido (se reactivan en Ajustes)', 'info', 5000);
+      }
+    }
+
+    // Velocidad del "tiempo visual": 0 en hitstop, <1 en cámara lenta, >1 mientras recupera el atraso.
+    let rate = 1;
+    if (this.stopT > 0) { rate = 0; this.stopT -= dt; }
+    else if (this.slowT > 0) { rate = this.slowScale; this.slowT -= dt; if (this.slowT <= 0) this.slowScale = 1; }
+    else if (this.lag > 0) rate = 1.6;
+    this.lag = Math.min(40, Math.max(0, this.lag + dt * 60 * (1 - rate)));
+    const worldDt = dt * Math.min(1, rate);
+
+    let renderTick: number;
+    if (this.session.isHost) {
+      const host = this.session as HostSession;
+      renderTick = (host.sim?.tick ?? 0) - 1 + this.ticker.alpha - this.lag;
+    } else {
+      renderTick = this.clockTick + this.ticker.alpha - INTERP_TICKS - this.lag;
+    }
+    const w = this.frames.sample(renderTick);
+    if (!w) return;
+
+    // Eventos que ya "pasaron" en el tiempo que estamos dibujando.
+    if (this.events.length) {
+      const due = this.events.filter((e) => e.t <= renderTick + 1);
+      if (due.length) {
+        this.events = this.events.filter((e) => e.t > renderTick + 1);
+        const listener = this.view.listener();
+        for (const e of due) {
+          if (e.k === 'jump' && e.id === this.localId && !this.session.isHost) {
+            this.view.handleEvent(e);
+            continue; // el sonido ya lo hizo la predicción
+          }
+          this.view.handleEvent(e);
+          this.hud.onEvent(e);
+          audio.onEvent(e, this.view.eventPos(e), listener, this.localId, (id) => id < 0 ? this.view.terrain.destructs[-1 - id]?.kind ?? null : this.view.charFamily(id));
+        }
+      }
+    }
+
+    // Personaje local: predicho (cliente) o el del frame (host).
+    let local: CharFrame | null = null;
+    const latest = this.latestWorld ?? this.frames.latest();
+    const lc = latest?.chars.find((c) => c.id === this.localId) ?? null;
+    if (lc) {
+      if (!this.session.isHost && this.pred && !(lc.fl & F_DEAD)) {
+        this.offset.multiplyScalar(Math.exp(-dt * 10));
+        local = {
+          ...lc,
+          x: this.pred.pos.x + this.offset.x, y: this.pred.pos.y + this.offset.y, z: this.pred.pos.z + this.offset.z,
+          f: this.pred.facing, vx: this.pred.vel.x, vy: this.pred.vel.y, vz: this.pred.vel.z,
+          fl: (lc.fl & ~F_GROUNDED) | (this.pred.grounded ? F_GROUNDED : 0),
+        };
+      } else {
+        local = w.chars.find((c) => c.id === this.localId) ?? lc;
+      }
+    }
+
+    // Espectador: seguir al primero vivo.
+    let camChar = local;
+    if (!camChar) camChar = w.chars.find((c) => !(c.fl & F_DEAD)) ?? null;
+
+    audio.intensity = w.phase === 'play' ? 1 : 0.3;
+    // Viento mientras volás y latido cuando estás destrozado.
+    const lf = local && !(local.fl & F_DEAD) ? local : null;
+    audio.setWind(lf && (lf.fl & F_TUMBLE) ? Math.min(1, Math.hypot(lf.vx, lf.vz) / 25) : 0);
+    if (lf && lf.st >= 3) {
+      this.heartT -= dt;
+      if (this.heartT <= 0) { audio.play('heart', 0.9); this.heartT = 0.75; }
+    } else this.heartT = 0;
+    this.view.render(w, worldDt, camChar, this.cursor, this.input.shift, dt);
+    const ping = this.session.isHost ? 0 : (this.session as ClientSession).rtt;
+    this.hud.update(w, local, this.me, dt, { ping, fps: this.fps, showFps: getPrefs().showFps, kind: this.session.isHost ? 'host' : 'client' });
+  }
+
+  showResults(res: MatchResultInfo, onBack: () => void, onLeave: () => void) {
+    this.hud.toggleForge(false);
+    const meRes = res.players.find((p) => p.id === this.localId);
+    const reward = applyMatch(res, meRes, this.hud.live);
+    this.hud.showResults(res, this.session.isHost, onBack, onLeave, reward);
+    audio.setWind(0);
+    if (meRes) {
+      const won = !res.draw && res.winner === meRes.team;
+      audio.play(won ? 'win' : 'lose', 1);
+      if (won) { audio.play('crowd', 1); audio.say('¡Victoria!', true); } else audio.say(res.draw ? 'Empate' : 'Derrota', true);
+    }
+  }
+
+  setInputEnabled(on: boolean) { this.input.enabled = on; }
+
+  dispose() {
+    this.disposed = true;
+    audio.setWind(0);
+    audio.tension = 0;
+    cancelAnimationFrame(this.raf);
+    this.ticker.stop();
+    this.input.dispose();
+    this.hud.dispose();
+    this.view.dispose();
+    window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('keyup', this.onKeyUp);
+  }
+}

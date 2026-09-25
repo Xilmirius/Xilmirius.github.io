@@ -1,0 +1,204 @@
+Yo haría esto
+                     SUPABASE
+              ┌───────────────────┐
+              │                   │
+              │ PostgreSQL        │
+              │ Realtime          │
+              │ Auth (opcional)   │
+              │                   │
+              └─────────┬─────────┘
+                        │
+                  SIGNALING
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+          BROWSER A           BROWSER B
+            HOST                CLIENT
+              │                   │
+              └────── WebRTC ─────┘
+                    GAMEPLAY
+
+Y PostgreSQL no sería el canal del gameplay.
+
+PostgreSQL
+
+Para cosas persistentes:
+
+games
+players
+matches
+game_results
+
+Por ejemplo:
+
+games
+----------------
+id
+code
+host_player_id
+status
+created_at
+Supabase Realtime
+
+Para signaling:
+
+HOST
+ │
+ ├── offer ──────────────► Supabase
+ │                           │
+ │                           ▼
+ │                        CLIENT
+ │                           │
+ │ ◄────── answer ───────────┤
+ │
+ ├── ICE candidate ────────►
+ │ ◄── ICE candidate ───────
+
+Y después:
+
+             SUPABASE
+                 │
+                 │  FIN
+                 │
+       ┌─────────┴─────────┐
+       │                   │
+      HOST                CLIENT
+       │                   │
+       ╰══════ WebRTC ═════╯
+              P2P
+
+Supabase ya no participa en los movimientos.
+
+¿Por qué PostgreSQL y no Mongo?
+
+Para este proyecto concreto, me quedaría con PostgreSQL simplemente porque Supabase ya te lo da.
+
+No ganás nada metiendo Mongo:
+
+Supabase ─── PostgreSQL
+     │
+     └── Realtime
+
+es mucho más sencillo que:
+
+Supabase ─── Realtime
+     │
+     └── MongoDB Atlas
+
+Tendrías dos proveedores cuando Postgres ya es suficiente.
+
+Y para datos de partidas tampoco necesitás las ventajas particulares de MongoDB.
+
+Incluso algo tan sencillo como:
+
+games
+players
+matches
+
+te alcanza perfectamente.
+
+Y hay una decisión todavía más importante
+
+Yo no guardaría el estado del juego en Supabase.
+
+No hagas:
+
+Player mueve
+     ↓
+Supabase
+     ↓
+Otro Player
+
+Ni:
+
+60 updates/segundo
+       ↓
+   PostgreSQL
+
+El flujo debería ser:
+
+               SUPABASE
+                  │
+            crear partida
+            encontrar partida
+               signaling
+                  │
+                  ▼
+             WEBRTC P2P
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+       HOST                CLIENT
+        │                   │
+    game state          input/state
+        │                   │
+        └───────────────────┘
+
+El host es el servidor del juego, conceptualmente, aunque en realidad sea el navegador de un jugador.
+
+Entonces tu infraestructura sería absurdamente pequeña
+Frontend
+   │
+   ├── Three.js
+   ├── WebRTC
+   └── Supabase SDK
+            │
+            ▼
+         Supabase
+
+Y listo.
+
+No:
+
+❌ VPS
+❌ Node server
+❌ ASP.NET server
+❌ WebSocket server
+❌ Redis
+❌ MongoDB
+❌ Docker
+❌ Kubernetes
+
+Para un juego de amigos esto me parece mucho más interesante que montar infraestructura tradicional.
+
+Mi stack para tu caso
+
+Frontend
+
+Three.js
+TypeScript
+Vite
+
+Backend-as-a-Service
+
+Supabase
+PostgreSQL
+Supabase Realtime
+
+Multiplayer
+
+WebRTC DataChannel
+Host authoritative
+
+NAT traversal
+
+STUN inicialmente
+TURN si necesitás fallback
+
+Y si después el juego crece, podés reemplazar únicamente la parte de networking:
+
+             MVP
+              │
+        Browser Host
+              │
+          WebRTC P2P
+              │
+             ...
+              │
+           escala
+              ▼
+       Dedicated Server
+
+Sin tener que tirar todo el juego.
+
+Así que sí: yo elegiría Supabase + PostgreSQL para este proyecto, no MongoDB. El valor de Supabase acá no es la DB: es que te da el ecosistema necesario para que no tengas que hostear tu propio signaling/backend.
