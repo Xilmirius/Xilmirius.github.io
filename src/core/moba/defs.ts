@@ -3,7 +3,7 @@
 import type { UnitKind } from '../entities';
 import type { Family } from '../types';
 
-export type MobaUnit = Exclude<UnitKind, 'hero'>;
+export type MobaUnit = Extract<UnitKind, 'melee' | 'ranged' | 'siege' | 'neutral' | 'coloso'>;
 
 export interface UnitDef {
   name: string;

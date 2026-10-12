@@ -29,7 +29,7 @@ export const ABILITY_SLOTS: AbilitySlot[] = ['q', 'e', 'f', 'r'];
 export type Route = 'tank' | 'carry' | 'support';
 export const ROUTE_NAMES: Record<Route, string> = { tank: 'Tanque', carry: 'Carry', support: 'Support' };
 
-export type ModeId = 'stock' | 'kills' | 'koth' | 'moba';
+export type ModeId = 'stock' | 'kills' | 'koth' | 'moba' | 'horde' | 'race';
 export type { RulesetId } from './rules';
 export type HeroId = 'canto' | 'prisma' | 'gloop' | 'remache';
 export const HERO_IDS: HeroId[] = ['canto', 'prisma', 'gloop', 'remache'];
@@ -46,6 +46,8 @@ export interface MatchSettings {
   bots: number;
   botLevel: 1 | 2 | 3;
   theme: string; // tema visual (solo estética)
+  /** Dificultad de los juegos contra el entorno (Horda): 1 fácil, 2 normal, 3 difícil. */
+  difficulty: 1 | 2 | 3;
 }
 
 export const DEFAULT_SETTINGS: MatchSettings = {
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   bots: 0,
   botLevel: 2,
   theme: 'neon',
+  difficulty: 2,
 };
 
 export interface RosterEntry {

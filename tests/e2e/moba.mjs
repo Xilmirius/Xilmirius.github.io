@@ -29,9 +29,10 @@ async function match(bots, tag) {
   watch(p, tag);
   await p.goto(BASE);
   await p.waitForSelector('.menu .logo');
+  // El juego se elige en la vitrina del menú.
+  await p.click('.gamecard:has-text("Asedio")');
   await p.click('text=Práctica vs bots');
   await p.waitForSelector('.lobby');
-  await p.selectOption('select:has(option[value="moba"])', 'moba');
   await wait(300);
   await p.selectOption('select:has(option[value="5"])', String(bots));
   await wait(300);

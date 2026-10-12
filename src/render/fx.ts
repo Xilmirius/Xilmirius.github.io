@@ -91,7 +91,7 @@ export class Particles {
 
 export const PROJ_COLORS: Record<string, number> = {
   shard: 0x4fd1ff, lance: 0x3fb4ff, glob: 0x7bea4f, wave: 0x4fdc4a, hook: 0x8fa3b8, bolt: 0xffc629, nova: 0x9d7bff, goolob: 0x7bea4f,
-  tbolt: 0xff5a4a, coreshot: 0xff5a4a, spark: 0x7fe3ff, cannon: 0x3a4048,
+  tbolt: 0xff5a4a, coreshot: 0xff5a4a, spark: 0x7fe3ff, cannon: 0x3a4048, rocket: 0xff8a3c,
 };
 /** Proyectiles que toman el color del equipo que dispara (torres, núcleo, esbirros). */
 const TEAM_TINT = new Set(['tbolt', 'coreshot', 'spark']);
@@ -155,6 +155,20 @@ function buildProjectileProcedural(kind: string, radius: number, tint?: number):
     }
     case 'cannon':
       return new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 0), new THREE.MeshToonMaterial({ color: c, gradientMap: tg }));
+    case 'rocket': {
+      // Cohete: cuerpo, punta roja y la llama atrás (apunta hacia +Z).
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.6, 8), new THREE.MeshToonMaterial({ color: 0xd8dde3, gradientMap: tg }));
+      body.rotation.x = Math.PI / 2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.26, 8), new THREE.MeshToonMaterial({ color: 0xff4d5e, gradientMap: tg }));
+      tip.rotation.x = Math.PI / 2;
+      tip.position.z = 0.42;
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 8), glow(1.35));
+      flame.rotation.x = -Math.PI / 2;
+      flame.position.z = -0.46;
+      g.add(body, tip, flame);
+      return g;
+    }
     default:
       return new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.12, radius), 8, 6), glow(1.3));
   }
@@ -183,6 +197,11 @@ export class ProjectilesView {
       if (p.k === 'nova' || p.k === 'goolob') o.rotation.y = time * 8;
       if (p.k === 'wave') o.position.y = p.y - 0.6;
       if (p.k === 'shard' || p.k === 'lance' || p.k === 'nova') this.particles.trail(p.x, p.y, p.z, PROJ_COLORS[p.k], p.k === 'nova' ? 0.2 : 0.07, 0.25);
+      if (p.k === 'rocket') {
+        // Estela: fuego pegado al cohete y humo que queda atrás.
+        this.particles.trail(p.x, p.y, p.z, PROJ_COLORS.rocket, 0.16, 0.22);
+        if (Math.random() < 0.7) this.particles.trail(p.x, p.y, p.z, 0x9a9aa8, 0.2, 0.6);
+      }
       if (p.k === 'glob' || p.k === 'wave') { if (Math.random() < 0.5) this.particles.trail(p.x, p.y - 0.2, p.z, 0x7bea4f, 0.1, 0.4); }
       if (tint !== undefined && p.k !== 'spark') this.particles.trail(p.x, p.y, p.z, tint, 0.12, 0.3);
       if (p.k === 'tbolt' || p.k === 'coreshot') o.rotation.z = time * 10;

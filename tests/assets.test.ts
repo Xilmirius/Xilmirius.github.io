@@ -86,6 +86,7 @@ describe('catálogo de assets', () => {
     const doc = generateDoc();
     if (process.env.UPDATE_ASSET_DOC) writeFileSync(DOC, doc);
     expect(existsSync(DOC)).toBe(true);
-    expect(readFileSync(DOC, 'utf8')).toBe(doc);
+    // Sin importar el fin de línea de la copia de trabajo (en Windows git puede bajarlo con CRLF).
+    expect(readFileSync(DOC, 'utf8').replace(/\r\n/g, '\n')).toBe(doc);
   });
 });

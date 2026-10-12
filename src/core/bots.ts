@@ -3,15 +3,19 @@
 import { MUTATION_LEVELS } from './constants';
 import type { Character } from './entities';
 import { HEROES } from './heroes';
+import { geyserPhase, ROTOR, rotorAngle } from './gadgets';
+import { CRATE_KINDS, HORDE, MISSIONS, type HordeMode } from './horde';
 import { BTN, type InputFrame } from './input';
 import { ITEM_BY_ID, canAfford } from './items';
 import { dirOf, norm2 } from './math';
 import { Rng } from './rng';
 import { CORE, TOWER } from './moba/defs';
 import type { MobaMode } from './moba/mode';
+import type { RaceMode } from './race';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
+import { C4, WEAPON_IDS, WEAPONS } from './weapons';
 
 const DIFF = {
   1: { think: 0.5, aimErr: 2.4, use: 0.12, lead: 0.2, push: 0.15, craftEvery: 8, dash: 0.05 },
@@ -110,6 +114,8 @@ export class BotBrain {
   private decide(sim: Simulation, ch: Character) {
     this.hold = 0;
     if (sim.mode.id === 'moba') { this.decideMoba(sim, ch); return; }
+    if (sim.mode.id === 'race') { this.decideRace(sim, ch); return; }
+    if (sim.mode.id === 'horde') { this.decideHorde(sim, ch); return; }
 
     // Elegir objetivo: el enemigo más cercano, con preferencia por los golpeados y los que están cerca del borde.
     let best: Character | null = null, bs = Infinity;
@@ -143,7 +149,7 @@ export class BotBrain {
       // Farmear: ir al destructible vivo más cercano.
       let bd = Infinity, g: { x: number; z: number } | null = null;
       for (const d of sim.destructibles) {
-        if (d.stage >= 3) continue;
+        if (d.stage >= 3 || d.explosive) continue;
         const dd = Math.hypot(d.x - ch.pos.x, d.z - ch.pos.z);
         if (dd < bd) { bd = dd; g = { x: d.x, z: d.z }; }
       }
@@ -245,6 +251,152 @@ export class BotBrain {
         this.tap |= [BTN.I1, BTN.I2, BTN.I3][i];
         break;
       }
+    }
+  }
+
+  // ───────────── Horda ─────────────
+
+  /**
+   * Cómo juega un bot la Horda: le dispara al zombi más cercano que tenga a tiro sin dejar que se le pegue,
+   * va a la zona de la misión (o a romper el nido más cercano), pasa por las cajas que le sirven, planta C4
+   * cuando lo rodean y vuelve a una mini base a enfriarse si está muy roto.
+   */
+  private decideHorde(sim: Simulation, ch: Character) {
+    const m = sim.mode as HordeMode;
+    const here = (p: { x: number; z: number }) => Math.hypot(p.x - ch.pos.x, p.z - ch.pos.z);
+
+    // El zombi más cercano al que le puede llegar una bala, y cuántos tiene encima.
+    let near: Character | null = null, ns = Infinity, crowd = 0;
+    for (const u of sim.units) {
+      if (!u.alive || u.invuln > 0.3 || Math.abs(u.pos.y - ch.pos.y) > 2.4) continue;
+      const d = here(u.pos);
+      if (d < 3.2) crowd++;
+      const s = d - (u === this.target ? 1.5 : 0);
+      if (s < ns) { ns = s; near = u; }
+    }
+    this.target = near;
+    const dist = near ? here(near.pos) : Infinity;
+
+    // Arma: la principal mientras sirva a esa distancia (escopeta de cerca, cohete de lejos); si no, la pistola.
+    const pri = ch.primary >= 0 ? WEAPON_IDS[ch.primary] : null;
+    const want = pri && (pri !== 'shotgun' || dist < 8) && (pri !== 'launcher' || (dist > 5 && crowd < 2)) ? ch.primary : 0;
+    if (want !== ch.weapon) this.tap |= BTN.Q;
+    const w = WEAPONS[WEAPON_IDS[ch.weapon]];
+
+    const nest = m.nests.length ? m.nests.reduce((a, b) => (here(a) <= here(b) ? a : b)) : null;
+    // Con un nido a tiro y ningún zombi encima, el nido primero: mientras viva, no paran de salir.
+    if (nest && here(nest) < w.range * 0.9 && dist > 4.5) {
+      this.aimAt(ch, nest.x, nest.z);
+      this.hold |= BTN.BASIC;
+    } else if (near && dist < w.range * 0.95) {
+      const err = this.d.aimErr * 0.5 * (0.3 + Math.min(1, dist / 12));
+      this.aimAt(ch, near.pos.x + near.vel.x * 0.1 + this.rng.range(-err, err), near.pos.z + near.vel.z * 0.1 + this.rng.range(-err, err));
+      this.hold |= BTN.BASIC;
+    } else if (nest && here(nest) < w.range * 0.9) {
+      // Sin zombis a tiro: al nido.
+      this.aimAt(ch, nest.x, nest.z);
+      this.hold |= BTN.BASIC;
+    }
+
+    // Rodeado: C4 a los pies y a correr. Uno pegado: empujón.
+    if (crowd >= 4 && ch.c4 > 0 && ch.grounded && this.rng.chance(this.d.use)) this.tap |= BTN.R;
+    if (near && dist < 1.9 && ch.cds.push <= 0 && this.pushT <= 0 && this.rng.chance(this.d.push * 0.5)) {
+      this.pushT = 0.3;
+      this.hold &= ~BTN.BASIC;
+    }
+
+    // Moverse. Primero, que no se le peguen: retrocede disparando (dentro de la zona, lo justo para no salirse).
+    // Con uno solo cerca y un objetivo al que ir, no retrocede: le dispara de paso.
+    const z = m.zone;
+    const inZone = !!z && here(z) < z.r;
+    const fuel = m.crates.filter((c) => CRATE_KINDS[c.kind] === 'fuel');
+    const obj = z ?? nest ?? (fuel.length ? fuel.reduce((a, b) => (here(a) <= here(b) ? a : b)) : null);
+    if (near && dist < (inZone ? 3 : obj && crowd < 2 ? 2.6 : 5.5)) {
+      // Se aleja del zombi, pero tirando hacia el objetivo (la zona, el nido, el bidón) para no regalar terreno.
+      const away = norm2(ch.pos.x - near.pos.x, ch.pos.z - near.pos.z);
+      const to = obj ? norm2(obj.x - ch.pos.x, obj.z - ch.pos.z) : { x: 0, z: 0 };
+      const u = norm2(away.x + to.x * 0.7, away.z + to.z * 0.7);
+      let gx = ch.pos.x + u.x * 4, gz = ch.pos.z + u.z * 4;
+      if (z && inZone) {
+        const o = norm2(gx - z.x, gz - z.z), lim = z.r - 0.8;
+        if (Math.hypot(gx - z.x, gz - z.z) > lim) { gx = z.x + o.x * lim; gz = z.z + o.z * lim; }
+      }
+      this.goal = { x: gx, z: gz };
+      if (dist < 2.4 && crowd >= 2 && sim.rules.dash && ch.dashCd <= 0 && ch.grounded && this.rng.chance(this.d.dash)) { this.dashAway = near; this.tap |= BTN.DASH; }
+      return;
+    }
+
+    // Muy roto y con una mini base cerca: a enfriarse (salvo en la extracción, que es llegar o nada).
+    const base = m.bases.length ? m.bases.reduce((a, c) => (here(a) <= here(c) ? a : c)) : null;
+    if (base && here(base) < 18 && MISSIONS[m.step]?.kind !== 'extract' && (ch.heat > 150 || (this.retreating && ch.heat > 60))) {
+      this.retreating = true;
+      this.goal = here(base) > HORDE.baseR - 1.5 ? { x: base.x, z: base.z } : null;
+      return;
+    }
+    this.retreating = false;
+
+    // Una caja que le sirva y le quede a mano (más lejos si todavía no tiene arma principal). El combustible, siempre.
+    let crate: { x: number; z: number } | null = null, cd = ch.primary < 0 ? 20 : 9;
+    for (const c of m.crates) {
+      const k = CRATE_KINDS[c.kind];
+      if (k === 'c4' ? ch.c4 >= C4.max : k === 'med' ? ch.heat < 50 : false) continue;
+      const d = k === 'fuel' ? here(c) * 0.2 : here(c);
+      if (d < cd) { cd = d; crate = c; }
+    }
+    if (crate) { this.goal = { x: crate.x, z: crate.z }; return; }
+
+    // El objetivo de la misión.
+    if (z) this.goal = inZone && here(z) < z.r - 1.2 ? null : { x: z.x + this.rng.range(-1.2, 1.2), z: z.z + this.rng.range(-1.2, 1.2) };
+    else if (nest) this.goal = here(nest) > 7 ? { x: nest.x, z: nest.z } : null;
+    else this.goal = null;
+  }
+
+  // ───────────── Carrera de obstáculos ─────────────
+
+  /** Corre a la próxima puerta por el camino a pie, salta los rotores, espera los géiseres y empuja al que tenga al lado. */
+  private decideRace(sim: Simulation, ch: Character) {
+    const m = sim.mode as RaceMode;
+    const gate = sim.terrain.gates[m.next.get(ch.id) ?? 0];
+    this.target = null;
+    this.goal = gate ? { x: gate.x, z: gate.z } : null;
+    if (!gate) return;
+    const gx = gate.x - ch.pos.x, gz = gate.z - ch.pos.z;
+    for (const g of sim.gadgets) {
+      const dx = g.x - ch.pos.x, dz = g.z - ch.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (g.kind === 'rotor' && d < ROTOR.len + 1.5 && ch.grounded) {
+        // Saltar cuando la barra está por pasar por donde estoy.
+        const a = rotorAngle(g.idx, sim.tick + 8);
+        const along = -dx * Math.cos(a) - dz * Math.sin(a), perp = dx * Math.sin(a) - dz * Math.cos(a);
+        if (Math.abs(along) < ROTOR.len + 0.6 && Math.abs(perp) < 1.3) this.tap |= BTN.JUMP;
+      }
+      // Géiser avisando justo adelante: frenar hasta que dispare.
+      if (g.kind === 'geyser' && d < 2.6 && d > 0.9 && dx * gx + dz * gz > 0 && geyserPhase(g.idx, sim.tick) !== 'idle') this.goal = null;
+    }
+    // Empujón al rival que esté pegado (más ganas cuanto más difícil el bot).
+    for (const c of sim.chars) {
+      if (c === ch || !c.alive || m.finished(c.id)) continue;
+      const d = Math.hypot(c.pos.x - ch.pos.x, c.pos.z - ch.pos.z);
+      if (d < 2 && ch.cds.push <= 0 && this.pushT <= 0 && this.rng.chance(this.d.push * 0.25)) {
+        this.aimAt(ch, c.pos.x, c.pos.z);
+        this.target = c;
+        this.pushT = 0.3;
+      }
+    }
+    // Ítems de las cajas: los de moverse, hacia la puerta; el resto, si hay alguien cerca.
+    for (let i = 0; i < 3; i++) {
+      const id = ch.actives[i];
+      if (!id || !this.rng.chance(this.d.use * 0.15)) continue;
+      const near = sim.chars.some((c) => c !== ch && c.alive && Math.hypot(c.pos.x - ch.pos.x, c.pos.z - ch.pos.z) < 4);
+      if (id === 'garfio' || id === 'parpadeo') {
+        // Solo en tramos rectos y firmes: unos metros hacia la puerta, si ahí hay piso.
+        const u = norm2(gx, gz);
+        const tx = ch.pos.x + u.x * 5, tz = ch.pos.z + u.z * 5;
+        if (!ch.grounded || sim.cw.groundAt(tx, tz, ch.pos.y + 1) === -Infinity) continue;
+        this.aimAt(ch, tx, tz);
+      } else if (!near) continue;
+      this.tap |= [BTN.I1, BTN.I2, BTN.I3][i];
+      break;
     }
   }
 
@@ -578,6 +730,8 @@ export class BotBrain {
     const blockedByDestruct = new Set<number>();
     for (const d of sim.destructibles) if (d.stage < 3) blockedByDestruct.add(t.cellIndexAt(d.x, d.z));
     for (const s of sim.structures) blockedByDestruct.add(t.cellIndexAt(s.x, s.z));
+    // Mejor rodear paragolpes, ejes de rotor y géiseres que pasarles por encima.
+    for (const g of sim.gadgets) if (g.kind !== 'box') blockedByDestruct.add(t.cellIndexAt(g.x, g.z));
     cost[start] = 0;
     const level = (i: number) => {
       const c = t.cells[i];

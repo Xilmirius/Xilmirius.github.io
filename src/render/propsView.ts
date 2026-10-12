@@ -95,6 +95,35 @@ export function buildDestructProcedural(kind: Family, seed: number): THREE.Group
   return g;
 }
 
+/** Barril explosivo: rojo, con franjas de peligro, para que nadie lo confunda con una cobertura común. */
+export function buildBarrelMesh(seed: number): THREE.Group {
+  const g = new THREE.Group();
+  const red = new THREE.MeshToonMaterial({ color: 0xd9412a, gradientMap: tg() });
+  const dark = new THREE.MeshToonMaterial({ color: 0x4a1a16, gradientMap: tg() });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.2, 14), red);
+  body.position.y = 0.6;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  g.add(body);
+  for (const y of [0.18, 1.02]) {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.585, 0.585, 0.12, 14), dark);
+    band.position.y = y;
+    g.add(band);
+  }
+  const stripes = hazardStripes().clone();
+  stripes.needsUpdate = true;
+  stripes.wrapS = stripes.wrapT = THREE.RepeatWrapping;
+  stripes.repeat.set(5, 1);
+  const warn = new THREE.Mesh(new THREE.CylinderGeometry(0.565, 0.565, 0.3, 14, 1, true), new THREE.MeshToonMaterial({ map: stripes, gradientMap: tg() }));
+  warn.position.y = 0.6;
+  g.add(warn);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb03a).multiplyScalar(1.3), toneMapped: false }));
+  cap.position.y = 1.26;
+  g.add(cap);
+  g.rotation.y = (seed * 1.3) % (Math.PI * 2);
+  return g;
+}
+
 interface DView { g: THREE.Group; stage: number; anim: number; baseY: number }
 
 export class DestructiblesView {
@@ -103,7 +132,7 @@ export class DestructiblesView {
 
   constructor(spawns: DestructSpawn[]) {
     spawns.forEach((d, i) => {
-      const g = buildDestructMesh(d.kind, i);
+      const g = d.explosive ? buildBarrelMesh(i) : buildDestructMesh(d.kind, i);
       g.position.set(d.x, d.y, d.z);
       this.group.add(g);
       this.items.push({ g, stage: 0, anim: 0, baseY: d.y });
@@ -208,6 +237,34 @@ export function buildStructureMesh(kind: string, rot: number, color: number, haz
     head.position.y = 0.9;
     for (const m of [base, hb]) { m.castShadow = true; }
     g.add(base, head);
+    return { g, head, mat, born: 0 };
+  }
+  if (kind === 'nest') {
+    // Nido de la Horda: un montículo de goo con huevos que laten. Se oscurece a medida que lo rompen.
+    const mat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: tg() });
+    const flesh = new THREE.MeshToonMaterial({ color: 0x6d7a3a, gradientMap: tg() });
+    const egg = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xb6ff5a).multiplyScalar(1.2), toneMapped: false });
+    const mound = new THREE.Mesh(new THREE.DodecahedronGeometry(0.85, 0), mat);
+    mat.color.set(0x8a9a4a);
+    mound.position.y = 0.55;
+    mound.scale.set(1, 0.85, 1);
+    mound.castShadow = true;
+    g.add(mound);
+    const head = new THREE.Group();
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.4;
+      const lump = new THREE.Mesh(new THREE.DodecahedronGeometry(0.38, 0), flesh);
+      lump.position.set(Math.cos(a) * 0.62, 0.3, Math.sin(a) * 0.62);
+      lump.castShadow = true;
+      g.add(lump);
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), egg);
+      e.position.set(Math.cos(a + 0.6) * 0.48, 1.0 + (i % 2) * 0.16, Math.sin(a + 0.6) * 0.48);
+      head.add(e);
+    }
+    const top = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), egg);
+    top.position.y = 1.42;
+    head.add(top);
+    g.add(head);
     return { g, head, mat, born: 0 };
   }
   const stone = kind === 'stonewall';

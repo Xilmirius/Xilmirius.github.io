@@ -420,6 +420,19 @@ export class AudioEngine {
       }
       case 'tick': this.tone(o, 'square', 1800, 1800, 0.03, 0.08); this.tone(o, 'sine', 900, 900, 0.08, 0.1); break;
       case 'hover': this.tone(o, 'sine', 1200, 1500, 0.04, 0.04); break;
+      // ── Armas (Horda) ──
+      case 'pistol': this.noiseHit(o, 'highpass', 1700 * pr, 0.06, 0.55); this.tone(o, 'square', 330 * pr, 90, 0.07, 0.3); this.noiseHit(o, 'lowpass', 700, 0.12, 0.3, 200, 0.01); break;
+      case 'uzi': this.noiseHit(o, 'bandpass', 2300 * pr, 0.035, 0.5); this.tone(o, 'square', 250 * pr, 110, 0.04, 0.2); break;
+      case 'shotgun':
+        this.noiseHit(o, 'lowpass', 2200, 0.24, 1, 260); this.tone(o, 'sine', 115, 38, 0.22, 0.9); this.noiseHit(o, 'highpass', 2600, 0.05, 0.45);
+        // La corredera, un instante después.
+        this.tone(o, 'square', 520, 380, 0.04, 0.1, 0.3); this.noiseHit(o, 'highpass', 3200, 0.04, 0.2, undefined, 0.36);
+        break;
+      case 'rocket': this.noiseHit(o, 'bandpass', 450, 0.55, 0.55, 2600); this.tone(o, 'sawtooth', 190, 70, 0.35, 0.22); break;
+      case 'c4plant': this.tone(o, 'square', 720, 480, 0.07, 0.14); this.noiseHit(o, 'lowpass', 420, 0.09, 0.35); break;
+      case 'c4beep': this.tone(o, 'square', 1900 * pr, 1900 * pr, 0.05, 0.13); break;
+      case 'swap': this.tone(o, 'square', 880, 560, 0.03, 0.1); this.noiseHit(o, 'highpass', 3000, 0.03, 0.22, undefined, 0.06); break;
+      case 'loot': [76, 81, 88].forEach((n, i) => this.tone(o, 'triangle', NOTE(n), NOTE(n), 0.14, 0.14, i * 0.06)); this.noiseHit(o, 'highpass', 3500, 0.05, 0.15); break;
       case 'whoosh': this.noiseHit(o, 'bandpass', 400, 0.35, 0.35, 3000); break;
     }
   }
@@ -515,6 +528,8 @@ export class AudioEngine {
   /** Traduce eventos de simulación a sonidos con volumen y paneo según distancia a la cámara. */
   /** Límite de sonidos de esbirros peleando entre ellos (si no, veinte golpes por segundo tapan todo). */
   private unitT = 0;
+  private shotSkip = 0;
+
   private unitOk() {
     const now = performance.now();
     if (now - this.unitT < 90) return false;
@@ -540,7 +555,8 @@ export class AudioEngine {
         if (e.f === 'shard' || e.f === 'lance' || e.f === 'crystal') this.play('crystal', vol * 0.5, pan);
         break;
       case 'boom':
-        if (e.r >= 3) this.play(e.c === 'quake' ? 'quake' : 'boom', vol, pan);
+        if (e.c === 'c4') { this.play('quake', vol, pan); this.play('boom', vol, pan, 0.8); }
+        else if (e.r >= 3) this.play(e.c === 'quake' ? 'quake' : 'boom', vol, pan);
         else if (e.r >= 1.5) this.play(e.c === 'build' ? 'metal' : e.c === 'buildstone' ? 'stone' : e.c === 'wave' ? 'push' : 'boom', vol * 0.8, pan);
         else if (e.c === 'shard' || e.c === 'lance') this.play('crystal', vol * 0.4, pan);
         else if (e.c === 'glob') this.play('goo', vol * 0.4, pan);
@@ -549,7 +565,7 @@ export class AudioEngine {
       case 'swing': this.play(e.c.startsWith('push') ? 'push' : 'swing', vol * 0.8, pan); break;
       case 'shoot': {
         if (e.c === 'spark' || e.c === 'cannon') { if (this.unitOk()) this.play(e.c === 'spark' ? 'shard' : 'boom', vol * 0.25, pan, 1.4); break; }
-        const s = { shard: 'shard', lance: 'lance', glob: 'glob', goolob: 'glob', wave: 'wave', hook: 'hook', bolt: 'bolt', nova: 'blink' }[e.c];
+        const s = { shard: 'shard', lance: 'lance', glob: 'glob', goolob: 'glob', wave: 'wave', hook: 'hook', bolt: 'bolt', nova: 'blink', rocket: 'rocket' }[e.c];
         if (s) this.play(s, vol * 0.7, pan);
         break;
       }
@@ -583,10 +599,42 @@ export class AudioEngine {
       case 'spawn': if (e.id === localId) this.play('spawn', 0.8); break;
       case 'blink': this.play('blink', vol, pan); break;
       case 'bounce': this.play('bounce', vol * 0.7, pan); break;
+      case 'gate':
+        if (e.fin) { this.play('crowd', e.fin === 1 ? 0.9 : 0.5); if (e.id === localId) this.play('jackpot', 0.9); }
+        else if (e.id === localId) this.play('levelup', 0.7);
+        break;
+      case 'gad':
+        if (e.w === 'pad') this.play('airjump', vol * (e.id === localId ? 1 : 0.5), pan, 1.5);
+        else if (e.w === 'bumper') this.play('bounce', vol, pan, 1.3);
+        else if (e.w === 'geyser') this.play('wave', vol * 0.6, pan, 1.6);
+        else if (e.w === 'box') { if (e.id === localId) this.play('craft', 0.9); else this.play('coin', vol * 0.4, pan); }
+        break;
       case 'count': this.play(e.n > 0 ? 'count' : 'go', 1); break;
       case 'deny': if (e.id === localId) this.play('deny', 0.7); break;
       case 'save': this.play('whoosh', vol, pan); this.play('crowd', 0.5); if (e.id === localId) this.play('jackpot', 0.8); break;
       case 'final': this.play('tick', 1); break;
+      // ── Armas (Horda) ──
+      case 'shot': {
+        const mine = e.id === localId;
+        // Las ráfagas ajenas, salteadas: seis uzis a la vez taparían todo lo demás.
+        if (!mine && e.w === 1 && this.shotSkip++ % 2) break;
+        this.play(['pistol', 'uzi', 'shotgun'][e.w] ?? 'pistol', vol * (mine ? 0.85 : 0.5), pan, 0.94 + Math.random() * 0.12);
+        break;
+      }
+      case 'wpn': if (e.id === localId) this.play(e.e ? 'deny' : 'swap', 0.8); break;
+      case 'loot': this.play(e.id === localId ? 'loot' : 'pickup', e.id === localId ? 0.9 : vol * 0.6, pan); break;
+      case 'c4': {
+        this.play('c4plant', vol, pan);
+        // Pitidos cada vez más seguidos hasta la explosión.
+        let t = 0.25, gap = 0.42;
+        while (t < e.f - 0.05) {
+          const at = t, pitch = 1 + (at / e.f) * 0.35;
+          setTimeout(() => this.play('c4beep', vol, pan, pitch), at * 1000);
+          t += gap;
+          gap = Math.max(0.09, gap * 0.8);
+        }
+        break;
+      }
       // ── Asedio (MOBA) ──
       case 'udie': if (!e.fall && (e.by === localId || this.unitOk())) this.play('crack', vol * (e.by === localId ? 0.7 : 0.35), pan); break;
       case 'tshot': this.play('bolt', vol * 0.8, pan, 0.7); break;

@@ -7,10 +7,19 @@
 //  'A' 'B' spawn de equipo (piso n0) '*' spawn extra para todos contra todos
 //  'z' punto de zona (n0)            'Z' punto de zona (n1)     (celdas z contiguas se promedian)
 //  Destructibles en n0: 'o' roca  'm' chatarra  'c' cristal  'g' goo   —  en n1: 'O' 'M' 'C' 'G'
+// Artefactos (todo en piso n0, ver core/gadgets.ts):
+//  'J' resorte (te lanza hacia arriba)   'p' paragolpes        'r' rotor (barra que gira; se salta)
+//  'y' géiser (avisa y dispara)          'e' barril explosivo  '?' caja de ítem (solo con reglas que la usen)
+// Mapas de la Horda ('horde'): sin artefactos de pista (resortes, paragolpes, rotores, géiseres). Sí cobertura y barriles,
+// que explotan a tiros. El equipo sale del lado A; las zonas de misión salen de los puntos 'z'/'Z' y de los dos grupos de salida.
+// Solo mapas de Carrera: '2'..'9' puntos de control en orden (celdas con el mismo número se promedian), 'F' la meta.
 // Solo mapas de Asedio (MOBA), todo en piso n0:
 //  'X' 'x' torre del equipo A / B    'K' 'k' núcleo del equipo A / B
 //  'n' campamento neutral            '@' guarida del Coloso (celdas contiguas se promedian)
 // Los mapas de Asedio se diseñan de la mitad izquierda y se espejan: son justos por construcción.
+
+/** Para qué clase de juego está armado un mapa (ver core/games.ts). */
+export type MapKind = 'arena' | 'moba' | 'race' | 'horde';
 
 export interface MapDef {
   id: string;
@@ -22,8 +31,8 @@ export interface MapDef {
   fog: number;
   ground: number;
   ground2: number;
-  /** 'arena' (brawler, por defecto) o 'moba' (Asedio: bases, líneas y torres). */
-  kind?: 'arena' | 'moba';
+  /** 'arena' (por defecto), 'moba' (Asedio: bases, líneas y torres), 'race' (Carrera de obstáculos) o 'horde' (Horda). */
+  kind?: MapKind;
   /** Asedio: recorrido de cada línea en celdas [columna, fila], de la base A a la base B. */
   lanes?: [number, number][][];
 }
@@ -42,15 +51,15 @@ export const MAPS: Record<string, MapDef> = {
       '    ....111111....    ',
       '  ..o...1OZZO1...o..  ',
       ' ....m..1G11G1..m.... ',
-      ' #......^1111^......# ',
+      ' #..J...^1111^...J..# ',
       '#..o...,,,,,,,,...o..#',
       '..A..g.,,c..c,,.g..B..',
       '.......,......,.......',
-      '..A.m..,c.zz.c,..m.B..',
+      '..A.me.,c.zz.c,.em.B..',
       '.......,......,.......',
       '..A..g.,,c..c,,.g..B..',
       '#..o...,,,,,,,,...o..#',
-      ' #......v1111v......# ',
+      ' #..J...v1111v...J..# ',
       ' ....m..1G11G1..m.... ',
       '  ..o...1OZZO1...o..  ',
       '    ....111111....    ',
@@ -77,6 +86,81 @@ export const MAPS: Record<string, MapDef> = {
       ' ...111111... ',
       '  ..1MZZM1..  ',
       '   ..1111..   ',
+    ],
+  },
+  flipper: {
+    id: 'flipper',
+    name: 'El Flipper',
+    desc: 'Arena de pinball: paragolpes, rotores que barren, géiseres junto a la plataforma del centro y barriles explosivos.',
+    players: '2v2 · 3v3 · FFA',
+    sky: 0x1c1440,
+    fog: 0x33205a,
+    ground: 0xc3b8dc,
+    ground2: 0xb0a4cc,
+    rows: [
+      '      ............      ',
+      '   ...o..,,..,,..o...   ',
+      '  ....J..........J....  ',
+      ' ..m......p..p......m.. ',
+      '..A....r........r....B..',
+      '.......,,.1111.,,.......',
+      '..A..e.,y>1ZZ1<y,.e..B..',
+      '.......,,.1111.,,.......',
+      '..A....r........r....B..',
+      ' ..g......p..p......g.. ',
+      '  ....J..........J....  ',
+      '   ...c..,,..,,..c...   ',
+      '      ............      ',
+    ],
+  },
+  refugio: {
+    id: 'refugio',
+    name: 'El Refugio',
+    desc: 'Mapa de la Horda: un fuerte en el centro con dos entradas, pasillos entre muros y barriles para volar zombis a tiros.',
+    players: '1 a 6',
+    kind: 'horde',
+    sky: 0x0f1a1c,
+    fog: 0x18302c,
+    ground: 0x9aa58a,
+    ground2: 0x88947a,
+    rows: [
+      '      ..................      ',
+      '   ....o......zz......o....   ',
+      '  ......##..........##......  ',
+      ' ..e....#....e..e....#....e.. ',
+      ' .......#..,,,,,,,,..#....... ',
+      '..A...o................o...B..',
+      '.....m.....11111111.....m.....',
+      '..A..z....>111ZZ111<....z..B..',
+      '.....m.....11111111.....m.....',
+      '..A...o................o...B..',
+      ' .......#..,,,,,,,,..#....... ',
+      ' ..e....#....e..e....#....e.. ',
+      '  ......##..........##......  ',
+      '   ....o......zz......o....   ',
+      '      ..................      ',
+    ],
+  },
+  pista: {
+    id: 'pista',
+    name: 'La Pista',
+    desc: 'Carrera de obstáculos: pasillo de rotores, campo de paragolpes, zigzag de géiseres con atajo, plataforma con rotor y recta final con barriles.',
+    players: '1 a 6',
+    kind: 'race',
+    sky: 0x16243e,
+    fog: 0x24406a,
+    ground: 0xd6c48f,
+    ground2: 0xc6b37d,
+    rows: [
+      '                                                                                  ',
+      '                         .........      .....                                     ',
+      ' .............           ..p...p..      .y...           1111111      ........     ',
+      ' .*.*.................2?......p.....3....  ..  .....4?.>1111111<..5..e...p...e.FF ',
+      ' .*.*......r......r...2?...p......p.3..J.  y.  .....4?.>111R111<..5.....e...p..FF ',
+      ' .*.*.................2?......p.....3....  ..  .y...4?.>1111111<..5..p...e.....FF ',
+      ' .............           ..p...p..         .....        1111111      ........     ',
+      '                         .........         ...y.                                  ',
+      '                                                                                  ',
     ],
   },
   puente: {
@@ -163,8 +247,6 @@ export const MAPS: Record<string, MapDef> = {
 };
 
 export const MAP_IDS = Object.keys(MAPS);
-/** Mapas de arena (los que se eligen a mano para el brawler). */
-export const ARENA_MAP_IDS = MAP_IDS.filter((id) => (MAPS[id].kind ?? 'arena') === 'arena');
 
 /** Asedio: una línea hasta 2 por equipo, dos líneas con 3 por equipo. */
 export function mobaMapFor(perTeam: number): string {

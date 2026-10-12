@@ -7,10 +7,11 @@ import {
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
 import { ITEM_BY_ID, type ItemDef } from '../core/items';
-import { MODE_INFO } from '../core/modes';
+import { gameOf, MODE_INFO } from '../core/games';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR, ROUTE_MODS } from '../core/mutations';
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
 import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, type ModeId, type Route } from '../core/types';
+import { C4, WEAPON_IDS, WEAPONS, type WeaponId } from '../core/weapons';
 import { esc } from './tooltip';
 import { keyName, type ActionId } from '../game/keybinds';
 
@@ -152,22 +153,78 @@ export function rulesTip(id: RulesetId) {
   const r = RULESETS[id];
   const on = (b: boolean, t: string) => `<li class="${b ? 'on' : 'off'}">${b ? '✔' : '✖'} ${t}</li>`;
   return head(r.icon, r.name) + p(r.desc)
-    + `<ul class="tt-list checks">${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar (${keyName('repair')})`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash (${keyName('dash')})`)}${r.recall ? on(true, `Volver a la base (${keyName('recall')})`) : ''}</ul>`;
+    + `<ul class="tt-list checks">${r.weapons ? on(true, 'Armas: pistola, uzi, escopeta, lanzacohetes y C4') : ''}${on(r.abilities, 'Poderes del héroe')}${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar (${keyName('repair')})`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash (${keyName('dash')})`)}${r.recall ? on(true, `Volver a la base (${keyName('recall')})`) : ''}</ul>`;
+}
+
+/** Lo que conviene saber de cada modo antes de jugarlo. Funciones porque nombran teclas, que se pueden reasignar. */
+const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
+  stock: () => [
+    '<b>No hay barra de vida</b>: cada golpe te agrieta y, cuanto más roto estás, más lejos volás.',
+    'Se pierde una vida solo por <b>ring-out</b>: saliendo del mapa.',
+  ],
+  kills: () => [
+    'Cada <b>ring-out</b> es un punto para tu equipo; caerte solo no le suma al rival.',
+    'Reaparecés siempre: lo que cuenta es llegar primero al objetivo.',
+  ],
+  koth: () => [
+    'La zona suma mientras haya gente de <b>un solo equipo</b> adentro; si hay rivales queda disputada.',
+    'La zona <b>se muda</b> cada tanto: mirá el aviso y llegá antes.',
+  ],
+  moba: () => [
+    '<b>Sin barra de vida</b>: como siempre, te agrietás y morís si te sacan del mapa. Las líneas son puentes sobre el vacío.',
+    '<b>Oleadas</b> de esbirros cada 24 s: Guijarros (cuerpo a cuerpo), Chispas (a distancia) y un Ariete cada 3 oleadas. Se los puede tirar al vacío.',
+    '<b>Economía</b>: rematar un esbirro te da su material al toque, y el esbirro suelta un trozo que junta el que esté cerca.',
+    '<b>Torres</b>: la exterior protege a la interior; las dos protegen al núcleo. Sin esbirros cerca reciben menos daño.',
+    `<b>Tu base</b> te enfría rápido y es donde se forja. <kbd>${keyName('recall')}</kbd>: volver (4 s quieto).`,
+    '<b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.',
+  ],
+  horde: () => [
+    '<b>Cooperativo</b>: no hay equipos rivales. Se pierde cuando a nadie le quedan vidas.',
+    `<b>Armas en vez de poderes</b>: <kbd>Clic</kbd> dispara (mantenelo), <kbd>Clic derecho</kbd> es el empujón, <kbd>${keyName('q')}</kbd> cambia entre la pistola y tu arma, <kbd>${keyName('r')}</kbd> planta C4.`,
+    'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que enfría. Disparar te frena: hay que elegir entre correr y tirar.',
+    'Las oleadas <b>no paran de crecer</b>. Se gana cumpliendo las <b>misiones</b> del mapa, una tras otra, hasta la <b>extracción</b>.',
+    'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde enfriarse y punto de reaparición.',
+    '<b>Zombis</b> (lentos), <b>Corredores</b> (rápidos y frágiles), <b>Escupidores</b> (a distancia, avisan dónde cae) y <b>Moles</b> (enormes: su golpe se ve venir). A todos se los puede <b>tirar al vacío</b>.',
+  ],
+  race: () => [
+    'Pasá las <b>puertas</b> en orden: si te caés, reaparecés en la última que pasaste.',
+    '<b>Rotores</b>: se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos.',
+    `Las <b>cajas ❓</b> dan un ítem de un solo uso (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>).`,
+    'Cuando llega el primero quedan 25 s para terminar.',
+  ],
+};
+
+const GUN_DESC: Record<WeaponId, string> = {
+  pistol: 'La de siempre: precisa, con buen alcance y munición infinita. A ella volvés cuando te quedás sin balas.',
+  uzi: 'Ráfaga larguísima que limpia zombis sueltos. Se come las balas.',
+  shotgun: 'Un abanico de perdigones: de cerca tira para atrás hasta a una Mole. De lejos casi no hace nada.',
+  launcher: 'Un cohete que explota en área y manda cuerpos a volar. Lento y con pocos tiros: elegí bien.',
+};
+
+/** El arma que tenés en la mano (Horda). */
+export function gunTip(idx: number) {
+  const w = WEAPONS[WEAPON_IDS[idx] ?? 'pistol'];
+  return head(w.icon, w.name) + p(GUN_DESC[w.id])
+    + p(`Mantené <kbd>Clic</kbd> para disparar. ${w.ammo ? `Trae ${w.ammo} ${w.id === 'launcher' ? 'cohetes' : 'balas'} por caja.` : 'Munición infinita.'} Disparar te frena un poco.`, 'tt-note');
+}
+
+export function swapTip(other: number) {
+  const w = other >= 0 ? WEAPONS[WEAPON_IDS[other]] : null;
+  return head('🔁', 'Cambiar de arma', keyName('q'))
+    + p(w ? `Pasás a: ${w.icon} <b>${w.name}</b>.` : 'Llevás la pistola y <b>un</b> arma más. Todavía no tenés otra: agarrá una caja de suministros.')
+    + p('Agarrar una caja del arma que ya tenés suma balas; una distinta la reemplaza.', 'tt-note');
+}
+
+export function c4Tip() {
+  return head('🧨', 'C4', keyName('r'))
+    + p(`Dejás una carga a tus pies: avisa el área y explota a los ${C4.fuse} s. <b>No lastima a tu equipo</b>, pero rompe el piso frágil y hace estallar los barriles.`)
+    + p(`Viene en las cajas (${C4.perCrate} cargas, hasta ${C4.max}). Plantala y alejate: los zombis te siguen hasta ella.`, 'tt-note');
 }
 
 export function modeTip(id: ModeId) {
-  if (id === 'moba') {
-    return head('🏰', MODE_INFO[id].name) + p(MODE_INFO[id].desc)
-      + `<ul class="tt-list">
-        <li><b>Sin barra de vida</b>: como siempre, te agrietás y morís si te sacan del mapa. Las líneas son puentes sobre el vacío.</li>
-        <li><b>Oleadas</b> de esbirros cada 24 s: Guijarros (cuerpo a cuerpo), Chispas (a distancia) y un Ariete cada 3 oleadas. Se los puede tirar al vacío.</li>
-        <li><b>Economía</b>: rematar un esbirro te da su material al toque, y el esbirro suelta un trozo que junta el que esté cerca.</li>
-        <li><b>Torres</b>: la exterior protege a la interior; las dos protegen al núcleo. Sin esbirros cerca reciben menos daño.</li>
-        <li><b>Tu base</b> te enfría rápido y es donde se forja. <kbd>${keyName('recall')}</kbd>: volver (4 s quieto).</li>
-        <li><b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.</li>
-      </ul>`;
-  }
-  return head('🏁', MODE_INFO[id].name) + p(MODE_INFO[id].desc);
+  const notes = MODE_NOTES[id]?.() ?? [];
+  return head(gameOf(id).icon, MODE_INFO[id].name) + p(MODE_INFO[id].desc)
+    + (notes.length ? `<ul class="tt-list">${notes.map((n) => `<li>${n}</li>`).join('')}</ul>` : '');
 }
 
 export { esc };

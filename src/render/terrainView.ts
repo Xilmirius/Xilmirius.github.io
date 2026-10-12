@@ -1,11 +1,18 @@
 // Malla del terreno generada desde la grilla: una sola malla estática + una malla por baldosa frágil.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CELL, ISLAND_BOTTOM, WALL_TOP } from '../core/constants';
+import { CELL, ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, Terrain, TILE_CRUMBLING, TILE_GONE } from '../core/terrain';
+import { GroundStyle } from './ground';
 import type { ThemeDef } from './themes';
 import { terrainAtlas, tileCracks, toonGradient } from './textures';
+
+/** Relieve de cada losa: el borde se mete BEVEL_IN y baja BEVEL_DROP, así las juntas tienen sombra propia. */
+const BEVEL_IN = 0.09;
+const BEVEL_DROP = 0.06;
+/** Un vecino más alto que esto oscurece el piso a su pie (sombra de contacto). */
+const AO_STEP = 0.6;
 
 class GeoBuilder {
   pos: number[] = [];
@@ -55,7 +62,7 @@ export class TerrainView {
   private time = 0;
   private version = -1;
 
-  constructor(private t: Terrain, private theme: ThemeDef) {
+  constructor(private t: Terrain, private theme: ThemeDef, private style = new GroundStyle(t)) {
     const def = t.def;
     const mat = new THREE.MeshToonMaterial({ map: terrainAtlas(def.id.length), vertexColors: true, gradientMap: toonGradient(), color: theme.groundTint });
     const staticB = new GeoBuilder();
@@ -110,23 +117,50 @@ export class TerrainView {
     ];
     const hs = corners.map(([x, z]) => h(x, z));
 
-    // Color de la cara superior
+    // Color de la cara superior: damero suave + variación por losa
     const base = new THREE.Color((ix + iz) % 2 ? def.ground : def.ground2);
     if (c.type === CellType.Wall) base.set(0x8b7b6c);
     else if (c.level >= 1) base.lerp(new THREE.Color(0xffffff), 0.12);
     if (c.type === CellType.Ramp) base.multiplyScalar(0.92);
     if (c.fragile >= 0) base.lerp(new THREE.Color(0xffe0a0), 0.18);
-    const topCols = [base, base, base, base];
+    base.offsetHSL(0, 0, this.style.jitter(ix, iz) * 0.022);
+    // Las losas firmes del piso llevan manchas de vegetación y senderos; muros y frágiles no (se leen por su color).
+    const organic = c.type !== CellType.Wall && c.fragile < 0;
+    const grass = base.clone().offsetHSL(0.075, 0.07, -0.07);
+    const dirt = base.clone().offsetHSL(-0.015, -0.1, -0.12);
+    // Sombra de contacto: las esquinas pegadas a algo más alto se oscurecen.
+    const cornerOff = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    const ao = cornerOff.map(([ox, oz], k) => {
+      const edge = Math.max(this.cellHeight(ix + ox, iz), this.cellHeight(ix, iz + oz));
+      if (edge - hs[k] > AO_STEP) return 0.7;
+      return this.cellHeight(ix + ox, iz + oz) - hs[k] > AO_STEP ? 0.85 : 1;
+    });
+    const tint = (x: number, z: number, k: number) => {
+      const col = base.clone();
+      if (organic) col.lerp(grass, this.style.patch(x, z) * 0.75).lerp(dirt, this.style.path(x, z) * 0.8);
+      return col.multiplyScalar(ao[k]);
+    };
+    const uvOf = (x: number, z: number) => [0.004 + ((x - bb.minX) / CELL) * 0.492, 0.996 - ((z - bb.minZ) / CELL) * 0.992];
+    // Losa con bisel: la cara de arriba se mete un poco y el borde baja hacia la junta.
+    const inner = corners.map(([x, z], k) => {
+      const px = x - cornerOff[k][0] * BEVEL_IN, pz = z - cornerOff[k][1] * BEVEL_IN;
+      return [px, h(px, pz), pz];
+    });
+    const outer = corners.map(([x, z], k) => [x, hs[k] - BEVEL_DROP, z]);
+    const inCol = inner.map((p, k) => tint(p[0], p[2], k));
+    const outCol = inCol.map((col) => col.clone().multiplyScalar(0.78));
+    const inUv = inner.map((p) => uvOf(p[0], p[2]));
+    const outUv = outer.map((p) => uvOf(p[0], p[2]));
     // Normal de la cara (rampas inclinadas)
     const p0 = new THREE.Vector3(corners[0][0], hs[0], corners[0][1]);
     const p1 = new THREE.Vector3(corners[1][0], hs[1], corners[1][1]);
     const p3 = new THREE.Vector3(corners[3][0], hs[3], corners[3][1]);
     const n = new THREE.Vector3().subVectors(p3, p0).cross(new THREE.Vector3().subVectors(p1, p0)).normalize();
     b.quad(
-      [[corners[0][0], hs[0], corners[0][1]], [corners[3][0], hs[3], corners[3][1]], [corners[2][0], hs[2], corners[2][1]], [corners[1][0], hs[1], corners[1][1]]],
+      [inner[0], inner[3], inner[2], inner[1]],
       [n.x, n.y, n.z],
-      [[0.004, 0.996], [0.004, 0.004], [0.496, 0.004], [0.496, 0.996]],
-      topCols,
+      [inUv[0], inUv[3], inUv[2], inUv[1]],
+      [inCol[0], inCol[3], inCol[2], inCol[1]],
     );
 
     // Caras laterales hacia vecinos más bajos (o vacío)
@@ -137,6 +171,15 @@ export class TerrainView {
       { dx: -1, dz: 0, a: 0, bI: 3, n: [-1, 0, 0] }, // oeste: 0->3
     ];
     for (const s of sides) {
+      const bn = new THREE.Vector3(s.n[0], s.n[1], s.n[2]).multiplyScalar(BEVEL_DROP).addScaledVector(n, BEVEL_IN).normalize();
+      b.quad(
+        [inner[s.a], outer[s.a], outer[s.bI], inner[s.bI]],
+        [bn.x, bn.y, bn.z],
+        [inUv[s.a], outUv[s.a], outUv[s.bI], inUv[s.bI]],
+        [inCol[s.a], outCol[s.a], outCol[s.bI], inCol[s.bI]],
+      );
+    }
+    for (const s of sides) {
       const nx = ix + s.dx, nz = iz + s.dz;
       let n1 = ISLAND_BOTTOM, n2 = ISLAND_BOTTOM;
       if (isStatic && nx >= 0 && nz >= 0 && nx < t.w && nz < t.h) {
@@ -145,11 +188,11 @@ export class TerrainView {
         if (nc.type !== CellType.Void && nc.fragile < 0) {
           const nb = t.cellBounds(ni);
           const nh = (x: number, z: number) => t.topAt(ni, Math.min(Math.max(x, nb.minX + eps), nb.maxX - eps), Math.min(Math.max(z, nb.minZ + eps), nb.maxZ - eps));
-          n1 = nh(corners[s.a][0], corners[s.a][1]);
-          n2 = nh(corners[s.bI][0], corners[s.bI][1]);
+          n1 = nh(corners[s.a][0], corners[s.a][1]) - BEVEL_DROP;
+          n2 = nh(corners[s.bI][0], corners[s.bI][1]) - BEVEL_DROP;
         }
       }
-      const h1 = hs[s.a], h2 = hs[s.bI];
+      const h1 = hs[s.a] - BEVEL_DROP, h2 = hs[s.bI] - BEVEL_DROP;
       if (h1 - n1 < 0.001 && h2 - n2 < 0.001) continue;
       const b1 = Math.min(n1, h1), b2 = Math.min(n2, h2);
       const [ax, az] = corners[s.a];
@@ -164,6 +207,16 @@ export class TerrainView {
         [col(h1), col(b1), col(b2), col(h2)],
       );
     }
+  }
+
+  /** Altura aproximada de una celda (para la sombra de contacto). -Infinity si es vacío o está fuera del mapa. */
+  private cellHeight(ix: number, iz: number) {
+    const t = this.t;
+    if (ix < 0 || iz < 0 || ix >= t.w || iz >= t.h) return -Infinity;
+    const c = t.cells[iz * t.w + ix];
+    if (c.type === CellType.Void) return -Infinity;
+    if (c.type === CellType.Wall) return WALL_TOP;
+    return (c.level + (c.type === CellType.Ramp ? 0.5 : 0)) * LEVEL_H;
   }
 
   private buildUnderside(): THREE.Object3D {

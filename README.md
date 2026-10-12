@@ -1,14 +1,28 @@
-# RUBBLE — arena brawler de materiales (versión web)
+# RUBBLE — muchos juegos, un mundo que se rompe (versión web)
 
 > Codename **ProjectRubble**. Nombre final del juego/estudio todavía TBD (ver [docs/GDD.md](docs/GDD.md)).
 
-Arena brawler isométrico para jugar **en el navegador con amigos**: sesiones cortas, 1v1 a 3v3 o todos contra todos, mapa destructible y combate de **knockback físico** estilo Smash. No hay barra de vida: cada golpe te **agrieta** y cuanto más roto estás, más lejos volás. Se muere solo por **ring-out** (saliendo del mapa).
+**Una plataforma de juegos en el navegador**, para jugar con amigos con un link. Todos corren sobre el mismo núcleo: personajes de materiales, física de **knockback** estilo Smash, mapa que se rompe, bots y red P2P. No hay barra de vida: cada golpe te **agrieta** y, cuanto más roto estás, más lejos volás. Se muere solo por **ring-out** (saliendo del mapa).
+
+El menú es una **vitrina de juegos**: elegís uno y creás la sala o practicás con bots. Detrás se ve una partida de bots de ese juego, y dentro de la sala el host puede cambiar de juego sin salir.
+
+| Juego | Qué es | Jugadores |
+|---|---|---|
+| 🥊 **Arena** | El brawler de ring-outs: sacá a los demás del mapa. Modos Vidas, Ring-outs y Control de zona. | 2 a 6, por equipos o todos contra todos |
+| 🏰 **Asedio** | MOBA de bolsillo: bases, torres, esbirros y el Coloso. | 1v1 a 3v3 |
+| 🏁 **Carrera** | Pista de obstáculos, sin poderes. | 1 a 6, cada uno por su lado |
+| 🧟 **Horda** | Cooperativo contra zombis **con armas**, misiones, mini bases y extracción. | 1 a 6, todos juntos |
+
+Cada juego se declara en un solo lugar ([src/core/games.ts](src/core/games.ts)): sumar el próximo es agregar una entrada, su forma de ganar, sus reglas y sus mapas. La idea completa está en [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
 
 - 4 héroes, uno por familia de material: **Canto** (Piedra), **Prisma** (Cristal), **Gloop** (Goo), **Remache** (Metal).
 - Mapa que se rompe: cobertura destructible, pisos frágiles que dejan agujeros, materiales para farmear.
 - Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación).
 - 3 modos de arena: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
 - **🏰 Asedio (MOBA)**: bases, torres, núcleo y oleadas de esbirros; 1 línea hasta 2v2 y 2 líneas en 3v3, el Coloso, campamentos, minimapa, `B` para volver a la base y forja en la base. Sin barra de vida: los puentes están sobre el vacío. Diseño en [docs/MOBA.md](docs/MOBA.md).
+- **🧟 Horda (zombis)**: cooperativo de 1 a 6 **con armas en vez de poderes**. Clic dispara: pistola (balas infinitas), **uzi**, **escopeta** y **lanzacohetes**, más **C4**; las armas y la munición caen en cajas. Las oleadas no paran de crecer, así que se gana cumpliendo una cadena de **misiones** (encender el generador, destruir los nidos, asegurar la antena, juntar el combustible, derribar a la Mole Madre) hasta la **extracción**. Cada zona asegurada queda como **mini base** con torreta. Tres dificultades y mapa propio, **El Refugio**. Detalle en [docs/ZOMBIS.md](docs/ZOMBIS.md).
+- **🏁 Carrera de obstáculos**: todos contra todos hasta la meta por **La Pista**, pasando puertas en orden. Sin habilidades: golpes, empujón, salto, dash y los ítems de un solo uso que dan las cajas ❓. Si te caés, reaparecés en la última puerta.
+- **Artefactos en los mapas** además de los minerales: **resortes** que te lanzan, **paragolpes** que te rebotan, **rotores** que barren (se saltan), **géiseres** que avisan y disparan, y **barriles explosivos**. La arena **El Flipper** está armada alrededor de ellos.
 - Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela. Por defecto habilidades en **Q 2 3**, ulti en **E** e ítems en **1 R F**; todas las teclas se reasignan en Ajustes → Controles.
 - Pantalla completa desde el menú, la pausa o la partida.
 - **Mantené la tecla para apuntar**: cada habilidad dibuja en el piso su área, línea, cono o muro antes de usarla. **Tooltips** en todo (habilidades, ítems, tu cuerpo, niveles, héroes, reglas).
@@ -17,7 +31,7 @@ Arena brawler isométrico para jugar **en el navegador con amigos**: sesiones co
 - **Cero assets externos**: modelos, texturas, sonidos y música son procedurales. Y **cada pieza es reemplazable por un archivo, de a una**: menú → 🧩 Assets y [docs/ASSETS_CATALOGO.md](docs/ASSETS_CATALOGO.md).
 - **Espectáculo de feedback sin marear**: cámara fija que solo te sigue, efectos de color (nunca blancos, nunca pantalla lavada), puños que golpean en arco como boxeadores, números de heat, pilares de color en cada ring-out, combos con sonido ascendente, anuncios de rachas con locutor, confeti y premios al final de cada partida.
 - **Gamificación**: nivel de cuenta, 17 logros y sombreros cosméticos que se desbloquean jugando (se guardan en tu navegador).
-- **Temas visuales** del mapa: Neón, Cantera, Atardecer y Noche (lo elige el host en el lobby).
+- **Temas visuales** del mapa: Neón, Cantera, Atardecer y Noche (lo elige el host en el lobby). Cada uno trae su fondo (mar de nubes, islas flotantes, grilla de neón, reflejo del sol o de la luna) y su vegetación sobre el terreno.
 
 > **¿Qué tengo que hacer yo para dejarlo online?** → [PASOS_PARA_VOS.md](PASOS_PARA_VOS.md)
 > **¿Cómo lo mejoro con modelos, sonidos o arte reales?** → [docs/MEJORAS_CON_ASSETS.md](docs/MEJORAS_CON_ASSETS.md)
@@ -136,12 +150,17 @@ Detalle completo, flujo de mensajes y cómo escalar a servidor dedicado: [docs/a
 src/
   core/          Simulación pura (sin Three.js ni DOM): se puede correr en Node o en un server dedicado
     sim.ts         Simulación autoritativa: combate, knockback, proyectiles, zonas, materiales
-    rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo, Asedio)
+    games.ts       Los juegos de la plataforma: qué modos, reglas, mapas y formato tiene cada uno
+    rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo, Asedio, Carrera, Horda)
     moba/          Asedio (MOBA): números (defs.ts), oleadas, IA de esbirros y torres, base, Coloso (mode.ts)
     movement.ts    Movimiento compartido (host y predicción del cliente usan el mismo código, dash incluido)
     terrain.ts     Terreno como grilla de alturas; baldosas frágiles
     collision.ts   Colisión terreno + obstáculos
     heroes/        Un archivo por héroe (kit de 4 habilidades + básico)
+    gadgets.ts     Artefactos del mapa: resortes, paragolpes, rotores, géiseres, barriles, cajas de ítems
+    horde.ts       Horda: oleadas, IA de los zombis, misiones, mini bases y cajas de suministros
+    weapons.ts     Armas: pistola, uzi, escopeta (impacto instantáneo), lanzacohetes y C4
+    race.ts        Carrera de obstáculos: puertas, reaparición y llegada
     items.ts       Ítems pasivos/activos
     mutations.ts   Rutas de mutación (Tanque/Carry/Support)
     modes.ts       Modos de juego (interfaz agnóstica)
@@ -161,9 +180,9 @@ tests/                 Unit tests + partidas headless de bots + E2E con Playwrig
 
 ## 7. Agregar contenido (escala sin tocar sistemas)
 
-- **Modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (victoria en `modes.ts` + reglas en `rules.ts` + mapa).
+- **Juego o modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (entrada en `games.ts` + victoria en `modes.ts` + reglas en `rules.ts` + mapa).
 - **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
-- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo). El test `mapas` valida que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; el test verifica que las líneas sean transitables y que el mapa esté espejado.
+- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. El test `mapas` valida que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; el test verifica que las líneas sean transitables y que el mapa esté espejado.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
 - **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
 
@@ -197,6 +216,7 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 ## 10. Límites conocidos / próximos pasos
 
 - Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
+- Horda: la dificultad está ajustada con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
 - Juego de teclado y mouse (no hay controles táctiles).

@@ -52,7 +52,10 @@ class Bar {
 // ───────────── esbirros y neutrales ─────────────
 
 /** Alto aproximado de cada unidad (para poner la barra). */
-const UNIT_H: Record<UnitKind, number> = { hero: 1.5, melee: 1.05, ranged: 1.35, siege: 1.3, neutral: 0.9, coloso: 3.1 };
+const UNIT_H: Record<UnitKind, number> = { hero: 1.5, melee: 1.05, ranged: 1.35, siege: 1.3, neutral: 0.9, coloso: 3.1, zombie: 1.4, runner: 1.25, brute: 2.3, spitter: 1.15, titan: 3.7 };
+/** Zombis de la Horda: no llevan el color de un equipo, llevan el suyo. */
+const ZOMBIE_KINDS = new Set<UnitKind>(['zombie', 'runner', 'brute', 'spitter', 'titan']);
+export const ZOMBIE_COLOR = 0x8fd14f;
 
 /** Malla de una unidad: el GLB unit.<tipo> si existe; si no, la versión procedural. */
 export function buildUnitMesh(kind: UnitKind, color: number): THREE.Group {
@@ -143,6 +146,72 @@ function buildUnitProcedural(kind: UnitKind, color: number): THREE.Group {
       add(new THREE.DodecahedronGeometry(0.45, 0), stone, 0.5, 0.35, 0);
       break;
     }
+    case 'zombie': {
+      // Zombi: cuerpo verdoso encorvado, brazos estirados hacia adelante y ojos que brillan.
+      const skin = toon(0x6f9a58), rags = toon(0x4a4458);
+      add(new THREE.DodecahedronGeometry(0.36, 0), rags, 0, 0.62, 0, 1, 1.25, 0.85);
+      add(new THREE.DodecahedronGeometry(0.27, 0), skin, 0, 1.16, 0.1).rotation.z = 0.25;
+      add(new THREE.BoxGeometry(0.07, 0.06, 0.04), eyes, -0.1, 1.2, 0.33);
+      add(new THREE.BoxGeometry(0.07, 0.06, 0.04), eyes, 0.1, 1.17, 0.33);
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.13, 0.13, 0.55), skin, s * 0.3, 0.86, 0.38).name = 'fist';
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.16, 0.34, 0.18), rags, s * 0.15, 0.17, 0);
+      break;
+    }
+    case 'runner': {
+      // Corredor: flaco, muy inclinado hacia adelante y con astillas de cristal en la espalda.
+      const skin = toon(0x7fb0a0), shard = toon(FAMILY_COLORS.crystal);
+      const body = add(new THREE.DodecahedronGeometry(0.28, 0), skin, 0, 0.6, 0.08, 0.9, 1.3, 0.8);
+      body.rotation.x = 0.5;
+      add(new THREE.DodecahedronGeometry(0.22, 0), skin, 0, 1.0, 0.3);
+      add(new THREE.BoxGeometry(0.06, 0.05, 0.04), eyes, -0.08, 1.03, 0.5);
+      add(new THREE.BoxGeometry(0.06, 0.05, 0.04), eyes, 0.08, 1.03, 0.5);
+      for (const [x, y, z, r] of [[-0.12, 0.85, -0.12, -0.5], [0.1, 0.78, -0.16, -0.7], [0, 0.6, -0.2, -0.9]]) {
+        const c = add(new THREE.OctahedronGeometry(0.1, 0), shard, x, y, z, 1, 2.4, 1);
+        c.rotation.x = r;
+      }
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.1, 0.1, 0.4), skin, s * 0.24, 0.75, 0.4).name = 'fist';
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.12, 0.34, 0.14), skin, s * 0.12, 0.17, 0);
+      break;
+    }
+    case 'brute': {
+      // Mole: enorme, de piedra cubierta de musgo, con puños que aplastan.
+      const stone = toon(0x6a6f5e), moss = toon(0x5f8a48);
+      add(new THREE.DodecahedronGeometry(0.75, 0), stone, 0, 1.05, 0, 1.1, 1.1, 0.9);
+      add(new THREE.DodecahedronGeometry(0.5, 0), moss, 0, 1.55, -0.15, 1.2, 0.6, 1);
+      add(new THREE.DodecahedronGeometry(0.36, 0), stone, 0, 1.95, 0.2);
+      add(new THREE.BoxGeometry(0.13, 0.08, 0.05), eyes, -0.14, 2.0, 0.52);
+      add(new THREE.BoxGeometry(0.13, 0.08, 0.05), eyes, 0.14, 2.0, 0.52);
+      for (const s of [-1, 1]) {
+        add(new THREE.DodecahedronGeometry(0.3, 0), stone, s * 0.95, 1.4, 0);
+        add(new THREE.DodecahedronGeometry(0.4, 0), stone, s * 1.0, 0.7, 0.3).name = 'fist';
+        add(new THREE.DodecahedronGeometry(0.34, 0), stone, s * 0.36, 0.28, 0);
+      }
+      break;
+    }
+    case 'titan': {
+      // Mole Madre (jefe de la Horda): una Mole gigante con una corona de cristales podridos.
+      const inner = buildUnitMesh('brute', color);
+      inner.scale.setScalar(1.6);
+      g.add(inner);
+      const shard = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xc86bff).multiplyScalar(1.15), toneMapped: false });
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const s = add(new THREE.ConeGeometry(0.16, 0.7, 5), shard, Math.cos(a) * 0.42, 3.55, Math.sin(a) * 0.42 + 0.2);
+        s.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
+      }
+      break;
+    }
+    case 'spitter': {
+      // Escupidor: saco de goo hinchado con una boca en tubo.
+      const sac = new THREE.MeshToonMaterial({ color: 0x9ad14f, gradientMap: toonGradient(), transparent: true, opacity: 0.92 });
+      add(new THREE.SphereGeometry(0.46, 14, 10), sac, 0, 0.55, -0.05, 1, 1.05, 1).name = 'wobble';
+      const mouth = add(new THREE.CylinderGeometry(0.1, 0.16, 0.35, 8), toon(0x3f5a2a), 0, 0.75, 0.42);
+      mouth.rotation.x = Math.PI / 2.4;
+      add(new THREE.SphereGeometry(0.06, 6, 4), eyes, -0.17, 0.92, 0.3);
+      add(new THREE.SphereGeometry(0.06, 6, 4), eyes, 0.17, 0.92, 0.3);
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.14, 0.2, 0.2), toon(0x3f5a2a), s * 0.2, 0.1, 0);
+      break;
+    }
     default:
       add(new THREE.SphereGeometry(0.4, 10, 8), team, 0, 0.5, 0);
   }
@@ -166,11 +235,11 @@ export class UnitsView {
       const kind = UNIT_KINDS[u.k] ?? 'melee';
       const neutral = u.tm >= 2;
       if (!v) {
-        const color = neutral ? NEUTRAL_COLOR : teamColor(u.tm);
+        const color = ZOMBIE_KINDS.has(kind) ? ZOMBIE_COLOR : neutral ? NEUTRAL_COLOR : teamColor(u.tm);
         const root = new THREE.Group();
         const body = buildUnitMesh(kind, color);
-        const w = kind === 'coloso' ? 2.4 : kind === 'siege' ? 1.1 : 0.85;
-        const bar = new Bar(w, kind === 'coloso' ? 0.16 : 0.1, color);
+        const w = kind === 'coloso' ? 2.4 : kind === 'titan' ? 3 : kind === 'brute' ? 1.6 : kind === 'siege' ? 1.1 : 0.85;
+        const bar = new Bar(w, kind === 'coloso' || kind === 'titan' ? 0.18 : 0.1, kind === 'titan' ? 0xc86bff : color);
         root.add(body);
         this.group.add(root, bar.g);
         v = { root, body, bar, kind, team: u.tm, atk: 0, hurt: 0, bless: null, bob: Math.random() * 6 };

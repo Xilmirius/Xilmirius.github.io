@@ -2,6 +2,7 @@
 // suficiente para "desniveles limitados de 1-2 niveles" (GDD §7).
 import { CELL, ISLAND_BOTTOM, LEVEL_H, TILE_HP, WALL_TOP } from './constants';
 import type { V3 } from './math';
+import type { GadgetKind, GadgetSpawn } from './gadgets';
 import type { Family } from './types';
 import { MAPS, type MapDef } from './maps';
 
@@ -14,9 +15,12 @@ export interface Cell {
   level: number;
   ramp: RampDir;
   fragile: number; // índice en la lista de frágiles o -1
+  /** Resorte: pisarlo te lanza hacia arriba. */
+  pad: boolean;
 }
 
-export interface DestructSpawn { kind: Family; x: number; z: number; y: number }
+/** explosive: barril que explota al romperse (usa el cuerpo de la chatarra). */
+export interface DestructSpawn { kind: Family; x: number; z: number; y: number; explosive?: boolean }
 /** Pieza fija de un mapa de Asedio (torre o núcleo) de un equipo. */
 export interface TeamPiece { team: number; x: number; z: number }
 
@@ -26,6 +30,12 @@ const DESTRUCT_CHARS: Record<string, [Family, number]> = {
   o: ['stone', 0], m: ['metal', 0], c: ['crystal', 0], g: ['goo', 0],
   O: ['stone', 1], M: ['metal', 1], C: ['crystal', 1], G: ['goo', 1],
 };
+
+/** En minúscula van en el piso (n0); en mayúscula, sobre una plataforma (n1). */
+const GADGET_CHARS: Record<string, GadgetKind> = { p: 'bumper', r: 'rotor', y: 'geyser', '?': 'box', P: 'bumper', R: 'rotor', Y: 'geyser' };
+
+/** Puerta de la Carrera: una franja de celdas que hay que pisar (punto de control o meta). */
+export interface Gate { x: number; z: number; cells: Set<number> }
 
 export class Terrain {
   readonly def: MapDef;
@@ -45,6 +55,10 @@ export class Terrain {
   readonly lairs: V3[] = [];
   /** Recorrido de cada línea en coordenadas del mundo, de la base A a la base B. */
   readonly lanes: V3[][] = [];
+  /** Artefactos del mapa (paragolpes, rotores, géiseres, cajas). Los resortes son celdas (`pad`). */
+  readonly gadgets: GadgetSpawn[] = [];
+  /** Carrera de obstáculos: puntos de control en orden (dígitos 2..9 del mapa) y, al final, la meta ('F'). */
+  readonly gates: Gate[] = [];
   tileState: Uint8Array;
   tileHp: Float32Array;
   tileTimer: Float32Array;
@@ -60,11 +74,13 @@ export class Terrain {
     this.originZ = (-this.h * CELL) / 2;
     const zoneCells: [number, number, number][] = [];
     const lairCells: [number, number, number][] = [];
+    const gateCells = new Map<number, number[]>(); // 2..9 puntos de control, 99 la meta
+    const mark = (n: number, ci: number) => { if (!gateCells.has(n)) gateCells.set(n, []); gateCells.get(n)!.push(ci); };
     for (let iz = 0; iz < this.h; iz++) {
       const row = def.rows[iz];
       for (let ix = 0; ix < this.w; ix++) {
         const ch = row[ix] ?? ' ';
-        const cell: Cell = { type: CellType.Floor, level: 0, ramp: RampDir.N, fragile: -1 };
+        const cell: Cell = { type: CellType.Floor, level: 0, ramp: RampDir.N, fragile: -1, pad: false };
         const c = this.cellCenter(ix, iz);
         switch (ch) {
           case ' ': cell.type = CellType.Void; break;
@@ -88,11 +104,21 @@ export class Terrain {
           case 'k': this.cores.push({ team: 1, x: c.x, z: c.z }); break;
           case 'n': this.camps.push({ x: c.x, y: 0, z: c.z }); break;
           case '@': lairCells.push([ix, iz, 0]); break;
+          case 'J': cell.pad = true; break;
+          case 'e': this.destructs.push({ kind: 'metal', x: c.x, z: c.z, y: 0, explosive: true }); break;
+          case 'F': mark(99, iz * this.w + ix); break;
           default: {
             const d = DESTRUCT_CHARS[ch];
+            const g = GADGET_CHARS[ch];
             if (d) {
               cell.level = d[1];
               this.destructs.push({ kind: d[0], x: c.x, z: c.z, y: d[1] * LEVEL_H });
+            } else if (g) {
+              const up = ch >= 'A' && ch <= 'Z' ? 1 : 0;
+              cell.level = up;
+              this.gadgets.push({ kind: g, x: c.x, y: up * LEVEL_H, z: c.z });
+            } else if (ch >= '2' && ch <= '9') {
+              mark(Number(ch), iz * this.w + ix);
             }
           }
         }
@@ -101,6 +127,12 @@ export class Terrain {
     }
     this.zonePoints.push(...this.groupCells(zoneCells));
     this.lairs.push(...this.groupCells(lairCells));
+    for (const n of [...gateCells.keys()].sort((a, b) => a - b)) {
+      const cells = gateCells.get(n)!;
+      let x = 0, z = 0;
+      for (const ci of cells) { const c = this.cellCenter(ci % this.w, Math.floor(ci / this.w)); x += c.x; z += c.z; }
+      this.gates.push({ x: x / cells.length, z: z / cells.length, cells: new Set(cells) });
+    }
     for (const lane of def.lanes ?? []) {
       this.lanes.push(lane.map(([ix, iz]) => { const c = this.cellCenter(ix, iz); return { x: c.x, y: 0, z: c.z }; }));
     }
@@ -134,6 +166,12 @@ export class Terrain {
       out.push({ x: x / group.length, y: lv * LEVEL_H, z: z / group.length });
     }
     return out;
+  }
+
+  /** ¿Hay un resorte en (x,z)? */
+  isPad(x: number, z: number): boolean {
+    const i = this.cellIndexAt(x, z);
+    return i >= 0 && this.cells[i].pad;
   }
 
   cellCenter(ix: number, iz: number) {

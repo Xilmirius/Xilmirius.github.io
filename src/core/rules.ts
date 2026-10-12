@@ -4,11 +4,10 @@
 // Un modo nuevo (MOBA, battle royale, carrera de obstáculos) es una combinación de los dos más un
 // tipo de mapa. La simulación nunca pregunta "¿estoy en el modo X?": pregunta "¿está prendido el sistema Y?".
 // Ver docs/PLATAFORMA_Y_MODOS.md.
+import { rulesetFor } from './games';
 import type { AbilitySlot } from './types';
 
-export type RulesetId = 'brawl' | 'full' | 'moba';
-/** Reglas que se eligen a mano en el lobby. 'moba' viene atada al modo Asedio (necesita bases). */
-export const RULESET_IDS: RulesetId[] = ['brawl', 'full'];
+export type RulesetId = 'brawl' | 'full' | 'moba' | 'race' | 'horde';
 
 export interface Ruleset {
   id: RulesetId;
@@ -35,6 +34,12 @@ export interface Ruleset {
   tileRegen: number;
   /** Multiplicador de la XP (el Asedio es más largo: se sube de nivel más despacio). */
   xpMul: number;
+  /** Habilidades del héroe (Q, 2, 3 y ulti). Apagado: solo golpes, empujón, salto y dash. */
+  abilities: boolean;
+  /** Las cajas del mapa dan ítems activos de un solo uso. */
+  itemBoxes: boolean;
+  /** Armas: el clic dispara en vez del golpe básico del héroe (ver core/weapons.ts). */
+  weapons: boolean;
 }
 
 export const RULESETS: Record<RulesetId, Ruleset> = {
@@ -42,26 +47,38 @@ export const RULESETS: Record<RulesetId, Ruleset> = {
     id: 'brawl', name: 'Brawler', icon: '⚡',
     desc: 'Rápido y directo: todas las habilidades desde el principio, la ulti se carga pegando y Shift es un dash. Sin niveles, forja ni ítems que administrar.',
     progression: false, crafting: false, repair: false, pickups: 'ult', dash: true, ultCharge: true,
-    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1,
+    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
   },
   full: {
     id: 'full', name: 'Completo', icon: '🧬',
     desc: 'Todos los sistemas: niveles que desbloquean habilidades, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
-    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1,
+    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
   },
   moba: {
     id: 'moba', name: 'Asedio', icon: '🏰',
     desc: 'Las del modo Asedio (MOBA): niveles, materiales que sueltan los esbirros, forja solo en tu base, B para volver y el piso roto se rearma solo.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
-    forgeAtBase: true, recall: true, tileRegen: 25, xpMul: 0.55,
+    forgeAtBase: true, recall: true, tileRegen: 25, xpMul: 0.55, abilities: true, itemBoxes: false, weapons: false,
+  },
+  race: {
+    id: 'race', name: 'Carrera', icon: '🏁',
+    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe. Golpes, empujón, salto y dash, más los ítems de un solo uso que dan las cajas.',
+    progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
+    forgeAtBase: false, recall: false, tileRegen: 6, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
+  },
+  horde: {
+    id: 'horde', name: 'Horda', icon: '🔫',
+    desc: 'Las de la Horda: armas en vez de poderes. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas.',
+    progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
+    forgeAtBase: false, recall: false, tileRegen: 12, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
   },
 };
 
 export const getRules = (id: string | undefined): Ruleset => RULESETS[id as RulesetId] ?? RULESETS.brawl;
 
-/** Reglas efectivas de una partida: el modo Asedio siempre juega con las suyas. */
-export const rulesFor = (s: { mode: string; rules?: string }): Ruleset => getRules(s.mode === 'moba' ? 'moba' : s.rules);
+/** Reglas efectivas de una partida: las que eligió el host si el juego las admite; si no, las del juego (core/games.ts). */
+export const rulesFor = (s: { mode: string; rules?: string }): Ruleset => getRules(rulesetFor(s));
 
 /** Nivel en que se desbloquea una habilidad con estas reglas (sin progresión: todas desde el inicio). */
 export const unlockLevel = (rules: Ruleset, def: { unlock: number }) => (rules.progression ? def.unlock : 1);

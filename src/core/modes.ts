@@ -1,7 +1,9 @@
 // Modos de juego: el núcleo es agnóstico al objetivo de victoria (GDD §11).
 // Agregar un modo = implementar esta interfaz; no se toca combate ni red.
 import type { Character, Structure } from './entities';
+import { createHordeMode } from './horde';
 import { createMobaMode } from './moba/mode';
+import { createRaceMode } from './race';
 import type { Simulation } from './sim';
 import type { ModeId } from './types';
 
@@ -28,6 +30,18 @@ export interface ModeHud {
   target: number;
   zone?: { x: number; y: number; z: number; r: number; owner: number; contested: boolean; next: number };
   moba?: MobaHud;
+  /**
+   * Horda: oleada, zombis que quedan, segundos para la próxima oleada y vidas del equipo; misión en curso (índice en
+   * MISSIONS, = cantidad de misiones al ganar), su progreso 0..1, héroes dentro de la zona y cuántos hacen falta, nidos
+   * en pie, id del jefe (-1 = no hay); cajas de suministros [id, x, y, z, tipo] y mini bases [x, y, z].
+   */
+  horde?: {
+    wave: number; left: number; next: number; lives: number;
+    step: number; p: number; in: number; need: number; nests: number; boss: number;
+    crates: number[][]; bases: number[][];
+  };
+  /** Carrera: próxima puerta de cada héroe (en el orden de `chars`), cuántas puertas hay, ids en orden de llegada y segundos para que termine (-1 = nadie llegó). */
+  race?: { next: number[]; gates: number; order: number[]; end: number };
 }
 
 export interface ModeResult { winner: number; draw: boolean; reason: string }
@@ -48,14 +62,11 @@ export interface GameMode {
   onStructureDown?(sim: Simulation, st: Structure, by: Character | null): void;
   /** Segundos hasta reaparecer (por defecto RESPAWN_TIME). */
   respawnTime?(sim: Simulation, ch: Character): number;
+  /** Dónde reaparece (por defecto, el punto de su equipo más lejos de los rivales). */
+  respawnAt?(sim: Simulation, ch: Character): { x: number; z: number } | null;
+  /** El modo no usa el tiempo límite (no se avisan los últimos minutos). */
+  untimed?: boolean;
 }
-
-export const MODE_INFO: Record<ModeId, { name: string; desc: string }> = {
-  stock: { name: 'Vidas', desc: 'Cada uno tiene vidas. Gana el último equipo con alguien en pie.' },
-  kills: { name: 'Ring-outs', desc: 'Sumá puntos sacando rivales del mapa. Gana quien llega primero al objetivo.' },
-  koth: { name: 'Control de zona', desc: 'Pará en la zona sin rivales para sumar puntos. La zona se mueve.' },
-  moba: { name: 'Asedio (MOBA)', desc: 'Dos bases, torres y oleadas de esbirros. Empujá las líneas y destruí el núcleo rival. 1 línea hasta 2v2, 2 líneas en 3v3.' },
-};
 
 function timeLeft(sim: Simulation) {
   return Math.max(0, sim.settings.timeLimit - sim.elapsed);
@@ -185,6 +196,8 @@ export function createMode(id: ModeId): GameMode {
     case 'kills': return new KillsMode();
     case 'koth': return new KothMode();
     case 'moba': return createMobaMode();
+    case 'horde': return createHordeMode();
+    case 'race': return createRaceMode();
     default: return new StockMode();
   }
 }

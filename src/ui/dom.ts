@@ -8,7 +8,13 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs | 
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false) continue;
       if (k === 'class') el.className = v;
-      else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else if (k === 'style' && typeof v === 'object') {
+        // Las variables CSS (--c) no se pueden asignar como propiedad: van con setProperty.
+        for (const [p, val] of Object.entries(v)) {
+          if (p.startsWith('--')) el.style.setProperty(p, String(val));
+          else (el.style as any)[p] = val;
+        }
+      }
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
       else if (k === 'html') el.innerHTML = v;
       else if (v === true) el.setAttribute(k, '');

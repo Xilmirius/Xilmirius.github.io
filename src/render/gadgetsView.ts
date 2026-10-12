@@ -1,0 +1,293 @@
+// Artefactos del mapa (ver core/gadgets.ts): resortes, paragolpes, rotores, géiseres y cajas de ítems.
+// Salen del mapa, así que host y clientes los arman igual; rotores y géiseres se animan a partir del tick
+// (son deterministas en el tiempo) y las cajas con el estado que viaja en el frame.
+import * as THREE from 'three';
+import { CELL } from '../core/constants';
+import { BUMPER, GEYSER, geyserPhase, geyserTime, ROTOR, rotorAngle } from '../core/gadgets';
+import type { Terrain } from '../core/terrain';
+import { hazardStripes, ringTexture, softDisc, toonGradient } from './textures';
+
+/** Colores de cada artefacto (también los usa la vista para sus efectos). */
+export const GADGET_COLORS = { pad: 0x7dff6a, bumper: 0xff4f8b, rotor: 0xffc629, geyser: 0x4fd1ff, box: 0xb070ff, barrel: 0xff5a2a };
+
+const toon = (c: number) => new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient() });
+const glow = (c: number, k = 1.2) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), toneMapped: false });
+
+interface PadVis { plate: THREE.Object3D; x: number; z: number; squash: number }
+interface BumperVis { body: THREE.Object3D; ring: THREE.MeshBasicMaterial; pulse: number }
+interface RotorVis { arm: THREE.Object3D; idx: number }
+interface GeyserVis { idx: number; ring: THREE.MeshBasicMaterial; jet: THREE.Mesh; jetMat: THREE.MeshBasicMaterial; x: number; y: number; z: number }
+interface BoxVis { g: THREE.Group; idx: number; on: boolean; pop: number; y: number }
+interface GateVis { mat: THREE.MeshBasicMaterial; x: number; y: number; z: number }
+
+/** Damero de la meta. */
+function checkerTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    g.fillStyle = (i + j) % 2 ? '#1a1a22' : '#f2f2f2';
+    g.fillRect(i * 16, j * 16, 16, 16);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  return t;
+}
+
+function boxTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#6a3fd0';
+  g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#d9c2ff';
+  g.lineWidth = 10;
+  g.strokeRect(5, 5, 118, 118);
+  g.fillStyle = '#ffe14a';
+  g.font = 'bold 96px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('?', 64, 70);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export class GadgetsView {
+  group = new THREE.Group();
+  private pads: PadVis[] = [];
+  private bumpers = new Map<number, BumperVis>();
+  private rotors: RotorVis[] = [];
+  private geysers: GeyserVis[] = [];
+  private boxes = new Map<number, BoxVis>();
+  private lastGad = '';
+  // Carrera: franja en el piso por cada puerta y una flecha sobre la que te toca.
+  private gates: GateVis[] = [];
+  private nextGate = -1;
+  private arrow: THREE.Mesh | null = null;
+
+  constructor(t: Terrain) {
+    for (let i = 0; i < t.cells.length; i++) {
+      if (!t.cells[i].pad) continue;
+      const c = t.cellCenter(i % t.w, Math.floor(i / t.w));
+      this.addPad(c.x, t.topAt(i, c.x, c.z), c.z);
+    }
+    t.gadgets.forEach((g, idx) => {
+      const y = Math.max(0, t.groundAt(g.x, g.z));
+      if (g.kind === 'bumper') this.addBumper(idx, g.x, y, g.z);
+      else if (g.kind === 'rotor') this.addRotor(idx, g.x, y, g.z);
+      else if (g.kind === 'geyser') this.addGeyser(idx, g.x, y, g.z);
+      else this.addBox(idx, g.x, y, g.z);
+    });
+    t.gates.forEach((gate, i) => {
+      const goal = i === t.gates.length - 1;
+      const mat = new THREE.MeshBasicMaterial(goal
+        ? { map: checkerTexture(), transparent: true, opacity: 0.85, depthWrite: false }
+        : { color: 0xffd23f, transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false });
+      let y = 0;
+      for (const ci of gate.cells) {
+        const c = t.cellCenter(ci % t.w, Math.floor(ci / t.w));
+        y = t.topAt(ci, c.x, c.z);
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(CELL * 0.96, CELL * 0.96), mat);
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(c.x, y + 0.03, c.z);
+        m.renderOrder = 1;
+        this.group.add(m);
+      }
+      this.gates.push({ mat, x: gate.x, y, z: gate.z });
+    });
+    if (this.gates.length) {
+      this.arrow = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.1, 4), glow(0xffd23f, 1.25));
+      this.arrow.rotation.x = Math.PI;
+      this.arrow.visible = false;
+      this.group.add(this.arrow);
+    }
+  }
+
+  /** Carrera: cuál es la próxima puerta del jugador local (-1 = ninguna). */
+  setNextGate(i: number) { this.nextGate = i; }
+
+  private add<T extends THREE.Object3D>(parent: THREE.Object3D, o: T, x: number, y: number, z: number, shadow = true): T {
+    o.position.set(x, y, z);
+    if (shadow) o.castShadow = true;
+    parent.add(o);
+    return o;
+  }
+
+  private addPad(x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const r = CELL * 0.42;
+    this.add(g, new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.08, 0.12, 20), toon(0x3a4048)), 0, 0.06, 0, false);
+    const plate = new THREE.Group();
+    this.add(plate, new THREE.Mesh(new THREE.CylinderGeometry(r * 0.86, r * 0.86, 0.1, 20), toon(GADGET_COLORS.pad)), 0, 0.05, 0, false);
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(r * 0.34, r * 0.5, 3), glow(0xeaffd9, 1.1));
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.scale.z = 0.25;
+    this.add(plate, arrow, 0, 0.11, 0, false);
+    plate.position.y = 0.16;
+    g.add(plate);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.95, 0.045, 6, 28), glow(GADGET_COLORS.pad, 1.25));
+    rim.rotation.x = Math.PI / 2;
+    this.add(g, rim, 0, 0.13, 0, false);
+    this.group.add(g);
+    this.pads.push({ plate, x, z, squash: 0 });
+  }
+
+  private addBumper(idx: number, x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const body = new THREE.Group();
+    this.add(body, new THREE.Mesh(new THREE.CylinderGeometry(BUMPER.r * 0.72, BUMPER.r * 0.86, 0.95, 14), toon(0x4a4f6a)), 0, 0.475, 0);
+    this.add(body, new THREE.Mesh(new THREE.CylinderGeometry(BUMPER.r * 0.95, BUMPER.r * 0.8, 0.22, 14), toon(GADGET_COLORS.bumper)), 0, 1.02, 0);
+    this.add(body, new THREE.Mesh(new THREE.SphereGeometry(BUMPER.r * 0.4, 12, 8), toon(0xfff0f5)), 0, 1.2, 0);
+    const ringMat = glow(GADGET_COLORS.bumper, 1.2);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(BUMPER.r * 0.9, 0.07, 6, 24), ringMat);
+    ring.rotation.x = Math.PI / 2;
+    this.add(body, ring, 0, 0.5, 0, false);
+    g.add(body);
+    this.group.add(g);
+    this.bumpers.set(idx, { body, ring: ringMat, pulse: 0 });
+  }
+
+  private addRotor(idx: number, x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    this.add(g, new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.55, ROTOR.h + 0.25, 12), toon(0x4a4f6a)), 0, (ROTOR.h + 0.25) / 2, 0);
+    this.add(g, new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), glow(GADGET_COLORS.rotor, 1.15)), 0, ROTOR.h + 0.32, 0, false);
+    const arm = new THREE.Group();
+    arm.position.y = ROTOR.h * 0.62;
+    const stripes = hazardStripes().clone();
+    stripes.needsUpdate = true;
+    stripes.wrapS = stripes.wrapT = THREE.RepeatWrapping;
+    stripes.repeat.set(6, 1);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(ROTOR.len * 2, 0.34, ROTOR.w * 2), new THREE.MeshToonMaterial({ map: stripes, gradientMap: toonGradient() }));
+    bar.castShadow = true;
+    arm.add(bar);
+    for (const s of [-1, 1]) this.add(arm, new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), toon(GADGET_COLORS.rotor)), s * ROTOR.len, 0, 0);
+    g.add(arm);
+    this.group.add(g);
+    this.rotors.push({ arm, idx });
+  }
+
+  private addGeyser(idx: number, x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const vent = new THREE.Mesh(new THREE.CylinderGeometry(GEYSER.r * 0.55, GEYSER.r * 0.7, 0.14, 14), toon(0x3a4048));
+    this.add(g, vent, 0, 0.07, 0, false);
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(GEYSER.r * 0.42, 14), new THREE.MeshBasicMaterial({ color: 0x0c1016 }));
+    hole.rotation.x = -Math.PI / 2;
+    this.add(g, hole, 0, 0.145, 0, false);
+    const ringMat = new THREE.MeshBasicMaterial({ map: ringTexture(), color: GADGET_COLORS.geyser, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false });
+    const ring = new THREE.Mesh(new THREE.PlaneGeometry(GEYSER.r * 2, GEYSER.r * 2), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    this.add(g, ring, 0, 0.04, 0, false);
+    const jetMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(GADGET_COLORS.geyser).multiplyScalar(1.15), transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false });
+    const jet = new THREE.Mesh(new THREE.CylinderGeometry(GEYSER.r * 0.5, GEYSER.r * 0.75, 1, 14, 1, true), jetMat);
+    jet.visible = false;
+    this.add(g, jet, 0, 0.5, 0, false);
+    this.group.add(g);
+    this.geysers.push({ idx, ring: ringMat, jet, jetMat, x, y, z });
+  }
+
+  private addBox(idx: number, x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y + 0.95, z);
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshToonMaterial({ map: boxTexture(), gradientMap: toonGradient() }));
+    cube.castShadow = true;
+    g.add(cube);
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: softDisc(), color: GADGET_COLORS.box, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false }));
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = -0.9;
+    g.add(halo);
+    g.visible = false;
+    this.group.add(g);
+    this.boxes.set(idx, { g, idx, on: false, pop: 0, y: y + 0.95 });
+  }
+
+  /** Alguien rebotó en un resorte en (x,z): hundir la placa más cercana. */
+  bounce(x: number, z: number) {
+    let best: PadVis | null = null, bd = CELL * 1.2;
+    for (const p of this.pads) {
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best) best.squash = 1;
+  }
+
+  /** Un paragolpes rebotó a alguien. */
+  bump(idx: number) {
+    const b = this.bumpers.get(idx);
+    if (b) b.pulse = 1;
+  }
+
+  /** tick: el del frame que se dibuja (interpolado). gad: estado de las cajas. */
+  update(tick: number, gad: string, time: number, dt: number) {
+    for (let i = 0; i < this.gates.length; i++) {
+      const g = this.gates[i];
+      const goal = i === this.gates.length - 1;
+      // La que te toca late; las que ya pasaste se apagan.
+      g.mat.opacity = i === this.nextGate ? (goal ? 0.75 : 0.45) + 0.25 * Math.sin(time * 6) : i < this.nextGate ? 0.1 : goal ? 0.85 : 0.28;
+    }
+    if (this.arrow) {
+      const g = this.gates[this.nextGate];
+      this.arrow.visible = !!g;
+      if (g) {
+        this.arrow.position.set(g.x, g.y + 3.4 + Math.sin(time * 4) * 0.35, g.z);
+        this.arrow.rotation.y = time * 2;
+      }
+    }
+    for (const p of this.pads) {
+      p.squash = Math.max(0, p.squash - dt * 3.5);
+      // Se hunde y salta: la placa sube de golpe y vuelve.
+      p.plate.position.y = 0.16 + Math.sin(p.squash * Math.PI) * 0.4;
+    }
+    for (const b of this.bumpers.values()) {
+      b.pulse = Math.max(0, b.pulse - dt * 4);
+      const k = 1 + Math.sin(b.pulse * Math.PI) * 0.28;
+      b.body.scale.set(k, 1 - (k - 1) * 0.4, k);
+      b.ring.color.setHex(GADGET_COLORS.bumper).multiplyScalar(1.1 + b.pulse * 0.9 + Math.sin(time * 4) * 0.08);
+    }
+    for (const r of this.rotors) r.arm.rotation.y = -rotorAngle(r.idx, tick);
+    for (const g of this.geysers) {
+      const ph = geyserPhase(g.idx, tick);
+      const tt = geyserTime(g.idx, tick);
+      if (ph === 'warn') {
+        // Aviso: el aro late cada vez más rápido y más fuerte.
+        const k = (tt - (GEYSER.period - GEYSER.warn)) / GEYSER.warn;
+        g.ring.opacity = 0.45 + 0.5 * Math.abs(Math.sin(time * (8 + k * 14)));
+        g.ring.color.setHex(GADGET_COLORS.geyser).multiplyScalar(1 + k * 0.6);
+      } else {
+        g.ring.opacity = 0.3;
+        g.ring.color.setHex(GADGET_COLORS.geyser);
+      }
+      // El chorro dura un poco más en pantalla que en la simulación, desvaneciéndose.
+      const show = 0.55;
+      g.jet.visible = tt < show;
+      if (g.jet.visible) {
+        const k = tt / show;
+        const h = 4.5 * Math.min(1, k * 4);
+        g.jet.scale.set(1 - k * 0.5, h, 1 - k * 0.5);
+        g.jet.position.y = h / 2;
+        g.jetMat.opacity = 0.75 * (1 - k);
+      }
+    }
+    if (gad !== this.lastGad) {
+      this.lastGad = gad;
+      for (const b of this.boxes.values()) {
+        const on = gad.charCodeAt(b.idx) === 49;
+        if (on && !b.on) b.pop = 1;
+        b.on = on;
+        b.g.visible = on;
+      }
+    }
+    for (const b of this.boxes.values()) {
+      if (!b.on) continue;
+      b.pop = Math.max(0, b.pop - dt * 3);
+      b.g.position.y = b.y + Math.sin(time * 2.2 + b.idx) * 0.12;
+      b.g.rotation.y = time * 1.4 + b.idx;
+      b.g.scale.setScalar(1 + Math.sin(b.pop * Math.PI) * 0.3);
+    }
+  }
+}

@@ -10,15 +10,22 @@ import { CollisionWorld } from '../core/collision';
 import { KILL_Y, TEAM_COLORS } from '../core/constants';
 import type { SimEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
+import { ITEM_BY_ID } from '../core/items';
 import type { RosterInfo } from '../core/protocol';
 import { stepPickup } from '../core/sim';
 import { F_DASH, F_DEAD, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
+import { Backdrop } from './backdrop';
 import { BeanView } from './beanView';
+import { DecorView } from './decorView';
 import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView } from './fx';
+import { buildGunMesh, CRATE_COLORS, HordeView, TRACER_COLORS } from './hordeView';
+import { CRATE_INFO, CRATE_KINDS } from '../core/horde';
+import { GADGET_COLORS, GadgetsView } from './gadgetsView';
 import { AimIndicator, type AimView } from './indicator';
-import { FixedView, NEUTRAL_COLOR, UnitsView } from './mobaView';
+import { FixedView, NEUTRAL_COLOR, UnitsView, ZOMBIE_COLOR } from './mobaView';
+import { GroundStyle } from './ground';
 import { Floaters, GlowFX, LightPool } from './juice';
 import { PostFX } from './post';
 import { DestructiblesView, pickupMesh, StructuresView, type PickupVis } from './propsView';
@@ -62,6 +69,8 @@ const FX_COLORS: Record<string, number> = {
   glob: 0x7bea4f, goo: 0x7bea4f, wave: 0x4fdc4a, hook: 0xffc94a, bolt: GOLD, magnet: 0xb070ff, body: GOLD,
   metal: 0x8fa3b8, stone: 0xc9a27a, build: 0xffc94a, buildstone: 0xc9a27a, goolob: 0x7bea4f,
   minion: 0xc9a27a, fountain: 0xff5a4a, cannon: 0xff8a3d, spark: 0x7fe3ff, tbolt: 0xff5a4a, coreshot: 0xff5a4a,
+  bumper: GADGET_COLORS.bumper, rotor: GADGET_COLORS.rotor, geyser: GADGET_COLORS.geyser, barrel: GADGET_COLORS.barrel,
+  bullet: 0xffe08a, rocket: 0xff8a3c, c4: 0xff5a3c,
 };
 /** Efectos que toman el color del atacante (su héroe) en vez de uno fijo. */
 const ATTACKER_FX = new Set(['punch', 'wrench', 'push', 'pushbig']);
@@ -73,6 +82,9 @@ export class GameView {
   readonly terrain: Terrain;
   private cw: CollisionWorld;
   private terrainView: TerrainView;
+  private decor: DecorView;
+  private gadgets: GadgetsView;
+  private backdrop: Backdrop | null = null;
   private destructs: DestructiblesView;
   private structs = new StructuresView();
   private particles = new Particles();
@@ -85,6 +97,7 @@ export class GameView {
   private koth = new KothView();
   private aimInd = new AimIndicator();
   private units = new UnitsView();
+  private horde = new HordeView();
   private fixed: FixedView;
   private beans = new Map<number, BeanView>();
   private pickups = new Map<number, PickupVis>();
@@ -100,7 +113,6 @@ export class GameView {
   private dustT = 0;
   private danger = 0;
   private sun: THREE.DirectionalLight;
-  private skyStuff: THREE.Object3D[] = [];
   private theme: ThemeDef;
   private pickupKind: 'materials' | 'ult' | 'none';
   localId = -1;
@@ -153,16 +165,22 @@ export class GameView {
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.sun, this.sun.target);
 
-    this.terrainView = new TerrainView(this.terrain, theme);
+    const style = new GroundStyle(this.terrain);
+    this.terrainView = new TerrainView(this.terrain, theme, style);
+    this.decor = new DecorView(this.terrain, theme, style);
     this.destructs = new DestructiblesView(this.terrain.destructs);
+    this.gadgets = new GadgetsView(this.terrain);
     this.projs = new ProjectilesView(this.sparks, this.teamColor);
     this.fixed = new FixedView(this.terrain, this.teamColor);
     this.scene.add(
-      this.terrainView.group, this.destructs.group, this.structs.group, this.particles.mesh, this.sparks.mesh,
+      this.terrainView.group, this.decor.group, this.gadgets.group, this.destructs.group, this.structs.group, this.particles.mesh, this.sparks.mesh,
       this.glow.group, this.lights.group, this.projs.group, this.zones.group, this.teles.group, this.koth.group, this.aimInd.group,
-      this.units.group, this.fixed.group,
+      this.units.group, this.fixed.group, this.horde.group,
     );
-    if (!sky) this.scene.add(this.buildBackdrop(theme.fog ?? def.fog));
+    if (!sky) {
+      this.backdrop = new Backdrop(this.terrain, theme);
+      this.scene.add(this.backdrop.group);
+    }
 
     for (const r of roster) {
       const isLocal = r.pid === localPid;
@@ -180,54 +198,6 @@ export class GameView {
       try { this.post = new PostFX(this.renderer, this.scene, this.camera); } catch (e) { console.warn('[post] deshabilitado', e); this.post = null; }
     }
     this.resize();
-  }
-
-  private buildBackdrop(fog: number): THREE.Object3D {
-    const g = new THREE.Group();
-    // Rocas flotando en el abismo
-    const mat = new THREE.MeshToonMaterial({ color: 0x5a4a60 });
-    for (let i = 0; i < 26; i++) {
-      const a = (i / 26) * Math.PI * 2 + Math.random() * 0.2;
-      const d = 38 + Math.random() * 30;
-      const s = 1 + Math.random() * 3.5;
-      const m = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), mat);
-      m.position.set(Math.cos(a) * d, -6 - Math.random() * 18, Math.sin(a) * d * 0.8);
-      m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      m.scale.y = 0.6 + Math.random() * 0.8;
-      g.add(m);
-    }
-    // Cristales gigantes de color en el abismo
-    const colors = this.theme.id === 'noche' ? [0x4fd1ff, 0x7dffea, 0x9ec0ff] : [0x4fd1ff, 0xff4f8b, 0xb070ff, 0x7dff6a, 0xffe14a];
-    for (let i = 0; i < (this.theme.crystals ? 14 : 0); i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = 30 + Math.random() * 30;
-      const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.8 + Math.random() * 1.6), new THREE.MeshBasicMaterial({ color: new THREE.Color(colors[i % colors.length]).multiplyScalar(1.15), toneMapped: false }));
-      c.scale.y = 2 + Math.random() * 2;
-      c.position.set(Math.cos(a) * d, -10 - Math.random() * 16, Math.sin(a) * d * 0.8);
-      c.rotation.z = (Math.random() - 0.5) * 0.8;
-      c.userData.spin = (Math.random() - 0.5) * 0.6;
-      c.userData.bob = Math.random() * 6;
-      this.skyStuff.push(c);
-      g.add(c);
-    }
-    // Estrellas (tenues y levemente azuladas)
-    const pts = new Float32Array(600 * 3);
-    for (let i = 0; i < 600; i++) {
-      const a = Math.random() * Math.PI * 2, d = 70 + Math.random() * 60;
-      pts[i * 3] = Math.cos(a) * d;
-      pts[i * 3 + 1] = -30 - Math.random() * 40;
-      pts[i * 3 + 2] = Math.sin(a) * d;
-    }
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.BufferAttribute(pts, 3));
-    const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xa9c4ff, size: 0.5, toneMapped: false, fog: false }));
-    if (this.theme.stars) g.add(stars);
-    // Brillo en el fondo del abismo
-    const glow = new THREE.Mesh(new THREE.CircleGeometry(80, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(fog).multiplyScalar(1.3), transparent: true, opacity: 0.6 }));
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = -40;
-    g.add(glow);
-    return g;
   }
 
   resize() {
@@ -303,6 +273,11 @@ export class GameView {
     if (frame.dst !== this.lastDst) { this.destructs.apply(frame.dst); this.lastDst = frame.dst; }
     this.terrainView.update(dt);
     this.destructs.update(dt);
+    if (frame.mode.race) {
+      const idx = this.roster.findIndex((r) => r.id === this.localId);
+      this.gadgets.setNextGate(idx >= 0 ? frame.mode.race.next[idx] ?? -1 : -1);
+    }
+    this.gadgets.update(frame.tick, frame.gad, this.time, dt);
 
     for (const c of frame.chars) {
       const b = this.beans.get(c.id);
@@ -310,6 +285,7 @@ export class GameView {
       const cf = c.id === this.localId && local ? local : c;
       const dead = (cf.fl & F_DEAD) !== 0;
       const gy = dead ? -999 : this.groundBelow(cf.x, cf.y, cf.z);
+      b.setWeapon(cf.wp, buildGunMesh);
       b.update(cf, dt, gy, this.time);
       if (dead) continue;
       if (cf.st >= 3 && Math.random() < dt * 10) {
@@ -331,10 +307,7 @@ export class GameView {
     }
     // Fin de partida: los que ganaron festejan (con papelitos), los que perdieron lloran; empate: hombros.
     if (frame.win !== -2) this.celebrate(frame.win, dt);
-    for (const s of this.skyStuff) {
-      s.rotation.y += dt * s.userData.spin;
-      s.position.y += Math.sin(this.time * 0.6 + s.userData.bob) * dt * 0.4;
-    }
+    this.decor.update(this.time);
     this.structs.update(frame.structs.filter((st) => st.k !== 'tower' && st.k !== 'core'), this.teamColor, this.time, dt);
     if (frame.units.length) this.units.update(frame.units, this.camera, this.teamColor, this.time, dt, frame.win);
     else this.units.clear();
@@ -349,6 +322,7 @@ export class GameView {
     this.zones.update(frame.zones, 'zone', this.myTeam, this.time, this.sparks);
     this.teles.update(frame.teles, 'tele', this.myTeam, this.time, this.sparks);
     this.koth.update(frame.mode.zone, this.teamColor, this.time);
+    this.horde.update(frame.mode.horde, this.time, dt);
     this.updatePickups(dt);
     this.particles.update(dt);
     this.sparks.update(dt);
@@ -376,6 +350,7 @@ export class GameView {
     this.camera.lookAt(this.focus);
     this.sun.position.set(this.focus.x + 14, 30, this.focus.z + 12);
     this.sun.target.position.copy(this.focus);
+    this.backdrop?.update(dt, this.time, this.focus);
 
     // Indicador de apuntado
     const from = alive ? new THREE.Vector3(local!.x, this.groundOr(local!.x, local!.z, local!.y), local!.z) : null;
@@ -598,7 +573,58 @@ export class GameView {
       case 'shoot': {
         // Tiros: estocada con una mano (las torretas no mueven al dueño). Esbirros: su animación de ataque.
         if (!this.isHero(e.id)) this.units.attack(e.id);
-        else if (e.c !== 'bolt') this.beans.get(e.id)?.armMove('throw');
+        else if (e.c === 'rocket') {
+          // Lanzacohetes: retroceso fuerte y fogonazo.
+          const b = this.beans.get(e.id), f = b?.lastFrame;
+          b?.kick(1.6);
+          if (f) {
+            const mx = f.x + Math.sin(f.f) * 0.9, mz = f.z + Math.cos(f.f) * 0.9;
+            G.sparkle(mx, f.y + 0.85, mz, FX_COLORS.rocket, 0.7);
+            P.burst(f.x - Math.sin(f.f) * 0.5, f.y + 0.85, f.z - Math.cos(f.f) * 0.5, 6, 0x9a9aa8, { speed: 2, up: 1, size: 0.16, life: 0.5, gravity: -1, drag: 2 });
+            L.flash(mx, f.y + 0.9, mz, FX_COLORS.rocket, 30, 8, 0.15);
+          }
+        } else if (e.c !== 'bolt') this.beans.get(e.id)?.armMove('throw');
+        break;
+      }
+      // ── Armas (Horda) ──
+      case 'shot': {
+        const b = this.beans.get(e.id), f = b?.lastFrame;
+        if (!b || !f) break;
+        const col = TRACER_COLORS[e.w] ?? TRACER_COLORS[0];
+        const shotgun = e.p.length > 4;
+        const mx = f.x + Math.sin(f.f) * 0.85, my = f.y + 0.8, mz = f.z + Math.cos(f.f) * 0.85;
+        b.kick(shotgun ? 1.3 : e.w === 1 ? 0.35 : 0.8);
+        // Fogonazo y casquillo.
+        G.sparkle(mx, my, mz, col, shotgun ? 0.6 : 0.3);
+        if (e.w !== 1 || Math.random() < 0.4) L.flash(mx, my, mz, col, shotgun ? 28 : 14, 6, 0.07);
+        P.burst(f.x + Math.cos(f.f) * 0.3, my, f.z - Math.sin(f.f) * 0.3, 1, 0xd9b44a, { speed: 2.2, up: 3, size: 0.05, life: 0.5, gravity: 14 });
+        for (let i = 0; i + 3 < e.p.length; i += 4) {
+          const x = e.p[i], y = e.p[i + 1], z = e.p[i + 2], what = e.p[i + 3];
+          this.horde.tracer(mx, my, mz, x, y, z, col, shotgun ? 0.035 : e.w === 1 ? 0.04 : 0.055, shotgun ? 0.11 : 0.08);
+          if (what === 1) {
+            // Dio en un cuerpo: salpicón.
+            P.burst(x, y, z, 3, ZOMBIE_COLOR, { speed: 2.5, up: 2, size: 0.09, life: 0.4 });
+            S.burst(x, y, z, 2, col, { speed: 4, up: 2, size: 0.04, life: 0.2, gravity: 4 });
+          } else if (what === 2) {
+            S.burst(x, y, z, 3, col, { speed: 3, up: 2.5, size: 0.04, life: 0.25, gravity: 6 });
+            P.burst(x, y, z, 1, DUST, { speed: 0.6, up: 0.8, size: 0.1, life: 0.4, gravity: -0.5, drag: 2 });
+          }
+        }
+        if (e.id === me && shotgun) this.onImpact(HITSTOP.light);
+        break;
+      }
+      case 'c4': {
+        this.horde.plant(e.x, e.y, e.z, e.f);
+        G.ring(e.x, e.y + 0.06, e.z, 1.2, FX_COLORS.c4, 0.3);
+        break;
+      }
+      case 'loot': {
+        const kind = CRATE_KINDS[e.c] ?? 'uzi';
+        const col = CRATE_COLORS[kind] ?? GOLD;
+        G.ring(e.x, e.y + 0.08, e.z, 1.6, col, 0.4);
+        S.burst(e.x, e.y + 0.6, e.z, 14, col, { speed: 4, up: 6, size: 0.07, life: 0.6, gravity: 8 });
+        L.flash(e.x, e.y + 0.8, e.z, col, 30, 8, 0.25);
+        if (this.worthText(e.x, e.z, e.id)) F.add(e.x, e.y + 1.6, e.z, `${CRATE_INFO[kind]?.icon ?? ''} ${CRATE_INFO[kind]?.name ?? ''}`, e.id === me ? 'dmg mine' : 'dmg', { size: e.id === me ? 26 : 18, life: 1.1 });
         break;
       }
       // ── Asedio (MOBA) ──
@@ -611,7 +637,7 @@ export class GameView {
         const col = e.tm >= 2 ? NEUTRAL_COLOR : this.teamColor(e.tm);
         if (e.fall) break; // cayó al vacío: ya se lo vio caer
         const fam: Family = kind === 'ranged' ? 'crystal' : kind === 'siege' ? 'metal' : kind === 'neutral' ? 'goo' : 'stone';
-        const big = kind === 'coloso';
+        const big = kind === 'coloso' || kind === 'titan';
         P.burst(e.x, e.y + 0.5, e.z, big ? 40 : 10, FAMILY_COLORS[fam], { speed: big ? 7 : 3.5, up: big ? 8 : 4, size: big ? 0.25 : 0.12, life: 0.9 });
         S.burst(e.x, e.y + 0.6, e.z, big ? 24 : 6, col, { speed: 3, up: 3, size: 0.05, life: 0.4 });
         if (e.by === me && me >= 0) G.sparkle(e.x, e.y + 0.8, e.z, GOLD, 0.5);
@@ -619,7 +645,7 @@ export class GameView {
           G.fireball(e.x, e.y + 1.2, e.z, 3, 0xb070ff);
           G.ring(e.x, e.y, e.z, 5, GOLD, 0.8);
           L.flash(e.x, e.y, e.z, 0xb070ff, 80, 20, 0.6);
-          F.add(e.x, e.y + 3, e.z, '¡COLOSO DERRIBADO!', 'big boom', { size: 40, life: 1.6 });
+          F.add(e.x, e.y + 3, e.z, kind === 'titan' ? '¡MOLE MADRE DERRIBADA!' : '¡COLOSO DERRIBADO!', 'big boom', { size: 40, life: 1.6 });
           this.onImpact(HITSTOP.boom);
         }
         break;
@@ -639,10 +665,21 @@ export class GameView {
         break;
       }
       case 'sdown': {
-        const col = this.teamColor(e.tm);
-        const core = e.kd === 'core';
         const y = this.terrain.groundAt(e.x, e.z);
         const gy = y > -Infinity ? y : 0;
+        if (e.kd === 'nest') {
+          // Nido de la Horda: revienta en goo.
+          G.fireball(e.x, gy + 1, e.z, 2.4, ZOMBIE_COLOR);
+          G.ring(e.x, gy + 0.1, e.z, 4, ZOMBIE_COLOR, 0.6);
+          P.burst(e.x, gy + 1, e.z, 30, 0x6d7a3a, { speed: 6, up: 8, size: 0.24, life: 1.1, gravity: 18 });
+          S.burst(e.x, gy + 1.2, e.z, 22, 0xb6ff5a, { speed: 8, up: 7, size: 0.08, life: 0.7 });
+          L.flash(e.x, gy + 1, e.z, ZOMBIE_COLOR, 80, 18, 0.5);
+          F.add(e.x, gy + 3, e.z, '¡NIDO DESTRUIDO!', 'big ring', { size: 36, life: 1.5, rise: 2.5 });
+          this.onImpact(HITSTOP.boom);
+          break;
+        }
+        const col = this.teamColor(e.tm);
+        const core = e.kd === 'core';
         G.fireball(e.x, gy + 2, e.z, core ? 4.5 : 3, col);
         G.ring(e.x, gy + 0.1, e.z, core ? 9 : 6, col, 0.9, 1.2);
         G.pillar(e.x, e.z, col, core ? 70 : 45, core ? 3.5 : 2.4, 1.4);
@@ -690,9 +727,10 @@ export class GameView {
       }
       case 'dstage': {
         const pos = this.destructs.position(e.i);
-        const kind = this.terrain.destructs[e.i]?.kind;
+        const spawn = this.terrain.destructs[e.i];
+        const kind = spawn?.kind;
         if (!pos || !kind) break;
-        const col = FAMILY_COLORS[kind];
+        const col = spawn.explosive ? GADGET_COLORS.barrel : FAMILY_COLORS[kind];
         if (e.s > 0) {
           const big = e.s >= 3;
           P.burst(pos.x, pos.y + 0.7, pos.z, big ? 30 : 10, col, { speed: big ? 7 : 3.5, up: big ? 8 : 4, size: big ? 0.22 : 0.13, life: 1 });
@@ -708,6 +746,43 @@ export class GameView {
           S.burst(pos.x, pos.y + 0.3, pos.z, 12, col, { speed: 2, up: 3, size: 0.06 });
           G.sparkle(pos.x, pos.y + 0.8, pos.z, col, 0.6);
         }
+        break;
+      }
+      case 'gad': {
+        if (e.w === 'pad') {
+          this.gadgets.bounce(e.x, e.z);
+          G.ring(e.x, e.y + 0.1, e.z, 1.6, GADGET_COLORS.pad, 0.3);
+          S.burst(e.x, e.y + 0.2, e.z, 10, GADGET_COLORS.pad, { speed: 2.5, up: 7, size: 0.07, life: 0.5, gravity: 6 });
+          P.burst(e.x, e.y + 0.05, e.z, 4, DUST, { speed: 2, up: 1.5, size: 0.12, life: 0.4, gravity: 2 });
+        } else if (e.w === 'bumper') {
+          this.gadgets.bump(e.i);
+          G.ring(e.x, e.y + 0.5, e.z, 2, GADGET_COLORS.bumper, 0.3);
+          L.flash(e.x, e.y + 0.8, e.z, GADGET_COLORS.bumper, 30, 8, 0.25);
+        } else if (e.w === 'geyser') {
+          G.ring(e.x, e.y + 0.1, e.z, 2.2, GADGET_COLORS.geyser, 0.45);
+          S.burst(e.x, e.y + 0.3, e.z, 22, GADGET_COLORS.geyser, { speed: 2.2, up: 13, size: 0.08, life: 0.8, gravity: 12 });
+          L.flash(e.x, e.y + 1, e.z, GADGET_COLORS.geyser, 30, 9, 0.35);
+        } else if (e.w === 'rise') {
+          // Un zombi sale del borde del mapa.
+          P.burst(e.x, e.y + 0.1, e.z, 10, DUST, { speed: 2.5, up: 3, size: 0.16, life: 0.7, gravity: 5 });
+          G.ring(e.x, e.y + 0.05, e.z, 1.3, 0x8fd14f, 0.4);
+        } else if (e.w === 'box' || e.w === 'boxup') {
+          const col = GADGET_COLORS.box;
+          S.burst(e.x, e.y + 1, e.z, e.w === 'box' ? 18 : 8, col, { speed: 4, up: 4, size: 0.08, life: 0.6 });
+          G.sparkle(e.x, e.y + 1, e.z, col, 0.7);
+          if (e.w === 'box' && e.id === me && e.it) F.add(e.x, e.y + 2, e.z, `${ITEM_BY_ID[e.it]?.icon ?? '🎁'} ${ITEM_BY_ID[e.it]?.name ?? ''}`, 'mat', { size: 22, life: 1.1, rise: 1.4 });
+        }
+        break;
+      }
+      case 'gate': {
+        const pos = this.charPos(e.id);
+        if (!pos) break;
+        const tc = this.teamColor(this.teamOf(e.id));
+        G.ring(pos.x, pos.y + 0.1, pos.z, e.fin ? 4 : 2.2, tc, 0.5);
+        if (e.fin) {
+          this.confetti(pos.x, pos.y + 1.5, pos.z, e.fin === 1 ? 70 : 30, 7, 12);
+          G.pillar(pos.x, pos.z, tc, 40, 2, 1.2);
+        } else if (e.id === me) S.burst(pos.x, pos.y + 1, pos.z, 14, 0xffd23f, { speed: 3, up: 5, size: 0.07, life: 0.6 });
         break;
       }
       case 'tile': {
@@ -902,6 +977,9 @@ export class GameView {
   }
 
   listener() { return this.focus; }
+
+  /** Solo para las pruebas de pantalla: cuántas mallas de la Horda hay en escena. */
+  get hordeObjects() { return this.horde.group.children.length; }
 
   dispose() {
     for (const b of this.beans.values()) b.dispose();

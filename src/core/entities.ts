@@ -15,8 +15,9 @@ export type Slot = AbilitySlot | 'basic' | 'push' | 'i1' | 'i2' | 'i3';
  * Las unidades usan la misma física, knockback y ring-out que los héroes (se pueden tirar al vacío),
  * pero tienen vida (hp) en vez de heat y las maneja la IA del modo, no un InputFrame de jugador.
  */
-export type UnitKind = 'hero' | 'melee' | 'ranged' | 'siege' | 'neutral' | 'coloso';
-export const UNIT_KINDS: UnitKind[] = ['hero', 'melee', 'ranged', 'siege', 'neutral', 'coloso'];
+export type UnitKind = 'hero' | 'melee' | 'ranged' | 'siege' | 'neutral' | 'coloso' | 'zombie' | 'runner' | 'brute' | 'spitter' | 'titan';
+/** El índice viaja por la red: los tipos nuevos se agregan siempre al final. */
+export const UNIT_KINDS: UnitKind[] = ['hero', 'melee', 'ranged', 'siege', 'neutral', 'coloso', 'zombie', 'runner', 'brute', 'spitter', 'titan'];
 export const SLOTS: Slot[] = ['q', 'e', 'f', 'r', 'basic', 'push', 'i1', 'i2', 'i3'];
 
 export interface ActionState {
@@ -104,6 +105,17 @@ export class Character implements MoveState {
   assists = 0;
   cs = 0; // unidades rematadas (Asedio)
   heatDealt = 0;
+  // Armas (reglas con `weapons`, ver core/weapons.ts): índices en WEAPON_IDS.
+  /** Arma en la mano. 0 = pistola. */
+  weapon = 0;
+  /** Arma principal que lleva además de la pistola (-1 = ninguna) y las balas que le quedan. */
+  primary = -1;
+  ammo = 0;
+  /** Cargas de C4. */
+  c4 = 0;
+  /** > 0: acaba de disparar (se mueve más lento, ver WeaponDef.move). */
+  gunT = 0;
+  gunMove = 1;
   // Estadísticas para premios y feedback
   destroyed = 0;
   pickups = 0;
@@ -164,6 +176,10 @@ export interface HitSpec {
   stun?: number;
   slow?: [number, number];
   noLaunch?: boolean;
+  /** El knockback no escala con la etapa de la víctima (artefactos del mapa: pegan igual a todos). */
+  flat?: boolean;
+  /** No emite el evento de golpe (balas en ráfaga: el disparo ya viaja como evento `shot`). */
+  quiet?: boolean;
   fx?: string;
 }
 
@@ -276,6 +292,8 @@ export interface Destructible {
   stage: number; // 0..2 vivo, 3 destruido
   respawnT: number;
   obstacle: Obstacle;
+  /** Barril: explota al romperse y no suelta material. */
+  explosive?: boolean;
 }
 
 export interface Pickup {
@@ -286,6 +304,21 @@ export interface Pickup {
   t: number;
   grounded: boolean;
   target: number;
+}
+
+/** Artefacto del mapa en la simulación (ver gadgets.ts). */
+export interface Gadget {
+  idx: number;
+  kind: import('./gadgets').GadgetKind;
+  x: number; y: number; z: number;
+  /** Cajas: disponible para agarrar. */
+  on: boolean;
+  /** Cajas: segundos para reaparecer. */
+  t: number;
+  /** Géiser: ya avisó este chorro. */
+  fired: boolean;
+  /** Último tick en que le pegó a cada cuerpo (para no pegar todos los ticks). */
+  last: Map<number, number>;
 }
 
 export const DESTRUCT_DEF: Record<Family, { size: number; h: number; hp: number }> = {

@@ -54,7 +54,7 @@ function edgeDist(p: { x: number; z: number }, s: Structure) {
 }
 
 /** Dirección para caminar hacia (tx,tz) esquivando obstáculos y sin tirarse al vacío. */
-function steer(sim: Simulation, u: Character, tx: number, tz: number): [number, number] {
+export function steer(sim: Simulation, u: Character, tx: number, tz: number): [number, number] {
   let dx = tx - u.pos.x, dz = tz - u.pos.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.05) return [0, 0];

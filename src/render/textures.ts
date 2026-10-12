@@ -237,6 +237,54 @@ export function softDisc(): THREE.Texture {
   return t;
 }
 
+/** Nubes suaves que se repiten sin costura (blanco con alfa): el color lo pone el material. */
+export function cloudTexture(): THREE.Texture {
+  const k = 'clouds';
+  if (cache.has(k)) return cache.get(k)!;
+  const S = 512;
+  const { c, g } = canvas(S, S);
+  const r = new Rng(77);
+  for (let i = 0; i < 46; i++) {
+    const x = r.range(0, S), y = r.range(0, S), rad = r.range(28, 92), a = r.range(0.1, 0.34);
+    // Cada mancha se dibuja también corrida una textura entera en cada eje: así los bordes empalman.
+    for (const ox of [-S, 0, S]) {
+      for (const oy of [-S, 0, S]) {
+        const grd = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, rad);
+        grd.addColorStop(0, `rgba(255,255,255,${a})`);
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = grd;
+        g.fillRect(x + ox - rad, y + oy - rad, rad * 2, rad * 2);
+      }
+    }
+  }
+  const t = tex(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  cache.set(k, t);
+  return t;
+}
+
+/** Una celda de grilla (líneas finas con halo) que se repite: el piso de neón del abismo. */
+export function gridTexture(): THREE.Texture {
+  const k = 'grid';
+  if (cache.has(k)) return cache.get(k)!;
+  const S = 128;
+  const { c, g } = canvas(S, S);
+  for (const [w, a] of [[14, 0.1], [7, 0.22], [2.5, 1]]) {
+    g.strokeStyle = `rgba(255,255,255,${a})`;
+    g.lineWidth = w;
+    g.beginPath();
+    g.moveTo(0, 0); g.lineTo(S, 0);
+    g.moveTo(0, S); g.lineTo(S, S);
+    g.moveTo(0, 0); g.lineTo(0, S);
+    g.moveTo(S, 0); g.lineTo(S, S);
+    g.stroke();
+  }
+  const t = tex(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  cache.set(k, t);
+  return t;
+}
+
 export function ringTexture(): THREE.Texture {
   const k = 'ring';
   if (cache.has(k)) return cache.get(k)!;

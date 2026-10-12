@@ -9,10 +9,12 @@ import {
   XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE, RECALL_TIME, BASE_RADIUS, ISLAND_BOTTOM,
 } from './constants';
 import {
-  baseStats, Character, DESTRUCT_DEF, type BlastSpec, type Destructible, type HitSpec, type Pickup,
+  baseStats, Character, DESTRUCT_DEF, type BlastSpec, type Destructible, type Gadget, type HitSpec, type Pickup,
   type Projectile, type Slot, type Structure, type Telegraph, type UnitKind, type Zone,
 } from './entities';
 import type { SimEvent } from './events';
+import { BARREL, BOX, BOX_ITEMS, BUMPER, GEYSER, geyserPhase, ROTOR, rotorAngle, rotorDir } from './gadgets';
+import { fixSettings, sidesOf } from './games';
 import { HEROES } from './heroes';
 import { BTN, held, pressed, released } from './input';
 import { canAfford, ITEM_BY_ID, pay, refund } from './items';
@@ -23,7 +25,8 @@ import { MUTATION_COST, NO_MODS, ROUTE_MODS, SUPPORT_RADIUS, SUPPORT_SHIELD, typ
 import { Rng } from './rng';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from './rules';
 import { Terrain, TILE_CRUMBLING, TILE_GONE, TILE_INTACT } from './terrain';
-import { FAMILIES, type AbilitySlot, type Family, type HeroId, type MatchSettings, type Route, type RosterEntry } from './types';
+import { C4, fireWeapon, plantC4, swapWeapon } from './weapons';
+import { ABILITY_SLOTS, FAMILIES, type AbilitySlot, type Family, type HeroId, type MatchSettings, type Route, type RosterEntry } from './types';
 
 export interface SimConfig {
   settings: MatchSettings;
@@ -35,6 +38,20 @@ export type Command =
   | { c: 'craft'; id: string }
   | { c: 'sell'; id: string }
   | { c: 'mutate'; slot: AbilitySlot; route: Route };
+
+/** Valida un comando que llegó por la red (dato no confiable). Devuelve null si no es un comando bien formado. */
+export function parseCommand(raw: unknown): Command | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const m = raw as Record<string, unknown>;
+  if (m.c === 'craft' || m.c === 'sell') {
+    return typeof m.id === 'string' && Object.hasOwn(ITEM_BY_ID, m.id) ? { c: m.c, id: m.id } : null;
+  }
+  if (m.c === 'mutate') {
+    const slot = m.slot as AbilitySlot, route = m.route as Route;
+    return ABILITY_SLOTS.includes(slot) && typeof route === 'string' && Object.hasOwn(ROUTE_MODS, route) ? { c: 'mutate', slot, route } : null;
+  }
+  return null;
+}
 
 export interface ProjSpec {
   kind: string;
@@ -102,6 +119,8 @@ export class Simulation {
   readonly mode: GameMode;
   readonly rules: Ruleset;
   readonly teamCount: number;
+  /** Cooperativo: todos los héroes en el equipo 0 (el modo pone a los rivales). */
+  readonly coop: boolean;
   /** Héroes (jugadores y bots). */
   chars: Character[] = [];
   /** Unidades del modo (esbirros, neutrales): mismos cuerpos y física, con vida e IA propia. */
@@ -116,6 +135,8 @@ export class Simulation {
   telegraphs: Telegraph[] = [];
   structures: Structure[] = [];
   destructibles: Destructible[] = [];
+  /** Artefactos del mapa (paragolpes, rotores, géiseres, cajas de ítems). */
+  gadgets: Gadget[] = [];
   pickups: Pickup[] = [];
   scheduled: { at: number; fn: () => void }[] = [];
   events: SimEvent[] = [];
@@ -131,8 +152,10 @@ export class Simulation {
   private pendingPickups: number[][] = [];
 
   constructor(cfg: SimConfig) {
-    // El Asedio siempre es por equipos y con sus reglas (bases, forja en base, volver con B).
-    this.settings = cfg.settings.mode === 'moba' ? { ...cfg.settings, teams: 'teams', rules: 'moba' } : cfg.settings;
+    // Cada juego fija lo suyo (core/games.ts): el Asedio es por equipos y con sus reglas, la Carrera es todos
+    // contra todos con las suyas, y la Horda es cooperativa (un solo equipo de héroes).
+    this.settings = fixSettings(cfg.settings);
+    this.coop = sidesOf(this.settings) === 'coop';
     this.rules = rulesFor(this.settings);
     this.rng = new Rng(cfg.seed);
     this.terrain = new Terrain(this.settings.map);
@@ -143,13 +166,14 @@ export class Simulation {
     this.teamCount = ffa ? cfg.roster.length : 2;
     const perTeam = new Array(this.teamCount).fill(0);
     cfg.roster.forEach((r, i) => {
-      const team = ffa ? i : Math.max(0, Math.min(1, r.team));
+      const team = ffa ? i : this.coop ? 0 : Math.max(0, Math.min(1, r.team));
       const hero = HEROES[r.hero] ?? HEROES.canto;
       const ch = new Character(i + 1, r.pid, r.name, team, hero.id, hero.family, r.bot, { x: 0, y: 0, z: 0 });
       ch.hat = r.hat ?? 'none';
       ch.pos = this.spawnPoint(ch, perTeam[team]++);
       ch.ppos = { ...ch.pos };
       ch.facing = ch.pos.x < 0 ? Math.PI / 2 : -Math.PI / 2;
+      if (this.rules.weapons) ch.c4 = C4.start;
       this.recalcStats(ch);
       this.chars.push(ch);
       this.charById.set(ch.id, ch);
@@ -160,11 +184,15 @@ export class Simulation {
     this.terrain.destructs.forEach((d, idx) => {
       const def = DESTRUCT_DEF[d.kind];
       const h = def.size / 2;
+      const hp = d.explosive ? BARREL.hp : def.hp;
       this.destructibles.push({
-        idx, kind: d.kind, x: d.x, y: d.y, z: d.z, hp: def.hp, maxHp: def.hp, stage: 0, respawnT: 0,
+        idx, kind: d.kind, x: d.x, y: d.y, z: d.z, hp, maxHp: hp, stage: 0, respawnT: 0, explosive: d.explosive,
         obstacle: { id: idx, minX: d.x - h, maxX: d.x + h, minZ: d.z - h, maxZ: d.z + h, base: d.y, top: d.y + def.h, kind: 'd' },
       });
     });
+    this.gadgets = this.terrain.gadgets.map((g, idx) => ({
+      idx, kind: g.kind, x: g.x, y: g.y, z: g.z, on: g.kind !== 'box' || this.rules.itemBoxes, t: 0, fired: false, last: new Map<number, number>(),
+    }));
     this.mode.init(this);
     this.rebuildObstacles();
   }
@@ -228,7 +256,7 @@ export class Simulation {
 
   /** ¿La habilidad ya está disponible para este personaje? (sin progresión: siempre). */
   abilityUnlocked(ch: Character, slot: AbilitySlot) {
-    return ch.level >= unlockLevel(this.rules, HEROES[ch.hero].abilities[slot]);
+    return this.rules.abilities && ch.level >= unlockLevel(this.rules, HEROES[ch.hero].abilities[slot]);
   }
 
   ultReady(ch: Character) {
@@ -372,9 +400,11 @@ export class Simulation {
       const before = this.settings.timeLimit - this.elapsed;
       this.elapsed += DT;
       const left = this.settings.timeLimit - this.elapsed;
-      if (before > 60 && left <= 60) this.emit({ k: 'msg', tx: '¡Último minuto!' });
-      if (before > 30 && left <= 30) this.emit({ k: 'msg', tx: '¡ÚLTIMOS 30 SEGUNDOS!' });
-      if (left <= 10 && left > 0 && Math.ceil(before) !== Math.ceil(left)) this.emit({ k: 'final', n: Math.ceil(left) });
+      if (!this.mode.untimed) {
+        if (before > 60 && left <= 60) this.emit({ k: 'msg', tx: '¡Último minuto!' });
+        if (before > 30 && left <= 30) this.emit({ k: 'msg', tx: '¡ÚLTIMOS 30 SEGUNDOS!' });
+        if (left <= 10 && left > 0 && Math.ceil(before) !== Math.ceil(left)) this.emit({ k: 'final', n: Math.ceil(left) });
+      }
     }
 
     for (const c of this.bodies) { c.ppos.x = c.pos.x; c.ppos.y = c.pos.y; c.ppos.z = c.pos.z; }
@@ -400,6 +430,7 @@ export class Simulation {
       this.updateZones();
       this.updateStructures();
       this.updateDestructibles();
+      this.updateGadgets();
       this.updateTiles();
       this.updatePickups();
     }
@@ -507,20 +538,32 @@ export class Simulation {
   // ───────────────────────────── personajes ─────────────────────────────
 
   spawnPoint(ch: Character, idx: number): V3 {
-    const t = this.terrain;
-    const list = this.settings.teams === 'ffa' ? t.spawns.ffa : t.spawns.team[ch.team] ?? t.spawns.ffa;
+    const list = this.spawnList(ch);
     const pts = list.length ? list : [{ x: 0, y: 0, z: 0 }];
-    if (this.settings.teams === 'ffa') return { ...pts[(ch.id - 1) % pts.length] };
+    if (this.settings.teams === 'ffa' || this.coop) {
+      // Si hay más héroes que puntos, los que sobran salen al lado (no encimados).
+      const i = ch.id - 1, lap = Math.floor(i / pts.length);
+      const p = pts[i % pts.length];
+      return { ...p, x: p.x + lap * 0.95 * (p.x < 0 ? 1 : -1) };
+    }
     return { ...pts[idx % pts.length] };
   }
 
+  /** Puntos donde puede aparecer un héroe: los de todos en todos contra todos y en cooperativo; si no, los de su equipo. */
+  private spawnList(ch: Character): V3[] {
+    const t = this.terrain;
+    // Cooperativo: todo el equipo sale junto, del lado A.
+    if (this.coop && t.spawns.team[0].length) return t.spawns.team[0];
+    return this.settings.teams === 'ffa' ? t.spawns.ffa : t.spawns.team[ch.team] ?? t.spawns.ffa;
+  }
+
   private respawnPoint(ch: Character): V3 {
-    const list = this.settings.teams === 'ffa' ? this.terrain.spawns.ffa : this.terrain.spawns.team[ch.team];
+    const list = this.spawnList(ch);
     let best = list[0] ?? { x: 0, y: 0, z: 0 }, bestScore = -Infinity;
     for (const p of list) {
       if (this.cw.groundAt(p.x, p.z, 10) === -Infinity) continue;
       let near = Infinity;
-      for (const c of this.chars) {
+      for (const c of this.bodies) {
         if (!c.alive || c.team === ch.team) continue;
         near = Math.min(near, Math.hypot(c.pos.x - p.x, c.pos.z - p.z));
       }
@@ -531,7 +574,8 @@ export class Simulation {
   }
 
   private respawn(ch: Character) {
-    const p = this.respawnPoint(ch);
+    const at = this.mode.respawnAt?.(this, ch);
+    const p = at ? { x: at.x, y: this.groundY(at.x, at.z, 0), z: at.z } : this.respawnPoint(ch);
     ch.alive = true;
     ch.pos = { x: p.x, y: p.y + 5, z: p.z };
     ch.ppos = { ...ch.pos };
@@ -553,6 +597,7 @@ export class Simulation {
 
   charSpeed(ch: Character) {
     let s = ch.stats.speed;
+    if (ch.gunT > 0) s *= ch.gunMove;
     if (ch.slowT > 0) s *= 1 - ch.slowAmt;
     if (ch.hasteT > 0) s *= 1 + ch.hasteAmt;
     if (ch.action && !ch.action.lock) s *= ch.action.slow;
@@ -578,6 +623,7 @@ export class Simulation {
     if (ch.slowT > 0) { ch.slowT -= DT; if (ch.slowT <= 0) ch.slowAmt = 0; }
     if (ch.hasteT > 0) { ch.hasteT -= DT; if (ch.hasteT <= 0) ch.hasteAmt = 0; }
     if (ch.armorT > 0) { ch.armorT -= DT; if (ch.armorT <= 0) ch.armorAmt = 0; }
+    if (ch.gunT > 0) ch.gunT -= DT;
     for (const k in ch.cds) { const s = k as Slot; if (ch.cds[s] > 0) ch.cds[s] = Math.max(0, ch.cds[s] - DT); }
     for (const [id, t] of ch.bodyHits) if (this.tick - t > 30) ch.bodyHits.delete(id);
 
@@ -594,8 +640,10 @@ export class Simulation {
     if (act) {
       // Las habilidades salen cuando llega el bit (flanco): el cliente ya resolvió el apuntado
       // (tecla arma, clic izquierdo lanza) y manda un pulso de un tick con el cursor donde se lanzó.
-      for (const slot of ['q', 'e', 'f', 'r'] as AbilitySlot[]) {
-        if (pressed(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
+      if (this.rules.abilities) {
+        for (const slot of ['q', 'e', 'f', 'r'] as AbilitySlot[]) {
+          if (pressed(inp.b, pb, ABILITY_BTN[slot])) this.tryAbility(ch, slot, true);
+        }
       }
       if (ch.buffered) {
         ch.buffered.t -= DT;
@@ -606,7 +654,12 @@ export class Simulation {
           if (s === 'q' || s === 'e' || s === 'f' || s === 'r') this.tryAbility(ch, s, false);
         }
       }
-      if (this.rules.crafting) for (let i = 0; i < 3; i++) if (pressed(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
+      if (this.rules.crafting || this.rules.itemBoxes) for (let i = 0; i < 3; i++) if (pressed(inp.b, pb, ITEM_BTN[i])) this.tryItem(ch, i);
+      // Armas: la tecla de la primera habilidad cambia de arma y la de la ulti planta C4.
+      if (this.rules.weapons) {
+        if (pressed(inp.b, pb, BTN.Q)) swapWeapon(this, ch);
+        if (pressed(inp.b, pb, BTN.R)) plantC4(this, ch);
+      }
 
       // Empujón: mantener carga, soltar empuja (D-0028).
       if (held(inp.b, BTN.PUSH) && ch.cds.push <= 0) {
@@ -616,10 +669,13 @@ export class Simulation {
       if (ch.charging && released(inp.b, pb, BTN.PUSH)) this.doPush(ch);
 
       if (held(inp.b, BTN.BASIC) && ch.cds.basic <= 0 && !ch.charging && !ch.action) {
-        const b = HEROES[ch.hero].basic;
-        b.cast(this, ch, inp.ax, inp.az);
-        ch.cds.basic = b.cd;
-        ch.cdMax.basic = b.cd;
+        if (this.rules.weapons) fireWeapon(this, ch);
+        else {
+          const b = HEROES[ch.hero].basic;
+          b.cast(this, ch, inp.ax, inp.az);
+          ch.cds.basic = b.cd;
+          ch.cdMax.basic = b.cd;
+        }
       }
 
       if (this.rules.repair && held(inp.b, BTN.REPAIR) && ch.heat > 0 && ch.mats[ch.family] >= REPAIR_COST) {
@@ -657,6 +713,7 @@ export class Simulation {
     const out = this.mo;
     stepMove(ch, inp, mp, this.cw, DT, out);
 
+    if (out.bounced) this.emit({ k: 'gad', w: 'pad', i: -1, id: ch.id, x: round2(ch.pos.x), y: round2(ch.pos.y), z: round2(ch.pos.z) });
     if (out.jumped || out.airJumped) this.emit({ k: 'jump', id: ch.id, air: out.airJumped ? 1 : 0 });
     if (out.dashed) this.emit({ k: 'dash', id: ch.id, dx: Math.round(ch.dashX * 100) / 100, dz: Math.round(ch.dashZ * 100) / 100 });
     if (out.landed > 8) {
@@ -736,6 +793,7 @@ export class Simulation {
     const wasTumble = u.tumble > 0;
     u.input.b = 0;
     stepMove(u, u.input, mp, this.cw, DT, this.mo);
+    if (this.mo.bounced) this.emit({ k: 'gad', w: 'pad', i: -1, id: u.id, x: round2(u.pos.x), y: round2(u.pos.y), z: round2(u.pos.z) });
     for (const h of this.mo.wallHits) {
       if (!wasTumble || h.speed < WALL_SLAM_SPEED) continue;
       const launcher = this.recentLauncher(u);
@@ -953,10 +1011,11 @@ export class Simulation {
     let lethal = 0;
     if (!t.alive) {
       // La unidad murió con este golpe: solo el efecto.
-      this.emit({ k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: 0, f: spec.fx ?? t.family, id: t.id, a: attacker ? attacker.id : -1, h: Math.round(applied), st: stage, l: 0, dx: 0, dz: 0 });
+      if (!spec.quiet) this.emit({ k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: 0, f: spec.fx ?? t.family, id: t.id, a: attacker ? attacker.id : -1, h: Math.round(applied), st: stage, l: 0, dx: 0, dz: 0 });
       return true;
     }
-    let force = spec.kb * STAGE_KB[stage] * (isUnit ? 1 : 1 + 0.003 * (t.heat - STAGE_AT[stage])) * t.stats.kbTaken;
+    const byStage = spec.flat ? 1 : STAGE_KB[stage] * (isUnit ? 1 : 1 + 0.003 * (t.heat - STAGE_AT[stage]));
+    let force = spec.kb * byStage * t.stats.kbTaken;
     if (hadShield) force *= 0.6;
     if (t.kbImmune > 0) force = 0;
     let dx = spec.dirX, dz = spec.dirZ;
@@ -1000,7 +1059,7 @@ export class Simulation {
       t.slowAmt = Math.max(t.slowAmt, spec.slow[0]);
       t.slowT = Math.max(t.slowT, spec.slow[1]);
     }
-    this.emit({
+    if (!spec.quiet) this.emit({
       k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: Math.round(force * 10) / 10, f: spec.fx ?? t.family, id: t.id,
       a: attacker ? attacker.id : -1, h: Math.round(applied), st: t.stage, l: lethal, dx: Math.round(dx * 10) / 10, dz: Math.round(dz * 10) / 10,
     });
@@ -1191,8 +1250,13 @@ export class Simulation {
       }
     }
     if (!ok) return;
-    ch.cds[slot] = (it.cd ?? 10) * ch.stats.cdMul;
-    ch.cdMax[slot] = ch.cds[slot];
+    if (this.rules.itemBoxes) {
+      // Ítem de caja: se gasta al usarlo.
+      ch.actives[i] = null;
+    } else {
+      ch.cds[slot] = (it.cd ?? 10) * ch.stats.cdMul;
+      ch.cdMax[slot] = ch.cds[slot];
+    }
     this.emit({ k: 'cast', id: ch.id, s: slot });
   }
 
@@ -1638,11 +1702,15 @@ export class Simulation {
         const drops = ns === 3 ? 4 + (ns - d.stage - 1) : ns - d.stage;
         d.stage = ns;
         this.emit({ k: 'dstage', i: d.idx, s: ns, by: by ? by.id : -1 });
-        this.dropMaterials(d.kind, d.x, d.y + 0.8, d.z, drops);
+        if (!d.explosive) this.dropMaterials(d.kind, d.x, d.y + 0.8, d.z, drops);
         if (ns === 3) {
-          d.respawnT = DESTRUCT_RESPAWN;
+          d.respawnT = d.explosive ? BARREL.respawn : DESTRUCT_RESPAWN;
           this.obstaclesDirty = true;
           if (by) { this.addXp(by, XP_DESTRUCT); by.destroyed++; }
+          // Barril: explota y le pega a todos los que estén cerca (también a quien lo rompió).
+          if (d.explosive) {
+            this.blast(by, -1, d.x, d.y + 0.7, d.z, { radius: BARREL.radius, heat: BARREL.heat, kb: BARREL.kb, up: BARREL.up, destruct: BARREL.destruct, tile: BARREL.tile, fx: 'barrel' }, NO_MODS);
+          }
           return true;
         }
       }
@@ -1693,6 +1761,90 @@ export class Simulation {
       d.stage = 0;
       this.obstaclesDirty = true;
       this.emit({ k: 'dstage', i: d.idx, s: 0, by: -1 });
+    }
+  }
+
+  // ───────────────────────────── artefactos del mapa ─────────────────────────────
+
+  /** Golpe de un artefacto: no escala con la etapa y le da el crédito a quien había lanzado a la víctima. */
+  private gadgetHit(g: Gadget, t: Character, cd: number, spec: HitSpec): boolean {
+    if ((g.last.get(t.id) ?? -9999) > this.tick - cd * TICK_RATE) return false;
+    const by = this.recentLauncher(t);
+    if (!this.hit(t, by && by.team !== t.team ? by : null, { ...spec, flat: true })) return false;
+    g.last.set(t.id, this.tick);
+    return true;
+  }
+
+  private updateGadgets() {
+    const play = this.phase === 'play';
+    for (const g of this.gadgets) {
+      if (g.kind === 'box') {
+        if (!this.rules.itemBoxes) continue;
+        if (!g.on) {
+          g.t -= DT;
+          if (g.t <= 0) { g.on = true; this.emit({ k: 'gad', w: 'boxup', i: g.idx, id: -1, x: g.x, y: g.y, z: g.z }); }
+          continue;
+        }
+        if (!play) continue;
+        for (const c of this.chars) {
+          if (!c.alive || Math.abs(c.pos.y - g.y) > 1.6 || Math.hypot(c.pos.x - g.x, c.pos.z - g.z) > BOX.r) continue;
+          const free = c.actives.indexOf(null);
+          if (free < 0) continue;
+          const it = this.rng.pick(BOX_ITEMS);
+          c.actives[free] = it;
+          c.cds[ITEM_SLOT[free]] = 0;
+          g.on = false;
+          g.t = BOX.respawn;
+          this.emit({ k: 'gad', w: 'box', i: g.idx, id: c.id, x: g.x, y: g.y, z: g.z, it });
+          break;
+        }
+        continue;
+      }
+      if (!play) continue;
+      if (g.kind === 'bumper') {
+        for (const t of this.bodies) {
+          if (!t.alive || t.pos.y > g.y + 1.3 || t.pos.y < g.y - 1) continue;
+          const dx = t.pos.x - g.x, dz = t.pos.z - g.z;
+          if (Math.hypot(dx, dz) > BUMPER.r + CHAR_RADIUS) continue;
+          if (this.gadgetHit(g, t, BUMPER.cd, { heat: BUMPER.heat, kb: BUMPER.kb, up: BUMPER.up, dirX: dx, dirZ: dz, fx: 'bumper' })) {
+            this.emit({ k: 'gad', w: 'bumper', i: g.idx, id: t.id, x: g.x, y: g.y, z: g.z });
+          }
+        }
+      } else if (g.kind === 'rotor') {
+        const a = rotorAngle(g.idx, this.tick), dir = rotorDir(g.idx);
+        const ca = Math.cos(a), sa = Math.sin(a);
+        for (const t of this.bodies) {
+          if (!t.alive || t.pos.y > g.y + ROTOR.h || t.pos.y < g.y - 0.4) continue;
+          const dx = t.pos.x - g.x, dz = t.pos.z - g.z;
+          const along = dx * ca + dz * sa, perp = -dx * sa + dz * ca;
+          if (Math.abs(along) > ROTOR.len + CHAR_RADIUS * 0.5 || Math.abs(perp) > ROTOR.w + CHAR_RADIUS) continue;
+          // Lo empuja para donde va la barra en ese punto (cerca del eje, hacia afuera de la barra).
+          const sweep = along * dir;
+          const s = Math.abs(sweep) > 0.6 ? Math.sign(sweep) : Math.sign(perp) || 1;
+          const k = 0.6 + 0.4 * Math.min(1, Math.abs(along) / ROTOR.len);
+          if (this.gadgetHit(g, t, ROTOR.cd, { heat: ROTOR.heat, kb: ROTOR.kb * k, up: ROTOR.up, dirX: -sa * s, dirZ: ca * s, fx: 'rotor' })) {
+            this.emit({ k: 'gad', w: 'rotor', i: g.idx, id: t.id, x: round2(t.pos.x), y: round2(t.pos.y), z: round2(t.pos.z) });
+          }
+        }
+      } else if (g.kind === 'geyser') {
+        if (geyserPhase(g.idx, this.tick) !== 'burst') { g.fired = false; continue; }
+        if (!g.fired) {
+          g.fired = true;
+          this.emit({ k: 'gad', w: 'geyser', i: g.idx, id: -1, x: g.x, y: g.y, z: g.z });
+        }
+        for (const t of this.bodies) {
+          if (!t.alive || t.pos.y > g.y + 2.5 || t.pos.y < g.y - 1) continue;
+          const dx = t.pos.x - g.x, dz = t.pos.z - g.z;
+          const d = Math.hypot(dx, dz);
+          if (d > GEYSER.r + CHAR_RADIUS * 0.5) continue;
+          // El chorro suma heat y te manda para arriba sin tumbarte: en el aire seguís teniendo el control.
+          if (!this.gadgetHit(g, t, GEYSER.burst + 0.2, { heat: GEYSER.heat, kb: 0, dirX: dx, dirZ: dz, fx: 'geyser' })) continue;
+          if (!t.alive || t.kbImmune > 0 || (t.action && t.action.direct)) continue;
+          t.vel.y = Math.max(t.vel.y, GEYSER.up);
+          t.grounded = false;
+          if (d > 0.2) { t.vel.x += (dx / d) * GEYSER.push; t.vel.z += (dz / d) * GEYSER.push; }
+        }
+      }
     }
   }
 

@@ -4,8 +4,8 @@ import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs } 
 import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
 import { ACTIONS, applyPreset, currentPreset, getBinds, keyLabel, keyName, PRESETS, RESERVED, setBind } from './game/keybinds';
-import { ARENA_MAP_IDS, MAPS } from './core/maps';
-import { MODE_INFO } from './core/modes';
+import { GAME_IDS, GAMES, gameOf, LOBBY_OPTIONS, mapsFor, MODE_INFO, sidesOf, type GameId } from './core/games';
+import { MAPS } from './core/maps';
 import type { LobbyState, MatchInit, MatchResultInfo } from './core/protocol';
 import { FAMILY_COLORS, FAMILY_NAMES, HERO_IDS, type HeroId, type MatchSettings, type ModeId } from './core/types';
 import { db } from './db/persistence';
@@ -20,7 +20,7 @@ import { clear, colorHex, fmtTime, h, modal, toast } from './ui/dom';
 import { fullscreenButton, fullscreenSupported, isFullscreen, toggleFullscreen } from './ui/fullscreen';
 import { HeroPreview } from './ui/heroPreview';
 import { THEMES } from './render/themes';
-import { rulesFor, RULESETS, RULESET_IDS, unlockLevel, type RulesetId } from './core/rules';
+import { rulesFor, RULESETS, unlockLevel, type RulesetId } from './core/rules';
 import { assetsReady, loadAssets } from './assets/registry';
 import { tip } from './ui/tooltip';
 import { abilityTip, heroTip, modeTip, rulesTip } from './ui/tips';
@@ -40,6 +40,9 @@ export class App {
   private chatLog: { from: string; text: string }[] = [];
   private lobbyEl: HTMLElement | null = null;
   private escMenu: (() => void) | null = null;
+  /** Juego elegido en el menú: con él se crea la sala o la práctica. */
+  private menuGame: GameId = getPrefs().game in GAMES ? (getPrefs().game as GameId) : 'arena';
+  private attractT = 0;
 
   constructor(root: HTMLElement) {
     this.stage = h('div', { class: 'stage' });
@@ -52,7 +55,7 @@ export class App {
     // Cada botón suena al pasar el mouse: la UI también "se siente".
     let lastHover: Element | null = null;
     document.addEventListener('mouseover', (e) => {
-      const b = (e.target as HTMLElement).closest?.('.btn, .herocard, .room, .hatbtn, .tab');
+      const b = (e.target as HTMLElement).closest?.('.btn, .herocard, .gamecard, .room, .hatbtn, .tab');
       if (b && b !== lastHover && !(b as HTMLButtonElement).disabled) audio.play('hover', 0.25);
       lastHover = b;
     });
@@ -72,9 +75,7 @@ export class App {
     this.preview?.dispose();
     this.preview = null;
     this.lobbyEl = null;
-    if (!this.attract) {
-      try { this.attract = new AttractMode(this.stage); } catch (e) { console.warn('attract', e); }
-    }
+    this.showcase(this.menuGame);
     audio.setMusic('menu');
     const p = getPrefs();
     clear(this.ui);
@@ -87,7 +88,7 @@ export class App {
       if (!open.length) { roomsBox.append(h('div', { class: 'muted' }, 'No hay salas abiertas ahora. ¡Creá una!')); return; }
       for (const r of open) {
         roomsBox.append(h('button', { class: 'room', onclick: () => this.join(r.code) },
-          h('b', null, r.code), h('span', null, `${r.host} · ${MODE_INFO[r.mode as ModeId]?.name ?? r.mode} · ${MAPS[r.map]?.name ?? r.map}`),
+          h('b', null, r.code), h('span', null, `${r.host} · ${roomGame(r.mode)} · ${MAPS[r.map]?.name ?? r.map}`),
           h('em', null, `${r.players}/${r.max}${r.inMatch ? ' · jugando' : ''}`)));
       }
     };
@@ -101,29 +102,60 @@ export class App {
       ? h('div', { class: 'netinfo ok' }, '🟢 Online: Supabase configurado')
       : h('div', { class: 'netinfo warn' }, '🟡 Modo local: solo entre pestañas de este navegador. ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSettings(true); } }, 'Configurar Supabase'), ' para jugar con amigos.');
 
-    this.ui.append(h('div', { class: 'menu' },
+    // La vitrina: una tarjeta por juego y, debajo, el elegido con sus dos formas de entrar.
+    const hub = h('div', { class: 'hub-games' });
+    const renderGames = () => {
+      const g = GAMES[this.menuGame];
+      clear(hub);
+      hub.append(
+        h('div', { class: 'games' }, GAME_IDS.map((id) => this.gameCard(id, id === g.id, () => {
+          if (id === this.menuGame) return;
+          audio.play('ui');
+          this.menuGame = id;
+          savePrefs({ game: id });
+          renderGames();
+          this.showcase(id, 350);
+        }))),
+        h('div', { class: 'gamebar', style: { '--c': colorHex(g.color) } },
+          h('div', { class: 'gb-info' },
+            h('h2', null, `${g.icon} ${g.name}`, h('small', null, g.tagline)),
+            h('p', null, g.desc),
+            h('div', { class: 'tags' }, h('span', { class: 'tag strong' }, `👥 ${g.players}`), g.highlights.map((t) => h('span', { class: 'tag' }, t)))),
+          h('div', { class: 'gb-actions' },
+            h('button', { class: 'btn primary big', onclick: () => this.host(false) }, '🎮 Crear sala'),
+            h('button', { class: 'btn big', onclick: () => this.host(true) }, g.sides === 'coop' ? '🤖 Jugar con bots' : '🤖 Práctica vs bots'),
+            h('button', { class: 'btn ghost small', onclick: () => this.showGameHelp(g.id) }, `❓ Cómo se juega ${g.name}`))),
+      );
+    };
+    renderGames();
+
+    this.ui.append(h('div', { class: 'menu hub' },
       h('div', { class: 'logo' }, h('h1', null, ...GAME_TITLE.split('').map((c, i) => h('span', { style: { animationDelay: `${i * 0.08}s` } }, c))), h('p', null, GAME_SUBTITLE)),
-      this.profileCard(),
-      h('div', { class: 'panel' },
-        h('label', null, 'Nombre'), name,
-        h('div', { class: 'row' },
-          h('button', { class: 'btn primary big', onclick: () => this.host(false) }, '🎮 Crear sala'),
-          h('button', { class: 'btn big', onclick: () => this.host(true) }, '🤖 Práctica vs bots'),
+      h('div', { class: 'hub-wrap' },
+        hub,
+        h('div', { class: 'hub-bottom' },
+          h('div', { class: 'panel' },
+            h('div', { class: 'row join' }, h('label', null, 'Unirse'), code, h('button', { class: 'btn', onclick: () => code.value.length >= 4 ? this.join(code.value) : toast('Poné el código de 5 letras', 'error') }, 'Unirse')),
+            h('h3', null, 'Salas abiertas'), roomsBox,
+            netInfo,
+          ),
+          h('div', { class: 'hub-side' },
+            this.profileCard(),
+            h('div', { class: 'panel' },
+              h('div', { class: 'row join' }, h('label', null, 'Nombre'), name),
+              h('div', { class: 'hub-links' },
+                h('button', { class: 'btn ghost', onclick: () => this.showHelp() }, '❓ Controles'),
+                h('button', { class: 'btn ghost', onclick: () => this.showHeroes() }, '🧱 Héroes'),
+                h('button', { class: 'btn ghost', onclick: () => this.showHistory() }, '🏆 Historial'),
+                h('button', { class: 'btn ghost', onclick: () => this.showAchievements() }, '🏅 Logros'),
+                h('button', { class: 'btn ghost', onclick: () => this.showSettings() }, '⚙️ Ajustes'),
+                h('button', { class: 'btn ghost', title: 'Todo lo que hoy es procedural y cómo reemplazarlo por archivos', onclick: () => openGallery() }, '🧩 Assets'),
+                fullscreenButton(),
+              ),
+            ),
+          ),
         ),
-        h('div', { class: 'row join' }, code, h('button', { class: 'btn', onclick: () => code.value.length >= 4 ? this.join(code.value) : toast('Poné el código de 5 letras', 'error') }, 'Unirse')),
-        h('h3', null, 'Salas abiertas'), roomsBox,
-        h('div', { class: 'row small' },
-          h('button', { class: 'btn ghost', onclick: () => this.showHelp() }, '❓ Cómo se juega'),
-          h('button', { class: 'btn ghost', onclick: () => this.showHeroes() }, '🧱 Héroes'),
-          h('button', { class: 'btn ghost', onclick: () => this.showHistory() }, '🏆 Historial'),
-          h('button', { class: 'btn ghost', onclick: () => this.showAchievements() }, '🏅 Logros'),
-          h('button', { class: 'btn ghost', onclick: () => this.showSettings() }, '⚙️ Ajustes'),
-          h('button', { class: 'btn ghost', title: 'Todo lo que hoy es procedural y cómo reemplazarlo por archivos', onclick: () => openGallery() }, '🧩 Assets'),
-          fullscreenButton(),
-        ),
-        netInfo,
       ),
-      h('div', { class: 'credits' }, `${keyName('up')}${keyName('left')}${keyName('down')}${keyName('right')} mover · ${keyName('jump')} saltar · Clic pegar · Clic derecho empujar (mantené) · ${keyName('q')} ${keyName('e')} ${keyName('f')} ${keyName('r')} apuntar y clic lanzar`),
     ));
     if (!getPrefs().seenHelp) { savePrefs({ seenHelp: true }); setTimeout(() => this.showHelp(), 600); }
     if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
@@ -132,8 +164,43 @@ export class App {
   }
 
   private stopAttract() {
+    clearTimeout(this.attractT);
     this.attract?.dispose();
     this.attract = null;
+  }
+
+  /** La vitrina: una partida de bots de ese juego corriendo detrás del menú y de la sala. */
+  private showcase(id: GameId, delay = 0) {
+    clearTimeout(this.attractT);
+    if (this.attract?.game === id) return;
+    const swap = () => {
+      this.attract?.dispose();
+      this.attract = null;
+      try { this.attract = new AttractMode(this.stage, id); } catch (e) { console.warn('attract', e); }
+    };
+    if (delay) this.attractT = window.setTimeout(swap, delay); else swap();
+  }
+
+  private gameCard(id: GameId, on: boolean, onPick: () => void) {
+    const g = GAMES[id];
+    return h('button', { class: 'gamecard' + (on ? ' on' : ''), style: { '--c': colorHex(g.color) }, onclick: onPick },
+      h('i', null, g.icon), h('em', null, `👥 ${g.players}`), h('b', null, g.name), h('span', null, g.tagline));
+  }
+
+  /** El host cambia de juego sin salir de la sala. */
+  private pickGame(current: GameId) {
+    const close = modal('Elegí el juego', h('div', { class: 'games' }, GAME_IDS.map((id) => this.gameCard(id, id === current, () => {
+      audio.play('ui');
+      close();
+      if (id !== current && this.session?.isHost) (this.session as HostSession).setSettings({ mode: GAMES[id].modes[0] });
+    }))), [{ label: 'Cancelar' }], 'wide');
+  }
+
+  private showGameHelp(id: GameId) {
+    const g = GAMES[id];
+    const body = h('div', { class: 'help game-help' });
+    body.innerHTML = g.modes.map((m) => `<div class="gh-mode">${modeTip(m)}</div>`).join('');
+    modal(`${g.icon} ${g.name}`, body, [{ label: '¡Entendido!', kind: 'primary' }], g.modes.length > 1 ? 'wide' : '');
   }
 
   // ───────────── sesiones ─────────────
@@ -162,7 +229,8 @@ export class App {
     this.showConnecting(offline ? 'Preparando práctica…' : 'Creando sala…');
     try {
       await s.open();
-      if (offline) s.setSettings({ bots: 3, botLevel: 2 });
+      const g = GAMES[this.menuGame];
+      s.setSettings({ mode: g.modes[0], bots: offline ? g.practiceBots : 0, botLevel: 2 });
     } catch (e: any) {
       toast('No se pudo crear la sala: ' + (e?.message ?? e), 'error', 6000);
       this.session = null;
@@ -255,9 +323,14 @@ export class App {
     const chatFocused = document.activeElement === prevChat;
     clear(root);
 
+    const game = gameOf(l.settings.mode);
+    this.showcase(game.id, 300);
     const link = `${location.origin}${location.pathname}?sala=${l.code}`;
     const header = h('div', { class: 'lobby-head' },
       h('button', { class: 'btn ghost', onclick: () => this.leave() }, '← Salir'),
+      h('div', { class: 'gamebadge', style: { '--c': colorHex(game.color) } },
+        h('i', null, game.icon), h('div', null, h('b', null, game.name), h('span', null, game.tagline)),
+        isHost ? h('button', { class: 'btn small', onclick: () => this.pickGame(game.id) }, 'Cambiar juego') : null),
       offline
         ? h('div', { class: 'codebox' }, h('span', null, 'Práctica'), h('b', { style: { letterSpacing: '1px' } }, 'vs bots'))
         : h('div', { class: 'codebox' }, h('span', null, 'Código de sala'), h('b', null, l.code),
@@ -265,8 +338,9 @@ export class App {
       h('div', { class: 'lobby-net' }, offline ? '' : hasSupabase() ? '🟢 Online' : '🟡 Local (pestañas)'),
     );
 
-    // Equipos
-    const teamMode = l.settings.teams === 'teams' || l.settings.mode === 'moba';
+    // Equipos: cada juego dice cómo se reparten (core/games.ts).
+    const sides = sidesOf(l.settings);
+    const teamMode = sides === 'teams';
     const humans = l.players;
     const botsN = l.settings.bots;
     const teamsBox = h('div', { class: 'teams' });
@@ -274,7 +348,7 @@ export class App {
     for (const t of cols) {
       const list = teamMode ? humans.filter((p) => p.team === t) : humans;
       const col = h('div', { class: 'team', style: { '--c': t >= 0 ? colorHex(TEAM_COLORS[t]) : '#bbb' } },
-        h('h3', null, t >= 0 ? `Equipo ${TEAM_NAMES[t]}` : 'Todos contra todos'),
+        h('h3', null, t >= 0 ? `Equipo ${TEAM_NAMES[t]}` : sides === 'coop' ? 'Todos juntos' : 'Todos contra todos'),
         ...list.map((p) => h('div', { class: 'pl' + (p.pid === s.localPid ? ' me' : '') + (p.connected ? '' : ' off') },
           h('span', { class: 'dot', style: { background: colorHex(FAMILY_COLORS[HEROES[p.hero].family]) } }),
           p.hat && p.hat !== 'none' ? h('span', { class: 'hat-ic' }, HAT_BY_ID[p.hat]?.icon ?? '') : null,
@@ -304,14 +378,21 @@ export class App {
       h('p', null, sel.desc),
       h('p', { class: 'passive' }, '⚙️ ', sel.passive),
       h('ul', null,
-        h('li', null, h('b', null, `Clic · ${sel.basic.name}: `), sel.basic.desc),
+        rules.weapons
+          ? h('li', null, h('b', null, 'Clic · Disparar: '), 'empezás con la pistola (no se queda sin balas) y una uzi o una escopeta cargada. Más armas y munición caen en cajas.')
+          : h('li', null, h('b', null, `Clic · ${sel.basic.name}: `), sel.basic.desc),
         h('li', null, h('b', null, 'Clic derecho · Empujón: '), 'mantené para cargar. Es lo que saca rivales del mapa.'),
         rules.dash ? h('li', null, h('b', null, 'Shift · Dash: '), 'ráfaga corta para entrar, esquivar o recuperarte.') : null,
-        ...(['q', 'e', 'f', 'r'] as const).map((k) => {
+        // Los poderes solo se listan en los juegos que los usan.
+        ...(rules.abilities ? (['q', 'e', 'f', 'r'] as const).map((k) => {
           const a = sel.abilities[k];
           const meta = k === 'r' && rules.ultCharge ? ' (se carga pegando)' : rules.progression ? ` (nv ${unlockLevel(rules, a)}, ${a.cd}s)` : ` (${a.cd}s)`;
           return tip(h('li', null, h('b', null, `${keyName(k)} · ${a.icon} ${a.name}`, h('small', null, meta), ': '), a.desc), () => abilityTip(sel.id, k, rules));
-        }),
+        }) : [
+          rules.weapons ? h('li', null, h('b', null, `${keyName('q')} · Cambiar de arma: `), 'entre la pistola y la que hayas agarrado.') : null,
+          rules.weapons ? h('li', null, h('b', null, `${keyName('r')} · C4: `), 'una carga a tus pies que explota a los 2 segundos. No lastima a tu equipo.') : null,
+          h('li', { class: 'muted' }, `En ${game.name} no se usan los poderes del héroe: elegilo por su peso y su velocidad.`),
+        ]),
       ),
     );
 
@@ -323,26 +404,30 @@ export class App {
       h('select', { class: 'input', disabled: dis, onchange: (e: Event) => on((e.target as HTMLSelectElement).value) },
         opts.map(([v, label]) => h('option', { value: v, selected: v === value }, label)));
     const humansN = humans.filter((p) => p.connected).length;
-    const moba = st.mode === 'moba';
+    // Lo que se puede tocar sale de la definición del juego y del modo: acá no se pregunta por ninguno en particular.
+    const info = MODE_INFO[st.mode];
     const settings = h('div', { class: 'settings' },
-      h('h3', null, 'Partida', isHost ? null : h('small', null, ' (la configura el host)')),
-      tip(h('label', null, 'Modo ⓘ'), () => modeTip(st.mode)), select(st.mode, (Object.keys(MODE_INFO) as ModeId[]).map((m) => [m, MODE_INFO[m].name]), (v) => set(modePatch(st, v as ModeId))),
-      h('p', { class: 'muted small' }, MODE_INFO[st.mode].desc),
-      moba
-        ? [tip(h('label', null, 'Reglas ⓘ'), () => rulesTip('moba')), h('p', { class: 'muted small' }, `${RULESETS.moba.icon} ${RULESETS.moba.name}: ${RULESETS.moba.desc}`)]
-        : [tip(h('label', null, 'Reglas ⓘ'), () => rulesTip(rules.id)),
-          select(rules.id, RULESET_IDS.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
-          h('p', { class: 'muted small' }, rules.desc)],
+      tip(h('h3', null, `${game.icon} ${game.name} ⓘ`, isHost ? null : h('small', null, ' (la configura el host)')), () => modeTip(st.mode)),
+      game.modes.length > 1
+        ? [h('label', null, 'Modo'), select(st.mode, game.modes.map((m) => [m, MODE_INFO[m].name]), (v) => set({ mode: v as ModeId }))]
+        : null,
+      h('p', { class: 'muted small' }, info.desc),
+      game.rulesets.length > 1
+        ? [tip(h('label', null, 'Reglas ⓘ'), () => rulesTip(rules.id)),
+          select(rules.id, game.rulesets.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
+          h('p', { class: 'muted small' }, rules.desc)]
+        : tip(h('p', { class: 'muted small' }, h('b', null, 'Reglas ⓘ · '), rules.desc), () => rulesTip(rules.id)),
       h('label', null, 'Mapa'),
-      moba
-        ? h('p', { class: 'muted small' }, `Automático según los equipos: ${MAPS.puente.name} (1 línea) hasta 2v2 · ${MAPS.cornisas.name} (2 líneas) en 3v3.`)
-        : select(st.map, ARENA_MAP_IDS.map((id) => [id, `${MAPS[id].name} (${MAPS[id].players})`]), (v) => set({ map: v })),
+      game.autoMap
+        ? h('p', { class: 'muted small' }, game.autoMap)
+        // (el formato que anuncia cada arena, "2v2 · FFA", solo dice algo donde hay equipos que elegir)
+        : select(st.map, mapsFor(game).map((id) => [id, game.sides === 'coop' ? MAPS[id].name : `${MAPS[id].name} (${MAPS[id].players})`]), (v) => set({ map: v })),
       h('label', null, 'Tema visual'), select(st.theme ?? 'neon', THEMES.map((t) => [t.id, `${t.icon} ${t.name}`]), (v) => set({ theme: v })),
-      moba ? null : [h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' }))],
-      st.mode === 'stock' ? [h('label', null, 'Vidas'), select(String(st.lives), [1, 2, 3, 4, 5].map((n) => [String(n), String(n)]), (v) => set({ lives: +v }))] : null,
-      st.mode === 'kills' ? [h('label', null, 'Ring-outs para ganar'), select(String(st.killTarget), [5, 10, 15, 20].map((n) => [String(n), String(n)]), (v) => set({ killTarget: +v }))] : null,
-      st.mode === 'koth' ? [h('label', null, 'Puntos para ganar'), select(String(st.kothTarget), [60, 100, 150].map((n) => [String(n), String(n)]), (v) => set({ kothTarget: +v }))] : null,
-      h('label', null, moba ? 'Tiempo (después: muerte súbita)' : 'Tiempo límite'), select(String(st.timeLimit), [300, 480, 600, 900, 1200].map((n) => [String(n), fmtTime(n)]), (v) => set({ timeLimit: +v })),
+      game.sides === 'choice' ? [h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' }))] : null,
+      info.options.flatMap((o) => [
+        h('label', null, info.labels?.[o] ?? LOBBY_OPTIONS[o].label),
+        select(String(st[o]), LOBBY_OPTIONS[o].values.map((n, i) => [String(n), LOBBY_OPTIONS[o].names?.[i] ?? (o === 'timeLimit' ? fmtTime(n) : String(n))]), (v) => set({ [o]: +v })),
+      ]),
       h('label', null, `Bots (máx ${MAX_PLAYERS - humansN})`), select(String(st.bots), Array.from({ length: MAX_PLAYERS - humansN + 1 }, (_, i) => [String(i), String(i)]), (v) => set({ bots: +v })),
       h('label', null, 'Dificultad de bots'), select(String(st.botLevel), [['1', 'Fácil'], ['2', 'Normal'], ['3', 'Difícil']], (v) => set({ botLevel: +v as 1 | 2 | 3 })),
     );
@@ -425,9 +510,7 @@ export class App {
     this.escMenu?.();
     this.escMenu = null;
     const l = this.session?.lobby;
-    if (!this.attract) {
-      try { this.attract = new AttractMode(this.stage); } catch { /* */ }
-    }
+    this.showcase(l ? gameOf(l.settings.mode).id : this.menuGame);
     audio.setMusic('menu');
     if (l) this.renderLobby(l);
   }
@@ -648,13 +731,9 @@ function setRoomParam(code: string | null) {
   } catch { /* */ }
 }
 
-/** Cambiar de modo: el Asedio trae sus reglas, formato por equipos y un tiempo más largo; al salir se vuelve a lo de arena. */
-function modePatch(st: MatchSettings, mode: ModeId): Partial<MatchSettings> {
-  if (mode === 'moba') return { mode, rules: 'moba', teams: 'teams', timeLimit: Math.max(900, st.timeLimit) };
-  return {
-    mode,
-    rules: st.rules === 'moba' ? 'brawl' : st.rules,
-    map: MAPS[st.map]?.kind === 'moba' ? 'cantera' : st.map,
-    timeLimit: st.mode === 'moba' ? 600 : st.timeLimit,
-  };
+/** Cómo se anuncia una sala en la lista: el juego y, si tiene varios modos, cuál. */
+function roomGame(mode: string): string {
+  const g = gameOf(mode);
+  const m = MODE_INFO[mode as ModeId];
+  return `${g.icon} ${g.name}${m && g.modes.length > 1 ? ` (${m.name})` : ''}`;
 }

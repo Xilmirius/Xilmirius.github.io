@@ -4,7 +4,9 @@ import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
 import { ITEMS, ITEM_BY_ID, ITEM_TAGS, type ItemTag } from '../core/items';
-import { MODE_INFO } from '../core/modes';
+import { gameOf, MODE_INFO } from '../core/games';
+import { CRATE_INFO, CRATE_KINDS, MISSIONS } from '../core/horde';
+import { WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
 import type { MatchResultInfo, PlayerResult, RosterInfo } from '../core/protocol';
 import type { Command } from '../core/sim';
@@ -12,7 +14,7 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, dashTip, itemIdTip, itemTip, levelTip, matTip, pushTip, recallTip, routeTip, stageTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, c4Tip, dashTip, gunTip, itemIdTip, itemTip, levelTip, matTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchReward } from '../game/profile';
@@ -27,6 +29,11 @@ import { RECALL_TIME } from '../core/constants';
 
 const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
 /** Tecla que se muestra en cada casillero: el mouse es fijo, el resto sale de las teclas asignadas. */
+/** Avisos del host que llegan como código (los que son texto se muestran tal cual). */
+const DENY_TEXT: Record<string, string> = {
+  weapon: 'Todavía no tenés otra arma: agarrá una caja de suministros',
+  c4: 'Sin cargas de C4: vienen en las cajas 🧨',
+};
 const keyFor = (slot: string) => (slot === 'basic' ? 'Clic' : slot === 'push' ? 'Clic D' : keyName(slot as ActionId));
 
 export class Hud {
@@ -45,9 +52,11 @@ export class Hud {
   private forge: HTMLDivElement;
   private board: HTMLDivElement;
   private results: HTMLDivElement | null = null;
+  private gunEl: HTMLElement | null = null;
   private slotEls = new Map<string, { root: HTMLElement; cd: HTMLElement; txt: HTMLElement; lock: HTMLElement; icon: HTMLElement; mut: HTMLElement }>();
   private lastMe: MeFrame | null = null;
   private lastLocal: CharFrame | null = null;
+  private lastMode = '';
   private forgeTab: 'items' | 'mut' = 'items';
   private forgeFilter: ItemTag | 'all' = 'all';
   private forgeKey = '';
@@ -128,7 +137,7 @@ export class Hud {
   private renderHints() {
     const r = this.rules;
     const k = (a: ActionId) => `<b>${keyName(a)}</b>`;
-    const hints = [`${k('q')} ${k('e')} ${k('f')} ${k('r')} apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela`, r.dash && `${k('dash')} dash`, r.recall && `${k('recall')} volver a la base`, r.crafting && `${k('forge')} forja${r.forgeAtBase ? ' (en tu base)' : ''}`, r.repair && `${k('repair')} reparar`, `${k('board')} tabla`, '<b>Esc</b> menú'];
+    const hints = [r.weapons ? `<b>clic izq</b> disparar (mantené) · <b>clic der</b> empujón · ${k('q')} cambiar arma · ${k('r')} C4` : r.abilities ? `${k('q')} ${k('e')} ${k('f')} ${k('r')} apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela` : '<b>clic izq</b> golpe · <b>clic der</b> empujón', r.itemBoxes && `${k('i1')} ${k('i2')} ${k('i3')} ítems de las cajas`, r.dash && `${k('dash')} dash`, r.recall && `${k('recall')} volver a la base`, r.crafting && `${k('forge')} forja${r.forgeAtBase ? ' (en tu base)' : ''}`, r.repair && `${k('repair')} reparar`, `${k('board')} tabla`, '<b>Esc</b> menú'];
     this.hint.innerHTML = hints.filter(Boolean).join(' · ');
   }
 
@@ -175,14 +184,27 @@ export class Hud {
       return root;
     };
     const abilityContent = (s: AbilitySlot) => () => abilityTip(me.hero, s, this.rules, { mut: this.lastMe?.mut[s], level: this.lastLocal?.lv, ult: this.lastMe?.ult });
+    if (this.rules.weapons) {
+      // Armas: el arma en la mano con sus balas y las dos teclas que quedan (cambiar de arma y C4).
+      this.gunEl = tip(h('div', { class: 'gunbox' }), () => gunTip(this.lastLocal?.wp ?? 0));
+      this.bar.append(...[
+        this.gunEl,
+        mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
+        this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
+        h('div', { class: 'sep' }),
+        mk('q', document.createTextNode('🔁'), () => swapTip(this.lastLocal?.wp === 0 ? this.lastMe?.pri ?? -1 : 0)),
+        mk('r', document.createTextNode('🧨'), c4Tip),
+      ].filter((x): x is HTMLDivElement => !!x));
+      return;
+    }
     this.bar.append(...[
       mk('basic', iconNode(`icon.basic.${me.hero}`, hero.basic.kind === 'melee' ? '👊' : '🎯'), () => basicTip(me.hero), 'small'),
       mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
       this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
       this.rules.recall ? mk('recall', iconNode('icon.recall', '🏠'), recallTip, 'small') : null,
-      h('div', { class: 'sep' }),
-      ...(['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => mk(s, iconNode(`icon.ability.${me.hero}.${s}`, hero.abilities[s].icon), abilityContent(s), s === 'r' ? 'ult' : '')),
-      this.rules.crafting ? [
+      this.rules.abilities ? h('div', { class: 'sep' }) : null,
+      ...(this.rules.abilities ? (['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => mk(s, iconNode(`icon.ability.${me.hero}.${s}`, hero.abilities[s].icon), abilityContent(s), s === 'r' ? 'ult' : '')) : []),
+      this.rules.crafting || this.rules.itemBoxes ? [
         h('div', { class: 'sep' }),
         ...[0, 1, 2].map((i) => mk(`i${i + 1}`, document.createTextNode(''), () => itemIdTip(this.lastMe?.act[i] ?? null), 'item')),
       ] : [],
@@ -192,6 +214,7 @@ export class Hud {
   update(w: WorldFrame, local: CharFrame | null, me: MeFrame | null, dt: number, net: { ping: number; fps: number; showFps: boolean; kind: string }) {
     this.lastMe = me;
     this.lastLocal = local;
+    this.lastMode = w.mode.id;
     this.renderTop(w);
     this.renderCenter(w, local, dt);
     this.minimap?.draw(w, this.localId, dt);
@@ -211,12 +234,48 @@ export class Hud {
   private renderTop(w: WorldFrame) {
     const m = w.mode;
     if (m.moba) { this.renderMobaTop(w); return; }
+    if (m.horde) {
+      // Horda: la oleada, las vidas del equipo y la misión en curso con su barra.
+      const hd = m.horde;
+      const mi = MISSIONS[Math.min(hd.step, MISSIONS.length - 1)];
+      const pct = Math.round(hd.p * 100);
+      const boss = mi.kind === 'boss';
+      let state: string;
+      if (hd.step >= MISSIONS.length) state = '¡adentro!';
+      else if (mi.kind === 'nests') state = hd.nests === 1 ? 'queda 1' : `quedan ${hd.nests}`;
+      else if (mi.kind === 'fetch') state = `${Math.round(hd.p * mi.need)}/${mi.need}`;
+      else if (boss) state = `${100 - pct}% de vida`;
+      else if (hd.in < hd.need) state = mi.kind === 'extract' ? `adentro ${hd.in} de ${hd.need}` : 'entrá a la zona';
+      else state = m.zone?.contested ? `⚔️ con zombis adentro · ${pct}%` : `${pct}%`;
+      const wave = hd.wave === 0 ? `la horda llega en ${hd.next} s` : `oleada ${hd.wave} · próxima en ${hd.next} s · ${hd.left} zombis`;
+      const html = `<div class="mode">Horda · ${wave}</div>`
+        + `<div class="scores"><span class="score" style="--c:${colorHex(TEAM_COLORS[0])}"><i></i>Vidas <b>${hd.lives}</b></span><span class="score" style="--c:#8fd14f"><i></i>Zombis caídos <b>${m.scores[1] ?? 0}</b></span></div>`
+        + `<div class="mission${boss ? ' boss' : ''}"><em>Misión ${Math.min(hd.step + 1, MISSIONS.length)}/${MISSIONS.length}</em><b>${mi.title}</b><span class="mbar"><i style="width:${boss ? 100 - pct : pct}%"></i></span><small>${state}</small></div>`;
+      if (this.top.innerHTML !== html) this.top.innerHTML = html;
+      return;
+    }
+    if (m.race) {
+      const rc = m.race;
+      const idx = this.roster.findIndex((r) => r.id === this.localId);
+      const mine = idx >= 0 ? rc.next[idx] ?? 0 : 0;
+      const place = rc.order.indexOf(this.localId);
+      // Puesto en vivo: cuántos van más adelante que vos.
+      const rank = 1 + m.scores.filter((s, i) => i !== idx && s > (m.scores[idx] ?? 0)).length;
+      const you = idx < 0 ? '' : place >= 0 ? `¡Llegaste ${place + 1}º!` : `Vas ${rank}º · puerta ${Math.min(mine + 1, rc.gates)}/${rc.gates}`;
+      const end = rc.end >= 0 ? ` · <b class="bad">termina en ${Math.ceil(m.time)} s</b>` : ` · <span class="time">${fmtTime(m.time)}</span>`;
+      const board = this.roster.map((r, i) => ({ r, s: m.scores[i] ?? 0, fin: rc.order.indexOf(r.id) }))
+        .sort((a, b) => (a.fin >= 0 ? a.fin - 100 : 0) - (b.fin >= 0 ? b.fin - 100 : 0) || b.s - a.s)
+        .map(({ r, s, fin }) => `<span class="score" style="--c:${colorHex(TEAM_COLORS[r.team % TEAM_COLORS.length])}"><i></i>${esc(r.name)} <b>${fin >= 0 ? `🏁${fin + 1}º` : s + '%'}</b></span>`).join('');
+      const html = `<div class="mode">Carrera${end}${you ? ' · ' + you : ''}</div><div class="scores">${board}</div>`;
+      if (this.top.innerHTML !== html) this.top.innerHTML = html;
+      return;
+    }
     const teams = m.scores.map((s, i) => {
       const r = this.roster.find((x) => x.team === i);
-      const label = this.roster.length && this.isFfa() ? (r?.name ?? `J${i + 1}`) : TEAM_NAMES[i];
+      const label = this.roster.length && this.isFfa() ? esc(r?.name ?? `J${i + 1}`) : TEAM_NAMES[i];
       return `<span class="score" style="--c:${colorHex(TEAM_COLORS[i % TEAM_COLORS.length])}"><i></i>${label} <b>${s}</b></span>`;
     }).join('');
-    const zone = m.zone ? `<div class="zone-info">${m.zone.contested ? '⚔️ Disputada' : m.zone.owner >= 0 ? 'Zona de ' + (this.isFfa() ? this.roster.find((x) => x.team === m.zone!.owner)?.name : TEAM_NAMES[m.zone.owner]) : 'Zona libre'} · se mueve en ${Math.ceil(m.zone.next)} s</div>` : '';
+    const zone = m.zone ? `<div class="zone-info">${m.zone.contested ? '⚔️ Disputada' : m.zone.owner >= 0 ? 'Zona de ' + (this.isFfa() ? esc(this.roster.find((x) => x.team === m.zone!.owner)?.name ?? '') : TEAM_NAMES[m.zone.owner]) : 'Zona libre'} · se mueve en ${Math.ceil(m.zone.next)} s</div>` : '';
     const html = `<div class="mode">${MODE_INFO[m.id]?.name ?? m.title} · <span class="time">${fmtTime(m.time)}</span> · meta ${m.target} ${m.label}</div><div class="scores">${teams}</div>${zone}`;
     if (this.top.innerHTML !== html) this.top.innerHTML = html;
   }
@@ -296,14 +355,42 @@ export class Hud {
     if (this.body.innerHTML !== html) this.body.innerHTML = html;
   }
 
+  /** Armas: el arma en la mano con sus balas, a cuál cambia la tecla y cuántas cargas de C4 quedan. */
+  private renderGuns(c: CharFrame, me: MeFrame) {
+    const cur = WEAPONS[WEAPON_IDS[c.wp] ?? 'pistol'];
+    const ammo = cur.ammo > 0 ? String(me.am) : '∞';
+    const key = `${cur.id}|${ammo}`;
+    if (this.gunEl && this.gunEl.dataset.k !== key) {
+      const low = cur.ammo > 0 && me.am <= cur.ammo * 0.2;
+      this.gunEl.dataset.k = key;
+      this.gunEl.innerHTML = `<span class="gun-ic">${cur.icon}</span><div class="gun-info"><b>${cur.name}</b><span class="gun-ammo${low ? ' low' : ''}">${ammo}</span></div><div class="key">Clic</div>`;
+    }
+    const q = this.slotEls.get('q');
+    if (q) {
+      const other = c.wp === 0 ? (me.pri >= 0 ? WEAPONS[WEAPON_IDS[me.pri]] : null) : WEAPONS.pistol;
+      if (q.icon.dataset.item !== (other?.id ?? '')) { q.icon.dataset.item = other?.id ?? ''; q.icon.textContent = other ? other.icon : '🔁'; }
+      q.root.classList.toggle('off', !other);
+      // Las balas del arma que tenés guardada.
+      q.mut.textContent = other && other.ammo > 0 ? String(me.am) : '';
+      q.mut.className = 'mut ammo';
+    }
+    const r = this.slotEls.get('r');
+    if (r) {
+      r.mut.textContent = `×${me.c4}`;
+      r.mut.className = 'mut ammo';
+      r.root.classList.toggle('off', me.c4 <= 0);
+    }
+  }
+
   private renderBar(c: CharFrame, me: MeFrame) {
     const hero = HEROES[this.me!.hero];
+    if (this.rules.weapons) this.renderGuns(c, me);
     SLOTS.forEach((slot, i) => {
       const el = this.slotEls.get(slot);
       if (!el) return;
       const rem = me.cd[i], max = me.cdm[i] || 1;
       let locked = false, lockTxt = '';
-      if (slot === 'q' || slot === 'e' || slot === 'f' || slot === 'r') {
+      if (this.rules.abilities && (slot === 'q' || slot === 'e' || slot === 'f' || slot === 'r')) {
         const a = hero.abilities[slot];
         const lvl = unlockLevel(this.rules, a);
         if (c.lv < lvl) { locked = true; lockTxt = `Nv ${lvl}`; }
@@ -581,7 +668,12 @@ export class Hud {
         else if (/zona/.test(e.tx)) audio.say('La zona se movió');
         break;
       case 'count':
-        if (e.n === 0) { this.showCenter('¡PELEEN!', 1, 'go'); audio.say('¡A pelear!', true); }
+        if (e.n === 0) {
+          // Cada juego larga a su manera (core/games.ts).
+          const [text, say] = gameOf(this.lastMode).go;
+          this.showCenter(text, 1, 'go');
+          audio.say(say, true);
+        }
         else { this.showCenter(String(e.n), 0.95, 'count'); audio.say(String(e.n), true); }
         break;
       case 'lvl': if (e.id === this.localId) {
@@ -591,8 +683,21 @@ export class Hud {
         const mutation = MUTATION_LEVELS.includes(lv);
         this.showCenter(`Nivel ${lv}${unlocked ? ` · ¡${hero.abilities[unlocked].name}!` : ''}${mutation ? ' · mutación disponible' : ''}`, 1.8, 'good');
       } break;
-      case 'deny': if (e.id === this.localId) { this.deny.textContent = e.w; this.denyT = 1.6; } break;
+      case 'deny': if (e.id === this.localId) { this.deny.textContent = DENY_TEXT[e.w] ?? e.w; this.denyT = 1.6; } break;
+      case 'wpn': if (e.id === this.localId && e.e) this.localDeny('Sin balas: volvés a la pistola'); break;
+      case 'loot': if (e.id === this.localId) {
+        const c = CRATE_INFO[CRATE_KINDS[e.c]];
+        if (c) this.showCenter(`${c.icon} ${c.name}`, 1.1, 'good');
+      } break;
       case 'alert': this.onAlert(e.w, e.tm); break;
+      case 'gate': {
+        const name = this.byId.get(e.id)?.name ?? '';
+        if (e.fin === 1) this.announce(e.id === this.localId ? '¡LLEGASTE PRIMERO!' : '¡HAY GANADOR!', e.id === this.localId ? 'esperá a los demás' : `${name} llegó a la meta: apurate`, 'good', 'Llegó el primero');
+        else if (e.id !== this.localId) break;
+        else if (e.fin > 0) this.showCenter(`🏁 ¡Llegaste ${e.fin}º!`, 2.2, 'good');
+        else this.showCenter(`✔ Puerta ${e.i + 1}/${e.n}`, 1.1, 'good');
+        break;
+      }
       case 'recall': if (e.id === this.localId && e.s === 0) this.localDeny('Se cortó la vuelta a la base'); break;
       case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? `¡DESTROZADO! Reparate (${keyName('repair')})` : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
       case 'craft': if (e.id === this.localId) {
@@ -607,6 +712,23 @@ export class Hud {
     const my = this.me?.team ?? -1;
     const ours = team === my;
     switch (w) {
+      // Horda: en estos avisos `team` trae un número (la oleada, la misión o los nidos que quedan).
+      case 'horde_wave':
+        if (team === 1) this.announce('¡AHÍ VIENEN!', 'clic para disparar · las armas caen en cajas', 'bad', 'Ahí vienen');
+        else this.showCenter(`Oleada ${team}`, 1, 'bad');
+        break;
+      case 'horde_obj': {
+        const mi = MISSIONS[team];
+        if (mi) this.announce(`MISIÓN ${team + 1}: ${mi.title.toUpperCase()}`, mi.hint, mi.kind === 'extract' ? 'matchpoint' : 'ult', mi.title);
+        break;
+      }
+      case 'horde_done': {
+        const mi = MISSIONS[team];
+        if (mi) this.showCenter(`✔ ${mi.title}${mi.kind === 'hold' ? ' · mini base lista' : ''}`, 2, 'good');
+        audio.play('craft', 0.9);
+        break;
+      }
+      case 'horde_nest': this.showCenter(team > 0 ? `Nido destruido · ${team === 1 ? 'queda 1' : `quedan ${team}`}` : '¡Nidos destruidos!', 1.6, 'good'); break;
       case 'wave': this.once('wave1', () => this.announce('¡SALEN LOS ESBIRROS!', 'acompañá a tu oleada y empujá la línea', 'good', 'Salen los esbirros')); break;
       case 'tower_down':
         if (ours) this.announce('¡PERDIMOS UNA TORRE!', 'defendé la línea', 'bad', 'Perdimos una torre');
@@ -737,13 +859,15 @@ export class Hud {
   }
 
   private renderBoard(w: WorldFrame) {
+    // La última columna es la del modo (vidas, esbirros, zombis), si tiene una.
+    const stat = MODE_INFO[w.mode.id]?.stat;
     const rows = [...this.roster].sort((a, b) => a.team - b.team).map((r) => {
       const c = w.chars.find((x) => x.id === r.id);
       const col = colorHex(TEAM_COLORS[r.team % TEAM_COLORS.length]);
-      const last = w.mode.id === 'moba' ? (c?.cs ?? 0) : w.mode.id === 'stock' ? (c?.lives ?? 0) : '–';
-      return `<tr class="${r.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${esc(r.name)}${r.bot ? ' 🤖' : ''}</td><td>${HEROES[r.hero].name}</td><td>${c?.lv ?? 1}</td><td>${c?.k ?? 0}</td><td>${c?.d ?? 0}</td><td>${c?.a ?? 0}</td><td>${last}</td></tr>`;
+      const last = stat ? `<td>${(stat.key === 'cs' ? c?.cs : c?.lives) ?? 0}</td>` : '';
+      return `<tr class="${r.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${esc(r.name)}${r.bot ? ' 🤖' : ''}</td><td>${HEROES[r.hero].name}</td><td>${c?.lv ?? 1}</td><td>${c?.k ?? 0}</td><td>${c?.d ?? 0}</td><td>${c?.a ?? 0}</td>${last}</tr>`;
     }).join('');
-    this.board.innerHTML = `<table><thead><tr><th>Jugador</th><th>Héroe</th><th>Nv</th><th>Sacó</th><th>Cayó</th><th>Asist.</th><th>${w.mode.id === 'moba' ? 'Esbirros' : 'Vidas'}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    this.board.innerHTML = `<table><thead><tr><th>Jugador</th><th>Héroe</th><th>Nv</th><th>Sacó</th><th>Cayó</th><th>Asist.</th>${stat ? `<th>${stat.label}</th>` : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   // ───────────── resultados ─────────────
@@ -754,7 +878,9 @@ export class Hud {
     this.center.style.opacity = '0';
     const me = this.me;
     const won = !res.draw && me && me.team === res.winner;
-    const winnerName = res.draw ? 'Empate' : res.teams === 'ffa' ? res.players.find((p) => p.team === res.winner)?.name ?? '?' : `Equipo ${TEAM_NAMES[res.winner]}`;
+    const coop = gameOf(this.lastMode).coopNames;
+    const winnerName = res.draw ? 'Empate' : coop ? coop[res.winner === 0 ? 0 : 1]
+      : res.teams === 'ffa' ? res.players.find((p) => p.team === res.winner)?.name ?? '?' : `Equipo ${TEAM_NAMES[res.winner]}`;
     const score = (p: PlayerResult) => p.kills * 3 + p.assists + p.heatDealt / 100 + p.lethals + p.billiards * 2 + p.saves * 2;
     const mvp = [...res.players].sort((a, b) => score(b) - score(a))[0];
     const rows = [...res.players].sort((a, b) => a.team - b.team || b.kills - a.kills).map((p) => {

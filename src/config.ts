@@ -76,6 +76,8 @@ export interface Prefs {
   announcer: boolean;
   /** Lanzamiento rápido: las habilidades salen al apretar la tecla, sin clic. */
   quickCast: boolean;
+  /** Último juego elegido en el menú (core/games.ts). */
+  game: string;
 }
 
 function uuid(): string {
@@ -121,6 +123,7 @@ export function getPrefs(): Prefs {
     post: p.post ?? true,
     announcer: p.announcer ?? true,
     quickCast: p.quickCast ?? false,
+    game: p.game || 'arena',
   };
   return prefsCache;
 }

@@ -175,6 +175,9 @@ export class BeanView {
   private spin = 0;
   private arm: { move: ArmMove; hand: number; t: number; dur: number } | null = null;
   private nextHand = 1;
+  private gun: THREE.Group | null = null;
+  private gunIdx = -1;
+  private gunKick = 0;
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
   private chargeColor: THREE.Color;
@@ -399,6 +402,18 @@ export class BeanView {
     this.arm = { move, hand, t: 0, dur: ARM_DUR[move] };
   }
 
+  /** Arma en la mano (índice en WEAPON_IDS; -1 = ninguna). `build` arma la malla (render/hordeView). */
+  setWeapon(idx: number, build: (idx: number) => THREE.Group) {
+    if (idx === this.gunIdx) return;
+    this.gunIdx = idx;
+    this.gun?.removeFromParent();
+    this.gun = idx >= 0 ? build(idx) : null;
+    if (this.gun) this.tilt.add(this.gun);
+  }
+
+  /** Retroceso del arma al disparar. */
+  kick(amount = 1) { this.gunKick = Math.min(1.6, this.gunKick + amount); }
+
   /** Mano que está golpeando ahora (para la estela): +1 = derecha del modelo (+X), -1 = izquierda, 0 = ambas. */
   get lastHand() { return -this.nextHand; }
 
@@ -536,6 +551,19 @@ export class BeanView {
     this.handL.position.set(-hx, hy, hz);
     this.handR.position.set(hx, hy, grounded && !charging && !f.ac ? 0.1 + step * 0.15 : hz);
     if (f.fl & F_DASH) { this.handL.position.set(-0.4, 0.7, -0.35); this.handR.position.set(0.4, 0.7, -0.35); }
+    if (this.gun) {
+      // Con un arma: la derecha en la empuñadura y, si es larga, la izquierda sosteniendo el caño. El retroceso las empuja.
+      this.gunKick = Math.max(0, this.gunKick - dt * 9);
+      const k = this.gunKick * 0.1;
+      const ready = !charging && !(f.fl & F_DASH) && !tumble;
+      this.gun.visible = ready;
+      this.gun.position.set(0.25, 0.74, 0.4 - k);
+      this.gun.rotation.x = -this.gunKick * 0.2;
+      if (ready) {
+        this.handR.position.set(0.25, 0.68, 0.36 - k);
+        if (this.gunIdx > 0) this.handL.position.set(0.1, 0.7, 0.66 - k);
+      }
+    }
     this.applyArm(dt);
     this.chargeCone.visible = charging;
     if (charging) {

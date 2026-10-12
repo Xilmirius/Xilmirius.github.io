@@ -1,35 +1,38 @@
-// Fondo del menú: una partida de bots corriendo detrás de la UI ("attract mode").
+// Fondo del menú: una partida de bots del juego elegido corriendo detrás de la UI ("attract mode").
 import { BotBrain } from '../core/bots';
 import { DT } from '../core/constants';
+import { GAMES, normalizeSettings, type GameId } from '../core/games';
 import { Simulation } from '../core/sim';
 import { F_DEAD, FrameBuffer, buildWorldFrame } from '../core/snapshot';
 import { DEFAULT_SETTINGS, HERO_IDS } from '../core/types';
 import { GameView } from '../render/gameView';
 import { Ticker } from './ticker';
 
+/** Segundos que se deja ver el final de una partida de vitrina antes de arrancar otra. */
+const REPLAY_AFTER = 4;
+
 export class AttractMode {
-  private sim: Simulation;
-  private view: GameView;
-  private brains: BotBrain[];
+  private sim!: Simulation;
+  private view!: GameView;
+  private brains: BotBrain[] = [];
   private ticker: Ticker;
   private frames = new FrameBuffer();
   private raf = 0;
   private last = performance.now();
   private followT = 0;
   private follow = 1;
+  private endT = 0;
   private disposed = false;
 
-  constructor(container: HTMLElement) {
-    const roster = HERO_IDS.map((hero, i) => ({ pid: 'demo' + i, name: '', hero, team: i % 2, bot: true }));
-    this.sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, mode: 'kills', killTarget: 9999, timeLimit: 99999, map: 'cantera' }, roster, seed: Date.now() % 100000 });
-    this.brains = this.sim.chars.map((c) => new BotBrain(2, c.id * 7));
-    this.view = new GameView(container, 'cantera', this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: '', team: c.team, hero: c.hero, bot: true, hat: ['crown', 'party', 'halo', 'horns'][c.id % 4] })), '-', { shadows: false, pixelRatio: 1, post: false, theme: 'neon' });
-    this.view.renderer.domElement.classList.add('attract');
+  constructor(private container: HTMLElement, readonly game: GameId = 'arena') {
+    this.build();
     this.ticker = new Ticker(() => {
       this.sim.chars.forEach((c, i) => { c.input = this.brains[i].think(this.sim, c, DT); });
       this.sim.step();
       for (const e of this.sim.drainEvents()) this.view.handleEvent(e);
       this.frames.push(buildWorldFrame(this.sim));
+      // Las partidas que terminan (una carrera, una horda) vuelven a empezar solas.
+      if (this.sim.phase === 'end' && (this.endT += DT) > REPLAY_AFTER) { this.view.dispose(); this.build(); }
     });
     this.ticker.start();
     const loop = () => {
@@ -49,6 +52,23 @@ export class AttractMode {
       this.view.render(w, dt, c ?? null, null);
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /** Arma la partida de vitrina: el modo de entrada del juego, en su mapa y con su tema, sin final por puntos ni por tiempo. */
+  private build() {
+    const g = GAMES[this.game];
+    const roster = Array.from({ length: g.demo.bots }, (_, i) => ({ pid: 'demo' + i, name: '', hero: HERO_IDS[i % HERO_IDS.length], team: i % 2, bot: true }));
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS, mode: g.id === 'arena' ? 'kills' : g.modes[0], map: g.demo.map, theme: g.demo.theme,
+      killTarget: 9999, timeLimit: 99999, lives: 5,
+    });
+    this.sim = new Simulation({ settings, roster, seed: Date.now() % 100000 });
+    this.brains = this.sim.chars.map((c) => new BotBrain(2, c.id * 7));
+    this.view = new GameView(this.container, settings.map, this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: '', team: c.team, hero: c.hero, bot: true, hat: ['crown', 'party', 'halo', 'horns'][c.id % 4] })), '-', { shadows: false, pixelRatio: 1, post: false, theme: settings.theme });
+    this.view.renderer.domElement.classList.add('attract');
+    this.frames = new FrameBuffer();
+    this.endT = 0;
+    this.followT = 0;
   }
 
   resize() { this.view.resize(); }

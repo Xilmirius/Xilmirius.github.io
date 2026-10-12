@@ -34,6 +34,8 @@ export interface CharFrame {
   lives: number;
   rt: number;
   cs: number;
+  /** Arma en la mano (índice en WEAPON_IDS); -1 si la partida no usa armas. */
+  wp: number;
 }
 
 /** Unidad del Asedio: k = índice en UNIT_KINDS, hp 0..1. */
@@ -55,6 +57,8 @@ export interface WorldFrame {
   structs: StructFrame[];
   dst: string;
   tiles: string;
+  /** Artefactos: un carácter por cada uno ('1' = disponible, '0' = no; solo cambia en las cajas de ítems). */
+  gad: string;
   mode: ModeHud;
   /** Resultado cuando terminó: equipo ganador, -1 empate, -2 todavía se juega. */
   win: number;
@@ -78,6 +82,8 @@ export interface MeFrame {
   vy: number; gr: number; aj: number; tb: number; hs: number; sn: number; co: number; hsl: number; pb: number;
   spd: number; lock: number; ng: number; direct: number; air: number; rest: number; maj: number; jm: number;
   dt: number; dx: number; dz: number; ad: number; dsh: number;
+  /** Armas: arma principal (-1 = ninguna), balas que le quedan y cargas de C4. */
+  pri: number; am: number; c4: number;
 }
 
 const r2 = round2;
@@ -128,6 +134,7 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
       ac: c.action ? c.action.kind : '', ap: c.action ? Math.min(1, c.action.t / c.action.dur) : 0,
       ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : c.recallT > 0 ? c.recallT / RECALL_TIME : 0,
       sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT), cs: c.cs,
+      wp: sim.rules.weapons ? c.weapon : -1,
     })),
     units: sim.units.filter((u) => u.alive).map((u) => ({
       id: u.id, k: UNIT_KINDS.indexOf(u.unit), tm: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, f: u.facing,
@@ -142,6 +149,7 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
     })),
     dst: sim.destructibles.map((d) => d.stage).join(''),
     tiles: sim.terrain.tileString(),
+    gad: sim.gadgets.map((g) => (g.on ? '1' : '0')).join(''),
     mode: sim.mode.hud(sim),
     win: sim.result ? (sim.result.draw ? -1 : sim.result.winner) : -2,
   };
@@ -168,6 +176,7 @@ export function buildMeFrame(sim: Simulation, c: Character): MeFrame {
     spd: r2(sim.charSpeed(c)), lock: a && a.lock ? 1 : 0, ng: a && a.noGravity ? 1 : 0, direct: a && a.direct ? 1 : 0,
     air: c.stats.airControl, rest: c.stats.restitution, maj: c.stats.maxAirJumps, jm: c.stats.jumpMul,
     dt: r2(c.dashT), dx: r2(c.dashX), dz: r2(c.dashZ), ad: c.airDashes, dsh: sim.rules.dash ? 1 : 0,
+    pri: c.primary, am: c.ammo, c4: c.c4,
   };
 }
 
@@ -178,7 +187,7 @@ export function encodeWorld(w: WorldFrame): any[] {
     w.tick,
     w.phase === 'countdown' ? 0 : w.phase === 'play' ? 1 : 2,
     r2(w.phaseT),
-    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs]),
+    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs, c.wp]),
     w.projs.map((p) => [p.id, p.k, r2(p.x), r2(p.y), r2(p.z), r2(p.vx), r2(p.vz), r2(p.r), p.tm, p.o]),
     w.zones.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
     w.teles.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
@@ -188,6 +197,7 @@ export function encodeWorld(w: WorldFrame): any[] {
     w.mode,
     w.units.map((u) => [u.id, u.k, u.tm, r2(u.x), r2(u.y), r2(u.z), r2(u.f), u.fl, r2(u.hp), r2(u.vx), r2(u.vz)]),
     w.win,
+    w.gad,
   ];
 }
 
@@ -198,7 +208,7 @@ export function decodeWorld(a: any[]): WorldFrame {
     phaseT: a[2],
     chars: a[3].map((c: any[]) => ({
       id: c[0], x: c[1], y: c[2], z: c[3], f: c[4], vx: c[5], vy: c[6], vz: c[7], fl: c[8], heat: c[9], st: c[10], lv: c[11],
-      ac: c[12], ap: c[13], ch: c[14], sh: c[15], k: c[16], d: c[17], a: c[18], lives: c[19], rt: c[20], cs: c[21] ?? 0,
+      ac: c[12], ap: c[13], ch: c[14], sh: c[15], k: c[16], d: c[17], a: c[18], lives: c[19], rt: c[20], cs: c[21] ?? 0, wp: c[22] ?? -1,
     })),
     units: (a[11] ?? []).map((u: any[]) => ({ id: u[0], k: u[1], tm: u[2], x: u[3], y: u[4], z: u[5], f: u[6], fl: u[7], hp: u[8], vx: u[9], vz: u[10] })),
     projs: a[4].map((p: any[]) => ({ id: p[0], k: p[1], x: p[2], y: p[3], z: p[4], vx: p[5], vz: p[6], r: p[7], tm: p[8], o: p[9] })),
@@ -209,6 +219,7 @@ export function decodeWorld(a: any[]): WorldFrame {
     tiles: a[9],
     mode: a[10],
     win: a[12] ?? -2,
+    gad: a[13] ?? '',
   };
 }
 

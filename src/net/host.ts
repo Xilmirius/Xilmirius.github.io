@@ -6,9 +6,10 @@ import { DT, PROTOCOL_VERSION, SNAPSHOT_EVERY } from '../core/constants';
 import type { TimedEvent } from '../core/events';
 import { decodeInput, emptyInput, type InputFrame } from '../core/input';
 import type { ClientMsg, LobbyState, MatchInit, MatchResultInfo, RosterInfo } from '../core/protocol';
-import { Simulation } from '../core/sim';
+import { parseCommand, Simulation } from '../core/sim';
 import { buildMeFrame, buildWorldFrame, encodeWorld, FrameBuffer } from '../core/snapshot';
 import { validHat } from '../core/cosmetics';
+import { enterMode, gameOf, normalizeSettings, sidesOf } from '../core/games';
 import { mobaMapFor } from '../core/maps';
 import { DEFAULT_SETTINGS, HERO_IDS, type HeroId, type MatchSettings, type RosterEntry } from '../core/types';
 import { db } from '../db/persistence';
@@ -134,6 +135,7 @@ export class HostSession {
   }
 
   private onRemoteMessage(r: Remote, msg: ClientMsg, _fast: boolean) {
+    if (!msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case 'hello': {
         if (msg.v !== PROTOCOL_VERSION) {
@@ -170,7 +172,9 @@ export class HostSession {
         break;
       }
       case 'in': {
+        if (!Array.isArray(msg.f)) break;
         for (const a of msg.f) {
+          if (!Array.isArray(a)) continue;
           const f = decodeInput(a);
           if (f.seq > r.lastSeq) {
             r.queue.push(f);
@@ -188,9 +192,11 @@ export class HostSession {
         this.emitLobby();
         break;
       }
-      case 'cmd':
-        this.sim?.queueCommand(r.pid, msg.cmd);
+      case 'cmd': {
+        const cmd = parseCommand(msg.cmd);
+        if (cmd) this.sim?.queueCommand(r.pid, cmd);
         break;
+      }
       case 'chat': {
         const text = String(msg.text).slice(0, 140);
         this.broadcast({ t: 'chat', from: r.name, text });
@@ -254,8 +260,11 @@ export class HostSession {
     this.emitLobby();
   }
 
+  /** Cambia ajustes de la sala. Al cambiar de modo entran los valores del juego nuevo (core/games.ts). */
   setSettings(s: Partial<MatchSettings>) {
-    Object.assign(this.lobby.settings, s);
+    const cur = this.lobby.settings;
+    const base = s.mode && s.mode !== cur.mode ? enterMode(cur, s.mode) : cur;
+    Object.assign(cur, normalizeSettings({ ...base, ...s }));
     const humans = this.lobby.players.filter((p) => !p.bot).length;
     this.lobby.settings.bots = Math.max(0, Math.min(MAX_PLAYERS - humans, this.lobby.settings.bots));
     this.emitLobby();
@@ -276,9 +285,11 @@ export class HostSession {
     const s = this.lobby.settings;
     const humans = this.lobby.players.filter((p) => p.connected);
     const total = humans.length + s.bots;
-    if (total < 2) return 'Hacen falta al menos 2 personajes: sumá bots o esperá a tus amigos.';
+    // Cada juego dice cuántos hacen falta y cómo se reparten (core/games.ts).
+    const min = gameOf(s.mode).minPlayers;
+    if (total < min) return min < 2 ? 'Hace falta al menos un personaje.' : 'Hacen falta al menos 2 personajes: sumá bots o esperá a tus amigos.';
     if (total > MAX_PLAYERS) return `Máximo ${MAX_PLAYERS} personajes por partida.`;
-    if (s.teams === 'teams' || s.mode === 'moba') {
+    if (sidesOf(s) === 'teams') {
       const t = [0, 0];
       for (const p of humans) t[p.team]++;
       let b = s.bots;
@@ -292,8 +303,7 @@ export class HostSession {
   startMatch(): string | null {
     const err = this.canStart();
     if (err) return err;
-    const s = { ...this.lobby.settings };
-    if (s.mode === 'moba') { s.teams = 'teams'; s.rules = 'moba'; }
+    const s = normalizeSettings(this.lobby.settings);
     const humans = this.lobby.players.filter((p) => p.connected);
     const roster: RosterEntry[] = humans.map((p) => ({ pid: p.pid, name: p.name, hero: p.hero, team: p.team, bot: false, hat: p.hat }));
     const t = [0, 0];
@@ -308,7 +318,7 @@ export class HostSession {
       roster.push({ pid: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], hero, team, bot: true, botLevel: s.botLevel, hat: ['none', 'party', 'horns', 'tophat'][i % 4] });
     }
     // Asedio: el mapa sale del tamaño de los equipos (1 línea hasta 2v2, 2 líneas en 3v3).
-    if (s.mode === 'moba') s.map = mobaMapFor(Math.max(t[0], t[1]));
+    if (gameOf(s.mode).autoMap) s.map = mobaMapFor(Math.max(t[0], t[1]));
     const seed = Math.floor(Math.random() * 1e9);
     this.sim = new Simulation({ settings: s, roster, seed });
     this.brains.clear();

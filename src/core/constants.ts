@@ -1,7 +1,7 @@
 // Constantes de juego. Todo lo "tuneable" vive acá para iterar balance sin tocar sistemas.
 export const GAME_TITLE = 'RUBBLE';
-export const GAME_SUBTITLE = 'arena brawler de materiales';
-export const PROTOCOL_VERSION = 6;
+export const GAME_SUBTITLE = 'muchos juegos · un mundo que se rompe';
+export const PROTOCOL_VERSION = 8;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;

@@ -33,6 +33,16 @@ export type SimEvent =
   | { k: 'deny'; id: number; w: string }
   | { k: 'save'; id: number } // sobrevivió a un golpe letal
   | { k: 'final'; n: number } // cuenta regresiva de los últimos segundos
+  // Artefactos del mapa. w: pad | bumper | rotor | geyser | box · i: índice del artefacto (-1 = resorte) · id: cuerpo (-1 = nadie) · it: ítem que dio la caja
+  // Carrera: pasó una puerta (i: cuál, n: cuántas hay). fin: puesto en que llegó a la meta (0 = todavía no llegó)
+  | { k: 'gate'; id: number; i: number; n: number; fin: number }
+  | { k: 'gad'; w: string; i: number; id: number; x: number; y: number; z: number; it?: string }
+  // ── Armas (core/weapons.ts) ──
+  // Disparo de impacto instantáneo. w: índice del arma · p: por cada bala [x, y, z, qué tocó (0 nada, 1 cuerpo, 2 sólido)], todo seguido
+  | { k: 'shot'; id: number; w: number; p: number[] }
+  | { k: 'wpn'; id: number; w: number; e: number } // cambió de arma (e: 1 = se quedó sin balas)
+  | { k: 'c4'; id: number; x: number; y: number; z: number; f: number } // plantó una carga (f: segundos de mecha)
+  | { k: 'loot'; id: number; c: number; x: number; y: number; z: number } // agarró una caja de suministros (c: qué traía)
   // ── Asedio (MOBA) ──
   | { k: 'udie'; id: number; x: number; y: number; z: number; tm: number; by: number; fall: number } // murió una unidad
   | { k: 'uatk'; id: number; tg: number } // una unidad golpea cuerpo a cuerpo (tg: id del cuerpo o -id-1 de estructura)

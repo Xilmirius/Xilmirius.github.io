@@ -5,6 +5,7 @@ import {
   GROUND_ACCEL, GROUND_DECEL, HIT_SLIDE_ACCEL, JUMP_V, MANTLE_H, STEP_DOWN, STEP_UP, TUMBLE_DRAG, TUMBLE_FRICTION,
 } from './constants';
 import type { CollisionWorld, Obstacle } from './collision';
+import { PAD_V } from './gadgets';
 import { BTN, held, pressed, type InputFrame } from './input';
 import { approach2, dirOf, yawOf, type V3 } from './math';
 
@@ -54,9 +55,11 @@ export interface MoveOut {
   airJumped: boolean;
   mantled: boolean;
   dashed: boolean;
+  /** Pisó un resorte y salió disparado hacia arriba. */
+  bounced: boolean;
 }
 
-export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: false, airJumped: false, mantled: false, dashed: false });
+export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: false, airJumped: false, mantled: false, dashed: false, bounced: false });
 
 export const defaultMoveParams = (): MoveParams => ({
   speed: 6, lock: false, airControl: 1, restitution: 0.3, maxAirJumps: 1, jumpMul: 1, noGravity: false, dash: false,
@@ -72,7 +75,7 @@ export function canAct(s: MoveState) {
 export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: CollisionWorld, dt: number, out: MoveOut) {
   out.wallHits.length = 0;
   out.landed = 0;
-  out.jumped = out.airJumped = out.mantled = out.dashed = false;
+  out.jumped = out.airJumped = out.mantled = out.dashed = out.bounced = false;
 
   s.dashCd = Math.max(0, s.dashCd - dt);
   s.hitstun = Math.max(0, s.hitstun - dt);
@@ -217,6 +220,17 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
         s.coyote = 0;
       }
     }
+  }
+
+  // Resorte: es terreno, así que el host y la predicción del cliente rebotan en el mismo tick.
+  if (s.grounded && cw.terrain.isPad(s.pos.x, s.pos.z) && Math.abs(s.pos.y - cw.terrain.groundAt(s.pos.x, s.pos.z)) < 0.05) {
+    s.vel.y = PAD_V;
+    s.grounded = false;
+    s.coyote = 0;
+    s.dashT = 0;
+    s.airJumps = p.maxAirJumps;
+    s.airDashes = AIR_DASHES;
+    out.bounced = true;
   }
 }
 

@@ -19,7 +19,7 @@ import { type InputFrame } from '../core/input';
 import type { MatchInit, MatchResultInfo } from '../core/protocol';
 import type { Command } from '../core/sim';
 import { stepMove, newMoveOut, type MoveParams, type MoveState } from '../core/movement';
-import { buildMeFrame, F_DEAD, F_GROUNDED, F_TUMBLE, FrameBuffer, type CharFrame, type MeFrame, type StructFrame, type WorldFrame } from '../core/snapshot';
+import { buildMeFrame, F_DEAD, F_ELIMINATED, F_GROUNDED, F_TUMBLE, FrameBuffer, type CharFrame, type MeFrame, type StructFrame, type WorldFrame } from '../core/snapshot';
 import type { ClientSession } from '../net/client';
 import type { HostSession } from '../net/host';
 import { GameView } from '../render/gameView';
@@ -75,6 +75,8 @@ export class MatchRunner {
   private readonly rules: Ruleset;
   private heroId: HeroId | null = null;
   private teamColor = TEAM_COLORS[0];
+  /** Equipo de cada héroe (para elegir a quién mirar cuando te quedás sin vidas). */
+  private teams = new Map<number, number>();
   private heartT = 0;
   private lowFpsT = 0;
   private offBinds: () => void = () => {};
@@ -93,6 +95,7 @@ export class MatchRunner {
     this.rules = rulesFor(init.settings);
     this.heroId = me ? me.hero : null;
     this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
+    for (const r of init.roster) this.teams.set(r.id, r.team);
     this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups });
     this.cw = new CollisionWorld(this.view.terrain);
     this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c), this.view.terrain);
@@ -272,6 +275,13 @@ export class MatchRunner {
     const n = ITEM_KEYS[k];
     if (n === undefined) {
       const slot = k as AbilitySlot;
+      if (this.rules.weapons) {
+        // Armas: salen al toque, sin apuntar.
+        if (slot === 'q') return me.pri >= 0 ? 'now' : 'Todavía no tenés otra arma: agarrá una caja de suministros';
+        if (slot === 'r') return me.c4 > 0 ? 'now' : 'Sin cargas de C4: vienen en las cajas 🧨';
+        return `Acá no hay poderes: clic dispara, ${keyName('q')} cambia de arma y ${keyName('r')} planta C4`;
+      }
+      if (!this.rules.abilities) return 'En este modo no hay habilidades: golpes, empujón, dash y los ítems de las cajas';
       const a = HEROES[this.heroId].abilities[slot];
       if (local.lv < unlockLevel(this.rules, a)) return `${a.name}: se desbloquea en nivel ${unlockLevel(this.rules, a)}`;
       if (usesUltCharge(this.rules, slot)) {
@@ -282,10 +292,10 @@ export class MatchRunner {
       }
       return a.shape.k === 'self' ? 'now' : 'aim';
     }
-    if (!this.rules.crafting) return 'Estas reglas no tienen ítems';
+    if (!this.rules.crafting && !this.rules.itemBoxes) return 'Estas reglas no tienen ítems';
     const id = me.act[n];
     const it = id ? ITEM_BY_ID[id] : null;
-    if (!it) return `Espacio ${n + 1} vacío: forjá un ítem activo (${keyName('forge')})`;
+    if (!it) return this.rules.itemBoxes ? `Espacio ${n + 1} vacío: agarrá una caja ❓ de la pista` : `Espacio ${n + 1} vacío: forjá un ítem activo (${keyName('forge')})`;
     const cd = me.cd[SLOTS.indexOf(k as 'i1' | 'i2' | 'i3')];
     if (cd > ARM_EARLY) return `${it.name}: listo en ${Math.ceil(cd)} s`;
     return !it.shape || it.shape.k === 'self' ? 'now' : 'aim';
@@ -385,9 +395,12 @@ export class MatchRunner {
       }
     }
 
-    // Espectador: seguir al primero vivo.
+    // Espectador (o ya sin vidas): seguir a uno que siga en juego, de tu equipo si queda alguno.
     let camChar = local;
-    if (!camChar) camChar = w.chars.find((c) => !(c.fl & F_DEAD)) ?? null;
+    if (!camChar || (camChar.fl & F_ELIMINATED)) {
+      const alive = w.chars.filter((c) => !(c.fl & F_DEAD));
+      camChar = alive.find((c) => this.teams.get(c.id) === this.teams.get(this.localId)) ?? alive[0] ?? camChar;
+    }
 
     audio.intensity = w.phase === 'play' ? 1 : 0.3;
     // Viento mientras volás y latido cuando estás destrozado.
