@@ -41,10 +41,14 @@ export interface ModeHud {
     crates: number[][]; bases: number[][];
   };
   /** Carrera: próxima puerta de cada héroe (en el orden de `chars`), cuántas puertas hay, ids en orden de llegada y segundos para que termine (-1 = nadie llegó). */
-  race?: { next: number[]; gates: number; order: number[]; end: number };
+  /** rank: puesto en vivo de cada héroe · times: segundos que tardó cada uno de `order` · t: segundos de carrera. */
+  race?: { next: number[]; gates: number; rank: number[]; order: number[]; times: number[]; end: number; t: number };
 }
 
 export interface ModeResult { winner: number; draw: boolean; reason: string }
+
+/** Puesto de un héroe al terminar. time: segundos que tardó, o -1 si no llegó. */
+export interface Standing { id: number; place: number; time: number }
 
 export interface GameMode {
   id: ModeId;
@@ -64,6 +68,10 @@ export interface GameMode {
   respawnTime?(sim: Simulation, ch: Character): number;
   /** Dónde reaparece (por defecto, el punto de su equipo más lejos de los rivales). */
   respawnAt?(sim: Simulation, ch: Character): { x: number; z: number } | null;
+  /** Qué ítem le da una caja a este héroe (por defecto, uno cualquiera). */
+  boxItem?(sim: Simulation, ch: Character): string | null;
+  /** Tabla de posiciones al terminar (los modos donde cada uno llega en un puesto). */
+  standings?(sim: Simulation): Standing[];
   /** Un héroe eligió una de las mejoras que tenía ofrecidas (i: cuál). */
   onPerk?(sim: Simulation, ch: Character, i: number): void;
   /** El modo no usa el tiempo límite (no se avisan los últimos minutos). */

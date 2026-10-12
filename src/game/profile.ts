@@ -2,7 +2,9 @@
 // Vive en localStorage (no requiere login). Es la capa de "gamificación" entre partidas.
 import { HATS } from '../core/cosmetics';
 import { gameOf, LOBBY_OPTIONS, type GameId } from '../core/games';
+import { MAPS } from '../core/maps';
 import type { MatchResultInfo, PlayerResult } from '../core/protocol';
+import { lapTime } from '../core/race';
 
 const KEY = 'rubble.profile';
 
@@ -100,6 +102,7 @@ export interface MatchLiveStats {
 /** Lo que la partida sabe y el resultado no trae: a qué se jugó y hasta dónde se llegó. */
 export interface MatchContext {
   mode: string;
+  map: string;
   difficulty: number;
   /** Horda: oleada alcanzada y misiones cumplidas. */
   wave: number;
@@ -115,6 +118,7 @@ const RECORDS: Record<string, { label: string; fmt: (v: number) => string; lower
   'horde.wave': { label: 'Oleada más alta', fmt: (v) => `oleada ${v}` },
   'horde.kills': { label: 'Más zombis en una partida', fmt: (v) => `${v} zombis` },
   'horde.spree': { label: 'Racha más larga', fmt: (v) => `x${v}` },
+  'race.time': { label: 'Mejor tiempo', fmt: lapTime, lower: true },
 };
 
 export interface RecordLine { label: string; value: string; old: string | null }
@@ -143,6 +147,14 @@ export function recordsOf(game: GameId): string[] {
     if (wave) out.push(`oleada ${wave}`);
     if (p.records['horde.spree']) out.push(`racha x${p.records['horde.spree']}`);
   }
+  if (game === 'race') {
+    const cups = p.records['race.cups'];
+    if (cups) out.push(cups === 1 ? '🏆 1 copa' : `🏆 ${cups} copas`);
+    for (const id of Object.keys(MAPS)) {
+      const t = p.records[`race.time.${id}`];
+      if (t !== undefined) out.push(`${MAPS[id].name} ${lapTime(t)}`);
+    }
+  }
   return out;
 }
 
@@ -165,6 +177,10 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
   const p = getProfile();
   const won = !res.draw && me.team === res.winner;
   const horde = !!ctx && gameOf(ctx.mode).id === 'horde';
+  const race = !!ctx && gameOf(ctx.mode).id === 'race';
+  const arrived = (me.time ?? -1) > 0;
+  /** Copa terminada: en qué puesto quedé (0 = campeón), o -1. */
+  const cupPlace = res.cup?.final ? res.cup.table.findIndex((r) => r.pid === me.pid) : -1;
   const xp: { label: string; amount: number }[] = [];
   xp.push({ label: 'Partida jugada', amount: 60 });
   if (won) xp.push({ label: '¡Victoria!', amount: 120 });
@@ -179,6 +195,14 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
     if (me.cs) xp.push({ label: `${me.cs} zombis`, amount: Math.min(250, me.cs) });
     if (ctx.step) xp.push({ label: `${ctx.step} ${ctx.step === 1 ? 'misión cumplida' : 'misiones cumplidas'}`, amount: ctx.step * 25 });
     if (live.bestSpree >= 12) xp.push({ label: `Racha x${live.bestSpree}`, amount: Math.min(120, live.bestSpree * 2) });
+  }
+  if (race) {
+    if (arrived) xp.push({ label: 'Llegaste a la meta', amount: 40 });
+    if (res.players.length >= 3 && me.place === 2) xp.push({ label: 'Segundo puesto', amount: 50 });
+    if (res.players.length >= 4 && me.place === 3) xp.push({ label: 'Tercer puesto', amount: 25 });
+    if (arrived && me.deaths === 0) xp.push({ label: 'Sin caerte', amount: 30 });
+    if (cupPlace === 0) xp.push({ label: '¡Campeón de la copa!', amount: 200 });
+    else if (cupPlace === 1) xp.push({ label: 'Subcampeón de la copa', amount: 80 });
   }
   const total = xp.reduce((a, b) => a + b.amount, 0);
 
@@ -199,6 +223,10 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
     record(records, 'horde.wave', d, dn, ctx.wave);
     record(records, 'horde.kills', '', '', me.cs ?? 0);
     record(records, 'horde.spree', '', '', live.bestSpree);
+  }
+  if (race && ctx) {
+    if (arrived) record(records, 'race.time', ctx.map, MAPS[ctx.map]?.name ?? ctx.map, me.time!);
+    if (cupPlace === 0) p.records['race.cups'] = (p.records['race.cups'] ?? 0) + 1;
   }
   save();
 

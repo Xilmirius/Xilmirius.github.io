@@ -13,7 +13,7 @@ import {
   type Projectile, type Slot, type Structure, type Telegraph, type UnitKind, type Zone,
 } from './entities';
 import type { SimEvent } from './events';
-import { BARREL, BOX, BOX_ITEMS, BUMPER, GEYSER, geyserPhase, ROTOR, rotorAngle, rotorDir } from './gadgets';
+import { BARREL, BOOST, BOX, BOX_ITEMS, BUMPER, GEYSER, geyserPhase, ROLLER, rollerBalls, ROTOR, rotorAngle, rotorDir } from './gadgets';
 import { fixSettings, sidesOf } from './games';
 import { HEROES } from './heroes';
 import { BTN, held, pressed, released } from './input';
@@ -34,6 +34,9 @@ export interface SimConfig {
   roster: RosterEntry[];
   seed: number;
 }
+
+/** Ticks entre una embestida y la siguiente (un dash pega una sola vez). */
+const DASH_RAM_TICKS = 18;
 
 export type Command =
   | { c: 'craft'; id: string }
@@ -198,6 +201,7 @@ export class Simulation {
     });
     this.gadgets = this.terrain.gadgets.map((g, idx) => ({
       idx, kind: g.kind, x: g.x, y: g.y, z: g.z, on: g.kind !== 'box' || this.rules.itemBoxes, t: 0, fired: false, last: new Map<number, number>(),
+      dx: g.dx ?? 0, dz: g.dz ?? 0, len: g.len ?? 0,
     }));
     this.mode.init(this);
     this.rebuildObstacles();
@@ -722,6 +726,7 @@ export class Simulation {
     mp.dash = this.rules.dash && playing;
     if (!playing) { ch.vel.x = 0; ch.vel.z = 0; }
     const wasTumble = ch.tumble > 0;
+    const wasDash = ch.dashT > 0;
     const out = this.mo;
     stepMove(ch, inp, mp, this.cw, DT, out);
 
@@ -732,7 +737,16 @@ export class Simulation {
       this.emit({ k: 'land', id: ch.id, p: out.landed });
       if (wasTumble && out.landed > 14) this.damageTilesAround(ch.pos.x, ch.pos.z, 1.0, out.landed * 1.2);
     }
-    for (const h of out.wallHits) this.onWallHit(ch, h.speed, h.obstacle, h.x, h.y, h.z, h.nx, h.nz, wasTumble);
+    for (const h of out.wallHits) {
+      // Embestida: el dash rompe la cobertura contra la que choca (una vez por dash).
+      if (h.obstacle && this.rules.dashBreak > 0 && (wasDash || out.dashed) && this.tick - ch.ramTick > DASH_RAM_TICKS) {
+        ch.ramTick = this.tick;
+        this.damageObstacle(h.obstacle, this.rules.dashBreak, ch);
+        this.emit({ k: 'ram', id: ch.id, x: round2(h.x), y: round2(h.y), z: round2(h.z) });
+        continue;
+      }
+      this.onWallHit(ch, h.speed, h.obstacle, h.x, h.y, h.z, h.nx, h.nz, wasTumble);
+    }
 
     if (ch.pos.y < KILL_Y) {
       if (this.phase === 'end') { ch.pos.y = KILL_Y; ch.vel.y = 0; }
@@ -1802,7 +1816,7 @@ export class Simulation {
           if (!c.alive || Math.abs(c.pos.y - g.y) > 1.6 || Math.hypot(c.pos.x - g.x, c.pos.z - g.z) > BOX.r) continue;
           const free = c.actives.indexOf(null);
           if (free < 0) continue;
-          const it = this.rng.pick(BOX_ITEMS);
+          const it = this.mode.boxItem?.(this, c) ?? this.rng.pick(BOX_ITEMS);
           c.actives[free] = it;
           c.cds[ITEM_SLOT[free]] = 0;
           g.on = false;
@@ -1856,6 +1870,32 @@ export class Simulation {
           t.grounded = false;
           if (d > 0.2) { t.vel.x += (dx / d) * GEYSER.push; t.vel.z += (dz / d) * GEYSER.push; }
         }
+      } else if (g.kind === 'boost') {
+        for (const c of this.chars) {
+          if (!c.alive || !c.grounded || Math.abs(c.pos.y - g.y) > 0.5 || Math.hypot(c.pos.x - g.x, c.pos.z - g.z) > BOOST.r) continue;
+          const fresh = (g.last.get(c.id) ?? -9999) <= this.tick - BOOST.cd * TICK_RATE;
+          c.hasteT = Math.max(c.hasteT, BOOST.time);
+          c.hasteAmt = Math.max(c.hasteAmt, BOOST.haste);
+          g.last.set(c.id, this.tick);
+          if (fresh) this.emit({ k: 'gad', w: 'boost', i: g.idx, id: c.id, x: g.x, y: g.y, z: g.z });
+        }
+      } else if (g.kind === 'roller') {
+        for (const s of rollerBalls(g.idx, this.tick, g.len)) {
+          const bx = g.x + g.dx * s, bz = g.z + g.dz * s;
+          for (const t of this.bodies) {
+            if (!t.alive || t.pos.y > g.y + ROLLER.h || t.pos.y < g.y - 0.6) continue;
+            const dx = t.pos.x - bx, dz = t.pos.z - bz;
+            if (Math.hypot(dx, dz) > ROLLER.r + CHAR_RADIUS * 0.7) continue;
+            // Te lleva puesto para donde rueda y te saca del carril por el costado por el que te agarró
+            // (si te agarró de lleno, por cualquiera de los dos): así la misma bola no te vuelve a pegar.
+            const side = dx * -g.dz + dz * g.dx;
+            const out = (Math.abs(side) > 0.1 ? Math.sign(side) : t.id % 2 ? 1 : -1) * ROLLER.out;
+            const kx = g.dx - g.dz * out, kz = g.dz + g.dx * out;
+            if (this.gadgetHit(g, t, ROLLER.cd, { heat: ROLLER.heat, kb: ROLLER.kb, up: ROLLER.up, dirX: kx, dirZ: kz, fx: 'roller' })) {
+              this.emit({ k: 'gad', w: 'roller', i: g.idx, id: t.id, x: round2(bx), y: g.y, z: round2(bz) });
+            }
+          }
+        }
       }
     }
   }
@@ -1879,6 +1919,14 @@ export class Simulation {
   private updateTiles() {
     const t = this.terrain;
     const regen = this.rules.tileRegen;
+    if (this.rules.tileStep && this.phase === 'play') {
+      // Piso flojo: el que lo pisa lo afloja, y a los TILE_CRUMBLE segundos se cae.
+      for (const c of this.chars) {
+        if (!c.alive || !c.grounded) continue;
+        const fi = t.fragileIndexAt(c.pos.x, c.pos.z);
+        if (fi >= 0 && t.tileState[fi] < TILE_CRUMBLING) this.damageTile(fi, TILE_HP);
+      }
+    }
     for (let fi = 0; fi < t.fragile.length; fi++) {
       if (regen > 0 && t.tileState[fi] === TILE_GONE) {
         // El piso se rearma solo (Asedio): las líneas no quedan cortadas para siempre.

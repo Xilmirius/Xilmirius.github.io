@@ -36,6 +36,8 @@ export type SimEvent =
   // Artefactos del mapa. w: pad | bumper | rotor | geyser | box · i: índice del artefacto (-1 = resorte) · id: cuerpo (-1 = nadie) · it: ítem que dio la caja
   // Carrera: pasó una puerta (i: cuál, n: cuántas hay). fin: puesto en que llegó a la meta (0 = todavía no llegó)
   | { k: 'gate'; id: number; i: number; n: number; fin: number }
+  // Alguien embistió cobertura con el dash (reglas con `dashBreak`).
+  | { k: 'ram'; id: number; x: number; y: number; z: number }
   | { k: 'gad'; w: string; i: number; id: number; x: number; y: number; z: number; it?: string }
   // ── Armas (core/weapons.ts) ──
   // Disparo de impacto instantáneo. w: índice del arma · p: por cada punto que tocó una bala [x, y, z, qué tocó (0 nada,

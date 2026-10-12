@@ -1,5 +1,6 @@
 // Mensajes entre host y clientes por WebRTC DataChannel.
 // Canal "rel" (confiable/ordenado): lobby, eventos, comandos. Canal "fast" (no confiable): inputs y snapshots.
+import type { CupInfo, CupResult } from './cup';
 import type { TimedEvent } from './events';
 import type { Command } from './sim';
 import type { HeroId, MatchSettings } from './types';
@@ -39,6 +40,8 @@ export interface MatchInit {
   seed: number;
   tick: number;
   matchId: string;
+  /** Copa en curso: qué carrera es esta y cómo viene la tabla. */
+  cup?: CupInfo;
 }
 
 export interface PlayerResult {
@@ -61,6 +64,9 @@ export interface PlayerResult {
   lethals: number;
   saves: number;
   hat: string;
+  /** Carrera: puesto (1 = primero) y segundos que tardó (-1 = no llegó). */
+  place?: number;
+  time?: number;
 }
 
 export interface MatchResultInfo {
@@ -70,6 +76,8 @@ export interface MatchResultInfo {
   duration: number;
   players: PlayerResult[];
   teams: 'teams' | 'ffa';
+  /** Copa: la tabla después de esta carrera. */
+  cup?: CupResult;
 }
 
 export type HostMsg =

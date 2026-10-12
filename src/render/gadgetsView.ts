@@ -1,14 +1,14 @@
-// Artefactos del mapa (ver core/gadgets.ts): resortes, paragolpes, rotores, géiseres y cajas de ítems.
-// Salen del mapa, así que host y clientes los arman igual; rotores y géiseres se animan a partir del tick
-// (son deterministas en el tiempo) y las cajas con el estado que viaja en el frame.
+// Artefactos del mapa (ver core/gadgets.ts): resortes, paragolpes, rotores, géiseres, cajas de ítems, aceleradores
+// y lanzabolas. Salen del mapa, así que host y clientes los arman igual; rotores, géiseres y bolas se animan a
+// partir del tick (son deterministas en el tiempo) y las cajas con el estado que viaja en el frame.
 import * as THREE from 'three';
-import { CELL } from '../core/constants';
-import { BUMPER, GEYSER, geyserPhase, geyserTime, ROTOR, rotorAngle } from '../core/gadgets';
+import { CELL, TICK_RATE } from '../core/constants';
+import { BOOST, BUMPER, GEYSER, geyserPhase, geyserTime, ROLLER, ROTOR, rotorAngle } from '../core/gadgets';
 import type { Terrain } from '../core/terrain';
 import { hazardStripes, ringTexture, softDisc, toonGradient } from './textures';
 
 /** Colores de cada artefacto (también los usa la vista para sus efectos). */
-export const GADGET_COLORS = { pad: 0x7dff6a, bumper: 0xff4f8b, rotor: 0xffc629, geyser: 0x4fd1ff, box: 0xb070ff, barrel: 0xff5a2a };
+export const GADGET_COLORS = { pad: 0x7dff6a, bumper: 0xff4f8b, rotor: 0xffc629, geyser: 0x4fd1ff, box: 0xb070ff, barrel: 0xff5a2a, boost: 0xff8a1e, roller: 0x5a6cff };
 
 const toon = (c: number) => new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient() });
 const glow = (c: number, k = 1.2) => new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(k), toneMapped: false });
@@ -19,6 +19,44 @@ interface RotorVis { arm: THREE.Object3D; idx: number }
 interface GeyserVis { idx: number; ring: THREE.MeshBasicMaterial; jet: THREE.Mesh; jetMat: THREE.MeshBasicMaterial; x: number; y: number; z: number }
 interface BoxVis { g: THREE.Group; idx: number; on: boolean; pop: number; y: number }
 interface GateVis { mat: THREE.MeshBasicMaterial; x: number; y: number; z: number }
+interface BoostVis { bolt: THREE.MeshBasicMaterial; ring: THREE.Mesh; idx: number; pulse: number }
+/** Un lanzabolas con sus bolas (más las que entran en el carril, una que se ve caer al final). */
+interface RollerVis { idx: number; x: number; y: number; z: number; dx: number; dz: number; len: number; balls: THREE.Mesh[] }
+
+/** Lo que sigue viéndose una bola después del borde, cayendo. */
+const ROLLER_FALL = 3;
+
+/** Rayo del acelerador. */
+function boltTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#fff';
+  g.beginPath();
+  for (const [x, y] of [[74, 8], [30, 70], [58, 70], [46, 120], [98, 52], [68, 52]]) g.lineTo(x, y);
+  g.closePath();
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Bola de bolera: una franja clara y tres agujeros, para que se note que rueda. */
+function ballTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#3a47c8';
+  g.fillRect(0, 0, 128, 64);
+  g.fillStyle = '#9fb0ff';
+  g.fillRect(0, 24, 128, 16);
+  g.fillStyle = '#14183c';
+  for (const [x, y] of [[22, 14], [36, 20], [22, 30]]) { g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
 /** Damero de la meta. */
 function checkerTexture(): THREE.Texture {
@@ -61,6 +99,8 @@ export class GadgetsView {
   private rotors: RotorVis[] = [];
   private geysers: GeyserVis[] = [];
   private boxes = new Map<number, BoxVis>();
+  private boosts = new Map<number, BoostVis>();
+  private rollers: RollerVis[] = [];
   private lastGad = '';
   // Carrera: franja en el piso por cada puerta y una flecha sobre la que te toca.
   private gates: GateVis[] = [];
@@ -78,6 +118,8 @@ export class GadgetsView {
       if (g.kind === 'bumper') this.addBumper(idx, g.x, y, g.z);
       else if (g.kind === 'rotor') this.addRotor(idx, g.x, y, g.z);
       else if (g.kind === 'geyser') this.addGeyser(idx, g.x, y, g.z);
+      else if (g.kind === 'boost') this.addBoost(idx, g.x, y, g.z);
+      else if (g.kind === 'roller') this.addRoller(idx, g.x, y, g.z, g.dx ?? 0, g.dz ?? 0, g.len ?? 0);
       else this.addBox(idx, g.x, y, g.z);
     });
     t.gates.forEach((gate, i) => {
@@ -206,6 +248,64 @@ export class GadgetsView {
     this.boxes.set(idx, { g, idx, on: false, pop: 0, y: y + 0.95 });
   }
 
+  private addBoost(idx: number, x: number, y: number, z: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const r = BOOST.r * 0.92;
+    this.add(g, new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.06, 0.08, 20), toon(0x3a3040)), 0, 0.04, 0, false);
+    const plate = new THREE.Mesh(new THREE.CircleGeometry(r * 0.9, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color(GADGET_COLORS.boost).multiplyScalar(0.55), toneMapped: false }));
+    plate.rotation.x = -Math.PI / 2;
+    this.add(g, plate, 0, 0.085, 0, false);
+    const boltMat = new THREE.MeshBasicMaterial({ map: boltTexture(), color: 0xffe9a0, transparent: true, depthWrite: false, toneMapped: false });
+    const bolt = new THREE.Mesh(new THREE.PlaneGeometry(r * 1.5, r * 1.5), boltMat);
+    bolt.rotation.x = -Math.PI / 2;
+    this.add(g, bolt, 0, 0.1, 0, false);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.95, 0.05, 6, 28), glow(GADGET_COLORS.boost, 1.3));
+    ring.rotation.x = Math.PI / 2;
+    this.add(g, ring, 0, 0.1, 0, false);
+    this.group.add(g);
+    this.boosts.set(idx, { bolt: boltMat, ring, idx, pulse: 0 });
+  }
+
+  private addRoller(idx: number, x: number, y: number, z: number, dx: number, dz: number, len: number) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.y = Math.atan2(dx, dz);
+    // La boca: un arco del que salen las bolas.
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(ROLLER.r + 0.22, 0.2, 8, 18, Math.PI), toon(0x4a4f6a));
+    arch.castShadow = true;
+    g.add(arch);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(ROLLER.r + 0.22, 0.07, 6, 18, Math.PI), glow(GADGET_COLORS.roller, 1.3));
+    lip.position.z = 0.18;
+    g.add(lip);
+    // El carril, pintado en el piso, para que se vea por dónde vienen.
+    const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.25, len), new THREE.MeshBasicMaterial({ color: GADGET_COLORS.roller, transparent: true, opacity: 0.2, depthWrite: false, toneMapped: false }));
+    lane.rotation.x = -Math.PI / 2;
+    lane.position.set(0, 0.025, len / 2);
+    lane.renderOrder = 1;
+    g.add(lane);
+    this.group.add(g);
+    const mat = new THREE.MeshToonMaterial({ map: ballTexture(), gradientMap: toonGradient() });
+    const balls: THREE.Mesh[] = [];
+    const n = Math.ceil((len + ROLLER_FALL) / (ROLLER.speed * ROLLER.gap)) + 1;
+    for (let i = 0; i < n; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(ROLLER.r, 18, 12), mat);
+      b.castShadow = true;
+      b.visible = false;
+      b.rotation.order = 'YXZ';
+      b.rotation.y = Math.atan2(dx, dz);
+      this.group.add(b);
+      balls.push(b);
+    }
+    this.rollers.push({ idx, x, y, z, dx, dz, len, balls });
+  }
+
+  /** Alguien pisó un acelerador. */
+  boost(idx: number) {
+    const b = this.boosts.get(idx);
+    if (b) b.pulse = 1;
+  }
+
   /** Alguien rebotó en un resorte en (x,z): hundir la placa más cercana. */
   bounce(x: number, z: number) {
     let best: PadVis | null = null, bd = CELL * 1.2;
@@ -250,6 +350,25 @@ export class GadgetsView {
       b.ring.color.setHex(GADGET_COLORS.bumper).multiplyScalar(1.1 + b.pulse * 0.9 + Math.sin(time * 4) * 0.08);
     }
     for (const r of this.rotors) r.arm.rotation.y = -rotorAngle(r.idx, tick);
+    for (const b of this.boosts.values()) {
+      b.pulse = Math.max(0, b.pulse - dt * 3);
+      b.bolt.opacity = 0.65 + 0.35 * Math.sin(time * 7 + b.idx);
+      b.ring.scale.setScalar(1 + Math.sin(b.pulse * Math.PI) * 0.45);
+    }
+    for (const r of this.rollers) {
+      // Misma cuenta que rollerBalls() en el núcleo, siguiendo cada bola un poco más allá del borde para verla caer.
+      const step = ROLLER.speed * ROLLER.gap;
+      let s = ROLLER.speed * ((((tick / TICK_RATE + r.idx * 0.83) % ROLLER.gap) + ROLLER.gap) % ROLLER.gap);
+      for (const b of r.balls) {
+        b.visible = s <= r.len + ROLLER_FALL;
+        if (b.visible) {
+          const over = Math.max(0, s - r.len);
+          b.position.set(r.x + r.dx * s, r.y + ROLLER.r - over * over * 1.6, r.z + r.dz * s);
+          b.rotation.x = s / ROLLER.r;
+        }
+        s += step;
+      }
+    }
     for (const g of this.geysers) {
       const ph = geyserPhase(g.idx, tick);
       const tt = geyserTime(g.idx, tick);

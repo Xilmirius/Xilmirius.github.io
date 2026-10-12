@@ -6,6 +6,9 @@ import { HEROES } from '../core/heroes';
 import { ITEMS, ITEM_BY_ID, ITEM_TAGS, type ItemTag } from '../core/items';
 import { gameOf, LOBBY_OPTIONS, MODE_INFO } from '../core/games';
 import { CRATE_INFO, CRATE_KINDS, MISSIONS } from '../core/horde';
+import type { CupInfo } from '../core/cup';
+import { MAPS } from '../core/maps';
+import { lapTime } from '../core/race';
 import { PERK_IDS, PERKS } from '../core/perks';
 import { SHOT_CRIT, WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
@@ -58,6 +61,12 @@ export class Hud {
   private perkEl = h('div', { class: 'hud-perks' });
   private perkRow = h('div', { class: 'perkrow' });
   private hitEl = h('div', { class: 'hud-hit' });
+  // Carrera: el puesto en grande, la pista y la copa que se está corriendo.
+  private posEl = h('div', { class: 'hud-pos' });
+  private lastRank = 0;
+  private mapName = '';
+  private cup: CupInfo | null = null;
+  private nextTimer: ReturnType<typeof setInterval> | null = null;
   private mouse = { x: 0, y: 0 };
   private hitT = 0;
   /** Bajas seguidas con armas (se corta al rato sin bajar a nadie). */
@@ -115,7 +124,8 @@ export class Hud {
     this.board = h('div', { class: 'board hidden' });
     // Botón chico de pantalla completa arriba a la derecha (el menú de pausa también lo tiene).
     const fs = fullscreenButton('fs-mini');
-    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, this.comboEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, this.comboEl, this.posEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    this.mapName = terrain?.def.name ?? '';
     if (rules.weapons) {
       this.root.append(this.hitEl);
       window.addEventListener('mousemove', this.onMouse, { passive: true });
@@ -273,17 +283,33 @@ export class Hud {
     if (m.race) {
       const rc = m.race;
       const idx = this.roster.findIndex((r) => r.id === this.localId);
-      const mine = idx >= 0 ? rc.next[idx] ?? 0 : 0;
       const place = rc.order.indexOf(this.localId);
-      // Puesto en vivo: cuántos van más adelante que vos.
-      const rank = 1 + m.scores.filter((s, i) => i !== idx && s > (m.scores[idx] ?? 0)).length;
-      const you = idx < 0 ? '' : place >= 0 ? `¡Llegaste ${place + 1}º!` : `Vas ${rank}º · puerta ${Math.min(mine + 1, rc.gates)}/${rc.gates}`;
-      const end = rc.end >= 0 ? ` · <b class="bad">termina en ${Math.ceil(m.time)} s</b>` : ` · <span class="time">${fmtTime(m.time)}</span>`;
-      const board = this.roster.map((r, i) => ({ r, s: m.scores[i] ?? 0, fin: rc.order.indexOf(r.id) }))
-        .sort((a, b) => (a.fin >= 0 ? a.fin - 100 : 0) - (b.fin >= 0 ? b.fin - 100 : 0) || b.s - a.s)
-        .map(({ r, s, fin }) => `<span class="score" style="--c:${colorHex(TEAM_COLORS[r.team % TEAM_COLORS.length])}"><i></i>${esc(r.name)} <b>${fin >= 0 ? `🏁${fin + 1}º` : s + '%'}</b></span>`).join('');
-      const html = `<div class="mode">Carrera${end}${you ? ' · ' + you : ''}</div><div class="scores">${board}</div>`;
+      const rank = idx >= 0 ? rc.rank[idx] ?? 0 : 0;
+      const col = (r: RosterInfo) => colorHex(TEAM_COLORS[r.team % TEAM_COLORS.length]);
+      const cup = this.cup ? ` · 🏆 pista ${this.cup.round + 1}/${this.cup.maps.length}` : '';
+      const clock = rc.end >= 0 ? `<b class="bad">termina en ${Math.ceil(m.time)} s</b>` : `<span class="time">${lapTime(rc.t)}</span>`;
+      // La pista en una tira: un punto por corredor, de la salida a la meta (el tuyo va arriba de todos).
+      const dots = this.roster.map((r, i) => ({ r, s: m.scores[i] ?? 0 })).sort((a, b) => +(a.r.id === this.localId) - +(b.r.id === this.localId))
+        .map(({ r, s }) => `<i class="${r.id === this.localId ? 'me' : ''}" style="left:${s}%;--c:${col(r)}"></i>`).join('');
+      const board = this.roster.map((r, i) => ({ r, rk: rc.rank[i] ?? 0, fin: rc.order.indexOf(r.id) })).sort((a, b) => a.rk - b.rk)
+        .map(({ r, rk, fin }) => `<span class="score${r.id === this.localId ? ' me' : ''}" style="--c:${col(r)}"><em>${rk}º</em>${esc(r.name)}${fin >= 0 ? ` <b>🏁 ${lapTime(rc.times[fin] ?? 0)}</b>` : ''}</span>`).join('');
+      const html = `<div class="mode">🏁 ${esc(this.mapName || 'Carrera')}${cup} · ${clock}</div><div class="rstrip">${dots}<b>🏁</b></div><div class="scores race">${board}</div>`;
       if (this.top.innerHTML !== html) this.top.innerHTML = html;
+      // El puesto, bien grande: es lo que mirás de reojo mientras corrés.
+      const show = idx >= 0 && this.roster.length > 1 && w.phase !== 'end';
+      this.posEl.classList.toggle('on', show);
+      if (show) {
+        const pos = `<b>${rank}<sup>º</sup></b><span>${place >= 0 ? '¡llegaste!' : `de ${this.roster.length} · puerta ${Math.min((rc.next[idx] ?? 0) + 1, rc.gates)}/${rc.gates}`}</span>`;
+        if (this.posEl.innerHTML !== pos) this.posEl.innerHTML = pos;
+        this.posEl.classList.toggle('p1', rank === 1);
+        if (rank !== this.lastRank) {
+          // Pasaste a alguien (o te pasaron).
+          if (this.lastRank && w.phase === 'play' && place < 0) {
+            if (rank < this.lastRank) { bump(this.posEl); audio.play('coin', 0.5, 0, 1.6); } else audio.play('tick', 0.35, 0, 0.7);
+          }
+          this.lastRank = rank;
+        }
+      }
       return;
     }
     const teams = m.scores.map((s, i) => {
@@ -684,6 +710,12 @@ export class Hud {
     fn();
   }
 
+  /** Carrera: presenta la pista (y cómo viene la copa, si se está corriendo una). */
+  introRace(cup: CupInfo | undefined) {
+    this.cup = cup ?? null;
+    this.announce(this.mapName.toUpperCase(), cup ? `🏆 copa · pista ${cup.round + 1} de ${cup.maps.length}` : 'el primero que llega a la meta gana', 'good', this.mapName);
+  }
+
   announce(title: string, sub = '', cls = '', speak?: string) {
     if (this.queue.length > 4) this.queue.shift();
     this.queue.push({ title, sub, cls, speak });
@@ -1015,8 +1047,10 @@ export class Hud {
 
   // ───────────── resultados ─────────────
 
-  showResults(res: MatchResultInfo, isHost: boolean, onBack: () => void, onLeave: () => void, reward: MatchReward | null = null, ctx: MatchContext | null = null) {
+  /** onStop: cortar una copa por la mitad y volver a la sala (el botón principal sigue con la próxima pista). */
+  showResults(res: MatchResultInfo, isHost: boolean, onBack: () => void, onLeave: () => void, reward: MatchReward | null = null, ctx: MatchContext | null = null, onStop?: () => void) {
     this.results?.remove();
+    this.posEl.classList.remove('on');
     this.centerT = 0;
     this.center.style.opacity = '0';
     this.comboEl.classList.remove('on');
@@ -1026,14 +1060,14 @@ export class Hud {
     const game = gameOf(this.lastMode);
     const coop = game.coopNames;
     // Cada juego cuenta su partida con sus columnas y sus premios.
-    const view = game.id === 'horde' ? HORDE_RESULTS : BRAWL_RESULTS;
+    const view = game.id === 'horde' ? HORDE_RESULTS : game.id === 'race' ? RACE_RESULTS : BRAWL_RESULTS;
     const winnerName = res.draw ? 'Empate' : coop ? coop[res.winner === 0 ? 0 : 1]
       : res.teams === 'ffa' ? res.players.find((p) => p.team === res.winner)?.name ?? '?' : `Equipo ${TEAM_NAMES[res.winner]}`;
     const mvp = [...res.players].sort((a, b) => view.mvp(b) - view.mvp(a))[0];
-    const rows = [...res.players].sort((a, b) => a.team - b.team || view.mvp(b) - view.mvp(a)).map((p) => {
+    const rows = [...res.players].sort(view.order ?? ((a, b) => a.team - b.team || view.mvp(b) - view.mvp(a))).map((p) => {
       const col = colorHex(TEAM_COLORS[p.team % TEAM_COLORS.length]);
       const hat = p.hat && p.hat !== 'none' ? HAT_BY_ID[p.hat]?.icon ?? '' : '';
-      return `<tr class="${p.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${hat} ${esc(p.name)}${p.bot ? ' 🤖' : ''}${p === mvp ? ' <span class="mvp">MVP</span>' : ''}</td><td>${HEROES[p.hero].name}</td>${view.cols.map(([, get]) => `<td>${get(p)}</td>`).join('')}</tr>`;
+      return `<tr class="${p.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${hat} ${esc(p.name)}${p.bot ? ' 🤖' : ''}${p === mvp && !view.order ? ' <span class="mvp">MVP</span>' : ''}</td><td>${HEROES[p.hero].name}</td>${view.cols.map(([, get]) => `<td>${get(p)}</td>`).join('')}</tr>`;
     }).join('');
     // Premios: cada categoría la gana alguien (si hay algo que premiar).
     const awards = view.awards.map(([icon, title, key, fmt]) => {
@@ -1049,27 +1083,88 @@ export class Hud {
       const level = LOBBY_OPTIONS.difficulty.names?.[ctx.difficulty - 1];
       sub = `Oleada ${Math.max(1, ctx.wave)} · ${ctx.step} de ${MISSIONS.length} misiones${level ? ' · ' + level : ''}`;
     }
+    let cls = res.draw ? '' : won ? 'win' : 'lose';
+    let champion = false;
+    let cupHtml = '';
+    const cup = res.cup;
+    if (game.id === 'race') {
+      // Carrera: tu puesto y tu tiempo; en copa, además, la tabla.
+      const mine = res.players.find((p) => p.id === this.localId);
+      const arrived = (mine?.time ?? -1) > 0;
+      if (mine) {
+        title = mine.place === 1 ? '🏆 ¡GANASTE LA CARRERA!' : arrived ? `🏁 Llegaste ${mine.place}º` : '⏱️ No llegaste a la meta';
+        cls = mine.place === 1 ? 'win' : arrived ? '' : 'lose';
+      }
+      sub = esc(this.mapName) + (arrived ? ` · ${lapTime(mine!.time!)}` : '');
+      if (cup) {
+        const at = cup.table.findIndex((r) => r.pid === me?.pid);
+        if (cup.final) {
+          champion = at === 0;
+          title = champion ? '🏆 ¡CAMPEÓN DE LA COPA!' : `🏆 Copa para ${esc(cup.table[0]?.name ?? '?')}`;
+          cls = champion ? 'win' : '';
+          sub = at > 0 ? `Terminaste ${at + 1}º con ${cup.table[at].total} puntos` : `${cup.table[0]?.total ?? 0} puntos en ${cup.maps.length} pistas`;
+        }
+        // Entre pista y pista, cómo viene la copa; al final, el podio.
+        const next = MAPS[cup.maps[cup.round + 1]]?.name;
+        const step = (i: number) => { const r = cup.table[i]; return r ? `<div class="pod p${i + 1}${r.pid === me?.pid ? ' me' : ''}"><span>${esc(r.name)}</span><b>${MEDALS[i]}</b><em>${r.total}</em></div>` : ''; };
+        cupHtml = cup.final ? `<div class="podium">${step(1)}${step(0)}${step(2)}</div>`
+          : `<div class="cup-line">🏆 Copa · pista ${cup.round + 1} de ${cup.maps.length}${next ? ` · próxima: <b>${esc(next)}</b>` : ''}</div>`;
+      }
+    }
     const records = (reward?.records ?? []).map((r) => `<div class="record"><b>${esc(r.label)}: ${esc(r.value)}</b>${r.old ? `<small>antes ${esc(r.old)}</small>` : ''}</div>`).join('');
 
     const box = h('div', { class: 'results' });
     box.innerHTML = `
-      <div class="res-title ${res.draw ? '' : won ? 'win' : 'lose'}">${title}</div>
-      <div class="res-sub" style="color:${res.draw ? '#fff' : colorHex(TEAM_COLORS[res.winner % TEAM_COLORS.length])}">${sub}</div>
+      <div class="res-title ${cls}">${title}</div>
+      <div class="res-sub" style="color:${res.draw || game.id === 'race' ? '#fff' : colorHex(TEAM_COLORS[res.winner % TEAM_COLORS.length])}">${sub}</div>
       <div class="res-reason">${esc(res.reason)} · duró ${fmtTime(res.duration)}</div>
       ${records ? `<div class="records"><span>🏅 ${reward!.records.length === 1 ? 'Récord personal' : 'Récords personales'}</span>${records}</div>` : ''}
+      ${cupHtml}
       <div class="awards">${awards}</div>
-      <table><thead><tr><th>Jugador</th><th>Héroe</th>${view.cols.map(([name]) => `<th>${name}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+      ${game.id === 'race' ? this.raceTable(res) : `<table><thead><tr><th>Jugador</th><th>Héroe</th>${view.cols.map(([name]) => `<th>${name}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`}
       <div class="reward"></div>`;
+    // En copa quedan pistas: la próxima larga sola a los pocos segundos (el host la puede adelantar o cortar la copa).
+    const more = !!cup && !cup.final;
+    const main = isHost
+      ? h('button', { class: 'btn primary', onclick: () => { this.stopNext(); onBack(); } }, more ? 'Siguiente pista ▶' : 'Volver al lobby')
+      : h('div', { class: 'wait' }, more ? 'La próxima pista ya larga…' : 'Esperando que el host vuelva al lobby…');
     const btns = h('div', { class: 'res-buttons' },
-      isHost ? h('button', { class: 'btn primary', onclick: onBack }, 'Volver al lobby') : h('div', { class: 'wait' }, 'Esperando que el host vuelva al lobby…'),
-      h('button', { class: 'btn', onclick: onLeave }, 'Salir al menú'),
+      main,
+      more && isHost && onStop ? h('button', { class: 'btn', onclick: () => { this.stopNext(); onStop(); } }, 'Terminar la copa') : null,
+      h('button', { class: 'btn', onclick: () => { this.stopNext(); onLeave(); } }, 'Salir al menú'),
     );
+    this.stopNext();
+    if (more) {
+      let left = CUP_NEXT;
+      const tick = () => {
+        main.textContent = isHost ? `Siguiente pista ▶ (${left})` : `La próxima pista larga en ${left} s…`;
+        if (left-- <= 0) { this.stopNext(); if (isHost) onBack(); }
+      };
+      tick();
+      this.nextTimer = setInterval(tick, 1000);
+    }
     box.appendChild(btns);
     this.results = box;
     this.root.appendChild(box);
-    if (won) this.confettiRain(120);
+    if (won || champion) this.confettiRain(champion ? 200 : 120);
     if (records) audio.play('jackpot', 0.7);
     if (reward) this.animateReward(box.querySelector('.reward') as HTMLElement, reward);
+  }
+
+  /** Carrera: una sola tabla con el puesto, el tiempo y, en copa, los puntos. Al terminar la copa se ordena por su tabla. */
+  private raceTable(res: MatchResultInfo): string {
+    const cup = res.cup;
+    const pts = new Map((cup?.table ?? []).map((r, i) => [r.pid, { gained: r.gained, total: r.total, at: i }]));
+    const at = (p: PlayerResult) => pts.get(p.pid)?.at ?? 99;
+    const rows = [...res.players].sort((a, b) => (cup?.final ? at(a) - at(b) : 0) || (a.place ?? 99) - (b.place ?? 99)).map((p) => {
+      const col = colorHex(TEAM_COLORS[p.team % TEAM_COLORS.length]);
+      const hat = p.hat && p.hat !== 'none' ? HAT_BY_ID[p.hat]?.icon ?? '' : '';
+      const c = pts.get(p.pid);
+      const first = cup?.final ? MEDALS[at(p)] ?? `${at(p) + 1}º` : p.place ? `${p.place}º` : '—';
+      return `<tr class="${p.id === this.localId ? 'me' : ''}"><td class="pl">${first}</td><td><i style="background:${col}"></i>${hat} ${esc(p.name)}${p.bot ? ' 🤖' : ''}</td>`
+        + `<td>${(p.time ?? -1) > 0 ? lapTime(p.time!) : 'no llegó'}</td><td>${p.deaths}</td><td>${p.kills}</td>${cup ? `<td class="gain">${c?.gained ? '+' + c.gained : ''}</td><td class="tot">${c?.total ?? 0}</td>` : ''}</tr>`;
+    }).join('');
+    return `<table class="race-table"><thead><tr><th>${cup?.final ? 'Copa' : 'Puesto'}</th><th>Jugador</th><th>Tiempo</th><th>Caídas</th><th>Tiró</th>${cup ? '<th>Puntos</th><th>Total</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   /** Desglose de XP de cuenta que suma de a una línea, con barra que se llena y sube de nivel. */
@@ -1138,7 +1233,13 @@ export class Hud {
     }
   }
 
+  private stopNext() {
+    if (this.nextTimer !== null) clearInterval(this.nextTimer);
+    this.nextTimer = null;
+  }
+
   dispose() {
+    this.stopNext();
     window.removeEventListener('mousemove', this.onMouse);
     this.root.remove();
   }
@@ -1150,7 +1251,12 @@ function esc(s: string) {
 
 type Award = [icon: string, title: string, key: (p: PlayerResult) => number, fmt: (v: number) => string];
 /** Cómo cuenta su partida cada juego en la pantalla de resultados: columnas, premios y a quién se destaca. */
-interface ResultView { cols: [string, (p: PlayerResult) => string | number][]; awards: Award[]; mvp: (p: PlayerResult) => number }
+/** order: cómo se ordena la tabla (por defecto, por equipo y por quién se destacó más). */
+interface ResultView { cols: [string, (p: PlayerResult) => string | number][]; awards: Award[]; mvp: (p: PlayerResult) => number; order?: (a: PlayerResult, b: PlayerResult) => number }
+
+const MEDALS = ['🥇', '🥈', '🥉'];
+/** Copa: segundos entre los resultados de una pista y la largada de la siguiente. */
+const CUP_NEXT = 15;
 
 const BRAWL_RESULTS: ResultView = {
   cols: [['Nv', (p) => p.level], ['Sacó', (p) => p.kills], ['Cayó', (p) => p.deaths], ['Asist.', (p) => p.assists], ['Heat', (p) => Math.round(p.heatDealt)]],
@@ -1178,6 +1284,20 @@ const HORDE_RESULTS: ResultView = {
     ['🛡️', 'Intocable', (p) => (p.deaths === 0 ? 1 : 0), () => 'no cayó nunca'],
   ],
   mvp: (p) => (p.cs ?? 0) + p.destroyed * 4 + p.pickups - p.deaths * 5,
+};
+
+/** La tabla de la Carrera se arma aparte (raceTable): acá van los premios. */
+const RACE_RESULTS: ResultView = {
+  cols: [],
+  awards: [
+    ['🪂', 'Equilibrista', (p) => (p.deaths === 0 && (p.time ?? -1) > 0 ? 1 : 0), () => 'llegó sin caerse'],
+    ['💥', 'Mal compañero', (p) => p.kills, (v) => (v === 1 ? 'tiró a 1 rival' : `tiró a ${v} rivales`)],
+    ['🔨', 'Demoledor', (p) => p.destroyed, (v) => (v === 1 ? 'rompió 1 cobertura' : `rompió ${v} coberturas`)],
+    ['🚀', 'Cañón humano', (p) => p.bestLaunch, (v) => `lanzó a ${v} m/s`],
+    ['🕳️', 'Imán del vacío', (p) => p.deaths, (v) => (v === 1 ? 'se cayó 1 vez' : `se cayó ${v} veces`)],
+  ],
+  mvp: (p) => -(p.place ?? 99),
+  order: (a, b) => (a.place ?? 99) - (b.place ?? 99),
 };
 
 const COMBO_TIERS: [number, string][] = [[3, '¡Combo!'], [5, '¡Brutal!'], [8, '¡Salvaje!'], [12, '¡Bestial!'], [16, '¡INHUMANO!'], [22, '¡¡RUBBLE!!']];

@@ -48,6 +48,8 @@ export interface MatchSettings {
   theme: string; // tema visual (solo estética)
   /** Dificultad de los juegos contra el entorno (Horda): 1 fácil, 2 normal, 3 difícil. */
   difficulty: 1 | 2 | 3;
+  /** Carrera: cuántas pistas seguidas se corren sumando puntos (1 = una carrera suelta). Ver core/cup.ts. */
+  cup: number;
 }
 
 export const DEFAULT_SETTINGS: MatchSettings = {
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   botLevel: 2,
   theme: 'neon',
   difficulty: 2,
+  cup: 1,
 };
 
 export interface RosterEntry {

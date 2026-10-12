@@ -1,6 +1,6 @@
 // Artefactos del mapa: cosas con las que se interactúa además de los minerales. Son parte del mapa (se
 // escriben en el ASCII), el host resuelve sus efectos y los clientes los dibujan a partir del mapa y del
-// tick: rotores y géiseres son deterministas en el tiempo, así que casi nada de esto viaja por la red.
+// tick: rotores, géiseres y bolas son deterministas en el tiempo, así que casi nada de esto viaja por la red.
 //
 //  - Resorte ('J'): es terreno. Pisarlo te lanza hacia arriba; vive en movement.ts para que el cliente lo
 //    prediga igual que el host.
@@ -9,10 +9,14 @@
 //  - Géiser ('y'): avisa y después dispara un chorro que te manda al aire.
 //  - Barril explosivo ('e'): cobertura que explota al romperse (es un destructible, ver terrain.ts).
 //  - Caja de ítem ('?'): da un ítem activo de un solo uso (solo con reglas que tengan `itemBoxes`).
+//  - Acelerador ('a'): pisarlo te da un envión de velocidad.
+//  - Lanzabolas ('N' 'S' 'E' 'W'): tira bolas que ruedan hacia ese lado hasta donde se termina el piso.
+//    Se saltan o se esquivan; si te agarran, te llevan puesto.
 import { TICK_RATE } from './constants';
 
-export type GadgetKind = 'bumper' | 'rotor' | 'geyser' | 'box';
-export interface GadgetSpawn { kind: GadgetKind; x: number; y: number; z: number }
+export type GadgetKind = 'bumper' | 'rotor' | 'geyser' | 'box' | 'boost' | 'roller';
+/** dx, dz, len: lanzabolas (hacia dónde ruedan las bolas y cuántos metros recorren). */
+export interface GadgetSpawn { kind: GadgetKind; x: number; y: number; z: number; dx?: number; dz?: number; len?: number }
 
 /** Velocidad vertical que da un resorte (≈ 4,3 m de alto y algo más de un segundo en el aire). */
 export const PAD_V = 16;
@@ -27,6 +31,11 @@ export const BOX = { r: 0.95, respawn: 9 };
 export const BARREL = { hp: 36, radius: 3.6, heat: 16, kb: 17, up: 3, destruct: 45, tile: 55, respawn: 25 };
 /** Ítems que puede dar una caja. */
 export const BOX_ITEMS = ['onda', 'parpadeo', 'garfio', 'frasco', 'muralla', 'ancla'];
+/** haste: cuánto más rápido corrés · time: cuánto dura el envión. */
+export const BOOST = { r: 0.95, haste: 0.6, time: 1.6, cd: 0.5 };
+/** r: radio de la bola · h: hasta qué altura pega (más arriba, pasás saltando) · gap: segundos entre una bola y la siguiente ·
+ * out: cuánto del empujón va hacia el costado (te saca del carril). */
+export const ROLLER = { r: 0.75, h: 1.15, speed: 7.5, gap: 2.6, kb: 13, heat: 5, up: 3, cd: 0.9, out: 0.6 };
 
 /** Ángulo de un rotor en un tick (los pares giran para un lado y los impares para el otro). */
 export function rotorAngle(index: number, tick: number): number {
@@ -47,4 +56,15 @@ export function geyserPhase(index: number, tick: number): 'idle' | 'warn' | 'bur
   const t = geyserTime(index, tick);
   if (t < GEYSER.burst) return 'burst';
   return t >= GEYSER.period - GEYSER.warn ? 'warn' : 'idle';
+}
+
+/**
+ * Bolas de un lanzabolas en un tick: a cuántos metros de la boca va cada una (de la más nueva a la más vieja).
+ * Cada lanzabolas arranca desfasado, así que los carriles de al lado no tiran todos a la vez.
+ */
+export function rollerBalls(index: number, tick: number, len: number): number[] {
+  const out: number[] = [];
+  const step = ROLLER.speed * ROLLER.gap;
+  for (let s = ROLLER.speed * ((tick / TICK_RATE + index * 0.83) % ROLLER.gap); s <= len; s += step) out.push(s);
+  return out;
 }

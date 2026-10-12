@@ -88,7 +88,7 @@ export class TerrainView {
       m.castShadow = true;
       const bb = t.cellBounds(ci);
       const top = t.topAt(ci, (bb.minX + bb.maxX) / 2, (bb.minZ + bb.maxZ) / 2);
-      const crack = new THREE.Mesh(new THREE.PlaneGeometry(CELL, CELL), this.crackMats[0]);
+      const crack = new THREE.Mesh(new THREE.PlaneGeometry(CELL, CELL), this.crackMats[this.loose() ? 1 : 0]);
       crack.rotation.x = -Math.PI / 2;
       crack.position.set((bb.minX + bb.maxX) / 2, top + 0.02, (bb.minZ + bb.maxZ) / 2);
       crack.renderOrder = 2;
@@ -103,6 +103,9 @@ export class TerrainView {
     const neon = theme.neon === 'none' ? null : this.buildNeonEdges();
     if (neon) this.group.add(neon);
   }
+
+  /** Piso flojo: en las pistas de Carrera el piso frágil ya se ve agrietado, porque se cae con solo pisarlo. */
+  private loose() { return this.t.def.kind === 'race'; }
 
   private addCell(b: GeoBuilder, i: number, isStatic: boolean) {
     const t = this.t;
@@ -122,7 +125,8 @@ export class TerrainView {
     if (c.type === CellType.Wall) base.set(0x8b7b6c);
     else if (c.level >= 1) base.lerp(new THREE.Color(0xffffff), 0.12);
     if (c.type === CellType.Ramp) base.multiplyScalar(0.92);
-    if (c.fragile >= 0) base.lerp(new THREE.Color(0xffe0a0), 0.18);
+    // Piso frágil: un tono más claro. En la Carrera se cae al pisarlo, así que ahí se nota de lejos.
+    if (c.fragile >= 0) base.lerp(new THREE.Color(this.loose() ? 0xfff2c0 : 0xffe0a0), this.loose() ? 0.5 : 0.18);
     base.offsetHSL(0, 0, this.style.jitter(ix, iz) * 0.022);
     // Las losas firmes del piso llevan manchas de vegetación y senderos; muros y frágiles no (se leen por su color).
     const organic = c.type !== CellType.Wall && c.fragile < 0;
@@ -285,7 +289,7 @@ export class TerrainView {
       if (s !== tv.state) {
         tv.state = s;
         if (s < TILE_GONE) {
-          tv.crack.material = s === TILE_CRUMBLING ? this.crumbleMat : this.crackMats[Math.min(3, s)];
+          tv.crack.material = s === TILE_CRUMBLING ? this.crumbleMat : this.crackMats[Math.min(3, s + (this.loose() ? 1 : 0))];
           tv.mesh.visible = true;
           tv.crack.visible = true;
           tv.mesh.position.set(0, 0, 0);

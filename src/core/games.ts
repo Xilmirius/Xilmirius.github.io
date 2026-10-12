@@ -15,10 +15,11 @@ export const GAME_IDS: GameId[] = ['arena', 'siege', 'race', 'horde'];
 export type Sides = 'choice' | 'teams' | 'ffa' | 'coop';
 
 /** Opciones de la partida que el host puede tocar en la sala. */
-export type LobbyOption = 'lives' | 'killTarget' | 'kothTarget' | 'timeLimit' | 'difficulty';
+export type LobbyOption = 'lives' | 'killTarget' | 'kothTarget' | 'timeLimit' | 'difficulty' | 'cup';
 /** names: cómo se muestra cada valor, si no alcanza con el número. */
 export const LOBBY_OPTIONS: Record<LobbyOption, { label: string; values: number[]; names?: string[] }> = {
   difficulty: { label: 'Dificultad', values: [1, 2, 3], names: ['Fácil', 'Normal', 'Difícil'] },
+  cup: { label: 'Formato', values: [1, 3, 4], names: ['Una carrera', 'Copa de 3 pistas', 'Copa de 4 pistas'] },
   lives: { label: 'Vidas', values: [1, 2, 3, 4, 5] },
   killTarget: { label: 'Ring-outs para ganar', values: [5, 10, 15, 20] },
   kothTarget: { label: 'Puntos para ganar', values: [60, 100, 150] },
@@ -54,8 +55,8 @@ export interface GameDef {
   defaults: Partial<MatchSettings>;
   /** Bots con los que arranca la práctica. */
   practiceBots: number;
-  /** Vitrina: la partida de bots que se ve detrás del menú. */
-  demo: { map: string; theme: string; bots: number };
+  /** Vitrina: la partida de bots que se ve detrás del menú. tour: cada vez que vuelve a empezar pasa al mapa siguiente del juego. */
+  demo: { map: string; theme: string; bots: number; tour?: boolean };
 }
 
 export interface ModeInfo {
@@ -93,13 +94,13 @@ export const GAMES: Record<GameId, GameDef> = {
   },
   race: {
     id: 'race', name: 'Carrera', icon: '🏁', tagline: 'Pista de obstáculos', color: 0x4fe0a0,
-    desc: 'Todos contra todos hasta la meta entre rotores, paragolpes, géiseres y resortes. Sin poderes: golpes, empujón, dash y los ítems de las cajas.',
-    highlights: ['Sin poderes: pura maña', 'Cajas con ítems de un solo uso', 'Te caés y volvés a la última puerta'],
+    desc: 'Todos contra todos hasta la meta. Cuatro pistas con lo suyo: rotores y géiseres, curvas con atajos, bolas que ruedan contra vos y paredes que se rompen a puro dash. Sin poderes: golpes, empujón, dash y los ítems de las cajas.',
+    highlights: ['4 pistas y copa por puntos', 'Sin poderes: pura maña', 'Te caés y volvés a la última puerta'],
     players: '1 a 6',
     modes: ['race'], rulesets: ['race'], mapKinds: ['race'],
     sides: 'ffa', minPlayers: 1, go: ['¡A CORRER!', '¡A correr!'],
-    defaults: { timeLimit: 300, theme: 'clasico' }, practiceBots: 4,
-    demo: { map: 'pista', theme: 'clasico', bots: 5 },
+    defaults: { timeLimit: 300, theme: 'clasico', cup: 3 }, practiceBots: 4,
+    demo: { map: 'pista', theme: 'clasico', bots: 5, tour: true },
   },
   horde: {
     id: 'horde', name: 'Horda', icon: '🧟', tagline: 'Cooperativo contra zombis', color: 0x9be04f,
@@ -137,8 +138,8 @@ export const MODE_INFO: Record<ModeId, ModeInfo> = {
     desc: 'Cooperativo con armas: las oleadas de zombis no paran de crecer. Cumplí las misiones del mapa y llegá a la extracción antes de quedarte sin vidas.',
   },
   race: {
-    name: 'Carrera de obstáculos', game: 'race', options: ['timeLimit'],
-    desc: 'Todos contra todos hasta la meta: rotores, paragolpes, géiseres y resortes. Sin habilidades: golpes, empujón, dash y los ítems de las cajas.',
+    name: 'Carrera de obstáculos', game: 'race', options: ['cup', 'timeLimit'], labels: { timeLimit: 'Tiempo límite por pista' },
+    desc: 'Todos contra todos hasta la meta. Sin habilidades: golpes, empujón, dash y los ítems de las cajas. En copa se corren varias pistas seguidas y gana quien suma más puntos.',
   },
 };
 
@@ -170,8 +171,13 @@ export function fixSettings(s: MatchSettings): MatchSettings {
 /** Deja los ajustes como el juego los exige, mapa incluido. Es lo que aplican la sala y el host. */
 export function normalizeSettings(s: MatchSettings): MatchSettings {
   const maps = mapsFor(gameOf(s.mode));
-  return { ...fixSettings(s), map: maps.includes(s.map) ? s.map : maps[0] };
+  // La copa no puede tener más pistas que las que hay, y solo existe en los modos que la ofrecen.
+  const cup = MODE_INFO[s.mode]?.options.includes('cup') ? Math.max(1, Math.min(maps.length, Math.round(s.cup) || 1)) : 1;
+  return { ...fixSettings(s), map: maps.includes(s.map) ? s.map : maps[0], cup };
 }
+
+/** Tema visual que le queda a un mapa (si tiene uno propio). */
+export const themeOf = (map: string): string | undefined => MAPS[map]?.theme;
 
 /** Cambiar de modo. Si el modo es de otro juego, entran también los valores de entrada de ese juego. */
 export function enterMode(prev: MatchSettings, mode: ModeId): MatchSettings {

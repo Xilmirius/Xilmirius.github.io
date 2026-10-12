@@ -611,6 +611,7 @@ export class AudioEngine {
       case 'spawn': if (e.id === localId) this.play('spawn', 0.8); break;
       case 'blink': this.play('blink', vol, pan); break;
       case 'bounce': this.play('bounce', vol * 0.7, pan); break;
+      case 'ram': this.play('bounce', vol * (e.id === localId ? 0.9 : 0.5), pan, 0.8); break;
       case 'gate':
         if (e.fin) { this.play('crowd', e.fin === 1 ? 0.9 : 0.5); if (e.id === localId) this.play('jackpot', 0.9); }
         else if (e.id === localId) this.play('levelup', 0.7);
@@ -619,6 +620,8 @@ export class AudioEngine {
         if (e.w === 'pad') this.play('airjump', vol * (e.id === localId ? 1 : 0.5), pan, 1.5);
         else if (e.w === 'bumper') this.play('bounce', vol, pan, 1.3);
         else if (e.w === 'geyser') this.play('wave', vol * 0.6, pan, 1.6);
+        else if (e.w === 'boost') this.play('whoosh', vol * (e.id === localId ? 1 : 0.4), pan, 1.9);
+        else if (e.w === 'roller') this.play('bounce', vol, pan, 0.6);
         else if (e.w === 'box') { if (e.id === localId) this.play('craft', 0.9); else this.play('coin', vol * 0.4, pan); }
         break;
       case 'count': this.play(e.n > 0 ? 'count' : 'go', 1); break;

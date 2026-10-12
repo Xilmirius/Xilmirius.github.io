@@ -32,6 +32,10 @@ export interface Ruleset {
   recall: boolean;
   /** Segundos para que una baldosa frágil que se cayó vuelva a estar (0 = nunca). */
   tileRegen: number;
+  /** El piso frágil se cae al pisarlo (no hace falta romperlo a golpes). */
+  tileStep: boolean;
+  /** Daño que le hace el dash a la cobertura contra la que choca (0 = no la rompe). */
+  dashBreak: number;
   /** Multiplicador de la XP (el Asedio es más largo: se sube de nivel más despacio). */
   xpMul: number;
   /** Habilidades del héroe (Q, 2, 3 y ulti). Apagado: solo golpes, empujón, salto y dash. */
@@ -47,31 +51,31 @@ export const RULESETS: Record<RulesetId, Ruleset> = {
     id: 'brawl', name: 'Brawler', icon: '⚡',
     desc: 'Rápido y directo: todas las habilidades desde el principio, la ulti se carga pegando y Shift es un dash. Sin niveles, forja ni ítems que administrar.',
     progression: false, crafting: false, repair: false, pickups: 'ult', dash: true, ultCharge: true,
-    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
+    forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
   },
   full: {
     id: 'full', name: 'Completo', icon: '🧬',
     desc: 'Todos los sistemas: niveles que desbloquean habilidades, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
-    forgeAtBase: false, recall: false, tileRegen: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
+    forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
   },
   moba: {
     id: 'moba', name: 'Asedio', icon: '🏰',
     desc: 'Las del modo Asedio (MOBA): niveles, materiales que sueltan los esbirros, forja solo en tu base, B para volver y el piso roto se rearma solo.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
-    forgeAtBase: true, recall: true, tileRegen: 25, xpMul: 0.55, abilities: true, itemBoxes: false, weapons: false,
+    forgeAtBase: true, recall: true, tileRegen: 25, tileStep: false, dashBreak: 0, xpMul: 0.55, abilities: true, itemBoxes: false, weapons: false,
   },
   race: {
     id: 'race', name: 'Carrera', icon: '🏁',
-    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe. Golpes, empujón, salto y dash, más los ítems de un solo uso que dan las cajas.',
+    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe. Golpes, empujón, salto y dash, más los ítems de un solo uso que dan las cajas. El dash rompe la cobertura y el piso flojo se cae al pisarlo.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
-    forgeAtBase: false, recall: false, tileRegen: 6, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
+    forgeAtBase: false, recall: false, tileRegen: 4, tileStep: true, dashBreak: 50, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
   },
   horde: {
     id: 'horde', name: 'Horda', icon: '🔫',
     desc: 'Las de la Horda: armas en vez de poderes. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
-    forgeAtBase: false, recall: false, tileRegen: 12, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
+    forgeAtBase: false, recall: false, tileRegen: 12, tileStep: false, dashBreak: 0, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
   },
 };
 

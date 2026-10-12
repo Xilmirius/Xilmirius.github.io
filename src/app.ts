@@ -4,6 +4,7 @@ import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs } 
 import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
 import { ACTIONS, applyPreset, currentPreset, getBinds, keyLabel, keyName, PRESETS, RESERVED, setBind } from './game/keybinds';
+import { cupMaps } from './core/cup';
 import { GAME_IDS, GAMES, gameOf, LOBBY_OPTIONS, mapsFor, MODE_INFO, sidesOf, type GameId } from './core/games';
 import { MAPS } from './core/maps';
 import type { LobbyState, MatchInit, MatchResultInfo } from './core/protocol';
@@ -419,11 +420,14 @@ export class App {
           select(rules.id, game.rulesets.map((r) => [r, `${RULESETS[r].icon} ${RULESETS[r].name}`]), (v) => set({ rules: v as RulesetId })),
           h('p', { class: 'muted small' }, rules.desc)]
         : tip(h('p', { class: 'muted small' }, h('b', null, 'Reglas ⓘ · '), rules.desc), () => rulesTip(rules.id)),
-      h('label', null, 'Mapa'),
+      h('label', null, st.cup > 1 ? 'Primera pista' : 'Mapa'),
       game.autoMap
         ? h('p', { class: 'muted small' }, game.autoMap)
         // (el formato que anuncia cada arena, "2v2 · FFA", solo dice algo donde hay equipos que elegir)
         : select(st.map, mapsFor(game).map((id) => [id, game.sides === 'coop' ? MAPS[id].name : `${MAPS[id].name} (${MAPS[id].players})`]), (v) => set({ map: v })),
+      game.autoMap ? null : h('p', { class: 'muted small' }, st.cup > 1
+        ? `🏆 La copa recorre ${cupMaps(st.map, st.cup, mapsFor(game)).map((id) => MAPS[id].name).join(' → ')}. Cada pista entra con su tema y los puntos se suman.`
+        : MAPS[st.map]?.desc ?? ''),
       h('label', null, 'Tema visual'), select(st.theme ?? 'neon', THEMES.map((t) => [t.id, `${t.icon} ${t.name}`]), (v) => set({ theme: v })),
       game.sides === 'choice' ? [h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' }))] : null,
       info.options.flatMap((o) => [
@@ -503,7 +507,7 @@ export class App {
   }
 
   private onEnd(res: MatchResultInfo) {
-    this.match?.showResults(res, () => (this.session as HostSession).backToLobby(), () => void this.leave());
+    this.match?.showResults(res, () => (this.session as HostSession).continueMatch(), () => void this.leave(), () => (this.session as HostSession).backToLobby());
   }
 
   private onBack() {

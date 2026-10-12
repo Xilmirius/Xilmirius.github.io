@@ -32,7 +32,9 @@ const DESTRUCT_CHARS: Record<string, [Family, number]> = {
 };
 
 /** En minúscula van en el piso (n0); en mayúscula, sobre una plataforma (n1). */
-const GADGET_CHARS: Record<string, GadgetKind> = { p: 'bumper', r: 'rotor', y: 'geyser', '?': 'box', P: 'bumper', R: 'rotor', Y: 'geyser' };
+const GADGET_CHARS: Record<string, GadgetKind> = { p: 'bumper', r: 'rotor', y: 'geyser', '?': 'box', a: 'boost', P: 'bumper', R: 'rotor', Y: 'geyser' };
+/** Lanzabolas: la letra dice hacia dónde ruedan las bolas [dx, dz] (el norte es arriba en el mapa). */
+const ROLLER_CHARS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 
 /** Puerta de la Carrera: una franja de celdas que hay que pisar (punto de control o meta). */
 export interface Gate { x: number; z: number; cells: Set<number> }
@@ -110,7 +112,10 @@ export class Terrain {
           default: {
             const d = DESTRUCT_CHARS[ch];
             const g = GADGET_CHARS[ch];
-            if (d) {
+            const roll = ROLLER_CHARS[ch];
+            if (roll) {
+              this.gadgets.push({ kind: 'roller', x: c.x, y: 0, z: c.z, dx: roll[0], dz: roll[1], len: 0 });
+            } else if (d) {
               cell.level = d[1];
               this.destructs.push({ kind: d[0], x: c.x, z: c.z, y: d[1] * LEVEL_H });
             } else if (g) {
@@ -124,6 +129,18 @@ export class Terrain {
         }
         this.cells.push(cell);
       }
+    }
+    // Lanzabolas: las bolas ruedan hasta el borde de la última celda de piso llano que tengan por delante.
+    for (const g of this.gadgets) {
+      if (g.kind !== 'roller') continue;
+      let ix = Math.floor((g.x - this.originX) / CELL), iz = Math.floor((g.z - this.originZ) / CELL), n = 0;
+      for (;;) {
+        ix += g.dx!; iz += g.dz!;
+        const c = ix < 0 || iz < 0 || ix >= this.w || iz >= this.h ? null : this.cells[iz * this.w + ix];
+        if (!c || c.type !== CellType.Floor || c.level !== 0) break;
+        n++;
+      }
+      g.len = (n + 0.5) * CELL;
     }
     this.zonePoints.push(...this.groupCells(zoneCells));
     this.lairs.push(...this.groupCells(lairCells));

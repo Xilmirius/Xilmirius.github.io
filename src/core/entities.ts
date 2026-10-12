@@ -97,6 +97,8 @@ export class Character implements MoveState {
   actives: (string | null)[] = [null, null, null];
   mutations: Partial<Record<AbilitySlot, Route>> = {};
 
+  /** Último tick en que embistió cobertura con el dash (reglas con `dashBreak`). */
+  ramTick = -9999;
   lastHits = new Map<number, number>(); // atacante -> tick
   launcher = -1; // quién lanzó este cuerpo (para crédito de billar y paredes)
   bodyHits = new Map<number, number>();
@@ -325,6 +327,8 @@ export interface Gadget {
   fired: boolean;
   /** Último tick en que le pegó a cada cuerpo (para no pegar todos los ticks). */
   last: Map<number, number>;
+  /** Lanzabolas: hacia dónde ruedan las bolas y cuántos metros recorren. */
+  dx: number; dz: number; len: number;
 }
 
 export const DESTRUCT_DEF: Record<Family, { size: number; h: number; hp: number }> = {

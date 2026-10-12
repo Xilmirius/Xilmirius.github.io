@@ -190,9 +190,11 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
   ],
   race: () => [
     'Pasá las <b>puertas</b> en orden: si te caés, reaparecés en la última que pasaste.',
-    '<b>Rotores</b>: se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos.',
+    '<b>Rotores</b> y <b>bolas</b>: se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
+    'El <b>piso flojo</b> (más claro y agrietado) se cae al pisarlo: no te quedes quieto. El <b>dash rompe</b> la cobertura que te tapa el paso; los barriles explotan.',
     `Las <b>cajas ❓</b> dan un ítem de un solo uso (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>).`,
     'Cuando llega el primero quedan 25 s para terminar.',
+    'En <b>copa</b> se corren varias pistas seguidas: cada puesto da puntos y gana quien suma más.',
   ],
 };
 

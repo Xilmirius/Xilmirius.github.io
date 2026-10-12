@@ -1,9 +1,9 @@
 // IA de bots: generan el mismo InputFrame que un jugador humano (el host no los trata distinto).
 // Sirven para practicar solo, completar equipos y reemplazar a quien se desconecta.
-import { MUTATION_LEVELS } from './constants';
+import { CELL, MUTATION_LEVELS } from './constants';
 import type { Character } from './entities';
 import { HEROES } from './heroes';
-import { geyserPhase, ROTOR, rotorAngle } from './gadgets';
+import { geyserPhase, ROLLER, rollerBalls, ROTOR, rotorAngle } from './gadgets';
 import { CRATE_KINDS, HORDE, MISSIONS, type HordeMode } from './horde';
 import { BTN, type InputFrame } from './input';
 import { ITEM_BY_ID, canAfford } from './items';
@@ -17,10 +17,11 @@ import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
 import { C4, WEAPON_IDS, WEAPONS } from './weapons';
 
+/** pace: a qué fracción de su velocidad corre una carrera (los fáciles se dejan alcanzar). */
 const DIFF = {
-  1: { think: 0.5, aimErr: 2.4, use: 0.12, lead: 0.2, push: 0.15, craftEvery: 8, dash: 0.05 },
-  2: { think: 0.2, aimErr: 0.8, use: 0.55, lead: 0.7, push: 0.6, craftEvery: 4, dash: 0.2 },
-  3: { think: 0.1, aimErr: 0.35, use: 0.85, lead: 1, push: 0.9, craftEvery: 2.5, dash: 0.35 },
+  1: { think: 0.5, aimErr: 2.4, use: 0.12, lead: 0.2, push: 0.15, craftEvery: 8, dash: 0.05, pace: 0.86 },
+  2: { think: 0.2, aimErr: 0.8, use: 0.55, lead: 0.7, push: 0.6, craftEvery: 4, dash: 0.2, pace: 0.94 },
+  3: { think: 0.1, aimErr: 0.35, use: 0.85, lead: 1, push: 0.9, craftEvery: 2.5, dash: 0.35, pace: 1 },
 } as const;
 
 const ITEM_PRIORITY: Record<string, string[]> = {
@@ -37,6 +38,11 @@ const ROUTE_PREF: Record<string, Route[]> = {
   remache: ['tank', 'support', 'carry'],
 };
 
+/** Punto del camino. hop: se llega saltando un hueco desde el punto anterior. */
+interface PathNode { x: number; z: number; top: number; hop?: boolean }
+/** Segundos que se le da a un salto sobre un hueco antes de volver a pensar. */
+const HOP_TIME = 1.3;
+
 export class BotBrain {
   private rng: Rng;
   private d: (typeof DIFF)[1 | 2 | 3];
@@ -44,7 +50,7 @@ export class BotBrain {
   private thinkT = 0;
   private target: Character | null = null;
   private goal: { x: number; z: number } | null = null;
-  private path: { x: number; z: number; top: number }[] = [];
+  private path: PathNode[] = [];
   private pathT = 0;
   private wishX = 0;
   private wishZ = 0;
@@ -62,6 +68,10 @@ export class BotBrain {
   private craftT = 0;
   private repairing = false;
   private dashAway: Character | null = null;
+  /** Salto en curso sobre un hueco: adónde quiere caer y cuánto le queda para darlo por terminado. */
+  private hop: { x: number; z: number; t: number } | null = null;
+  /** Había una bola por pasarme por encima en el tick anterior. */
+  private ballNear = false;
   // Asedio
   private lane = -1;
   private retreating = false;
@@ -90,6 +100,11 @@ export class BotBrain {
     }
 
     this.navigate(sim, ch, dt);
+    if (sim.mode.id === 'race') {
+      this.dodgeBalls(sim, ch);
+      // Los bots más fáciles corren un poco más lento (salvo en pleno salto sobre un hueco, que necesita toda la carrera).
+      if (!this.hop) { this.wishX *= this.d.pace; this.wishZ *= this.d.pace; }
+    }
 
     let b = this.hold;
     if (this.pushT > 0) {
@@ -373,6 +388,19 @@ export class BotBrain {
       // Géiser avisando justo adelante: frenar hasta que dispare.
       if (g.kind === 'geyser' && d < 2.6 && d > 0.9 && dx * gx + dz * gz > 0 && geyserPhase(g.idx, sim.tick) !== 'idle') this.goal = null;
     }
+    // Cobertura en el camino: embestirla con el dash y pegarle hasta que caiga (los barriles ni tocarlos: explotan).
+    const way = this.path[0] ?? gate;
+    const wu = norm2(way.x - ch.pos.x, way.z - ch.pos.z);
+    for (const d of sim.destructibles) {
+      if (d.stage >= 3 || d.explosive || Math.abs(d.y - ch.pos.y) > 1) continue;
+      const dx = d.x - ch.pos.x, dz = d.z - ch.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 2.6 || (dx * wu.x + dz * wu.z) / (dist || 1) < 0.6) continue;
+      this.aimAt(ch, d.x, d.z);
+      this.hold |= BTN.BASIC;
+      if (ch.grounded && ch.dashCd <= 0) this.tap |= BTN.DASH;
+      break;
+    }
     // Empujón al rival que esté pegado (más ganas cuanto más difícil el bot).
     for (const c of sim.chars) {
       if (c === ch || !c.alive || m.finished(c.id)) continue;
@@ -398,6 +426,25 @@ export class BotBrain {
       this.tap |= [BTN.I1, BTN.I2, BTN.I3][i];
       break;
     }
+  }
+
+  /**
+   * Bolas: saltar cuando una está por pasarme por encima (mirando un instante hacia adelante). Se decide una vez
+   * por bola: los bots más fáciles a veces no la ven venir.
+   */
+  private dodgeBalls(sim: Simulation, ch: Character) {
+    const look = 0.26;
+    const px = ch.pos.x + ch.vel.x * look, pz = ch.pos.z + ch.vel.z * look;
+    let near = false;
+    for (const g of sim.gadgets) {
+      if (g.kind !== 'roller' || near) continue;
+      for (const s of rollerBalls(g.idx, sim.tick, g.len)) {
+        const at = s + ROLLER.speed * look;
+        if (Math.hypot(g.x + g.dx * at - px, g.z + g.dz * at - pz) < ROLLER.r + 0.75) { near = true; break; }
+      }
+    }
+    if (near && !this.ballNear && ch.grounded && this.rng.chance(Math.min(0.97, this.d.use + 0.25))) this.tap |= BTN.JUMP;
+    this.ballNear = near;
   }
 
   // ───────────── Asedio (MOBA) ─────────────
@@ -623,6 +670,23 @@ export class BotBrain {
 
     // Recuperación: si estoy sobre el vacío, volver al piso más cercano.
     const under = cw.groundAt(ch.pos.x, ch.pos.z, ch.pos.y + 0.5);
+    if (this.hop) {
+      // Saltando un hueco: seguir hacia donde quiero caer; si no llego, segundo salto y después el dash.
+      this.hop.t -= dt;
+      if ((ch.grounded && this.hop.t < HOP_TIME - 0.25) || this.hop.t <= 0) this.hop = null;
+      else {
+        if (ch.grounded) this.tap |= BTN.JUMP;
+        const hx = this.hop.x - ch.pos.x, hz = this.hop.z - ch.pos.z;
+        const u = norm2(hx, hz);
+        this.wishX = u.x;
+        this.wishZ = u.z;
+        if (!ch.grounded && under === -Infinity && ch.vel.y < -3 && Math.hypot(hx, hz) > 1) {
+          if (ch.airJumps > 0 && ch.hitstun <= 0) this.tap |= BTN.JUMP;
+          else if (sim.rules.dash && ch.airDashes > 0 && ch.dashCd <= 0 && ch.tumble <= 0 && ch.hitstun <= 0) this.tap |= BTN.DASH;
+        }
+        return;
+      }
+    }
     if (!ch.grounded && under === -Infinity) {
       const safe = this.nearestSafe(sim, ch.pos.x, ch.pos.z);
       if (safe) {
@@ -654,7 +718,9 @@ export class BotBrain {
       this.path.shift();
       next = this.path[0];
     }
-    if (next && this.path.length > 1) {
+    // El próximo punto del camino queda del otro lado de un hueco: se llega saltando.
+    const gap = !!next && next.hop && ch.grounded;
+    if (next && (this.path.length > 1 || gap)) {
       wx = next.x - ch.pos.x;
       wz = next.z - ch.pos.z;
       if (next.top > ch.pos.y + 0.45 && Math.hypot(wx, wz) < 2.2 && ch.grounded) this.tap |= BTN.JUMP;
@@ -666,8 +732,16 @@ export class BotBrain {
     const u = norm2(wx, wz);
     wx = u.x; wz = u.z;
 
-    // Nunca caminar hacia el vacío.
-    for (const k of [0.9, 1.6]) {
+    // Nunca caminar hacia el vacío... salvo para saltar un hueco: ahí se toma carrera y se salta en el borde.
+    if (gap && cw.groundAt(ch.pos.x + wx * 0.7, ch.pos.z + wz * 0.7, ch.pos.y + 2) === -Infinity) {
+      this.tap |= BTN.JUMP;
+      this.hop = { x: next!.x, z: next!.z, t: HOP_TIME };
+      this.path.shift();
+      this.wishX = wx;
+      this.wishZ = wz;
+      return;
+    }
+    for (const k of gap ? [] : [0.9, 1.6]) {
       if (cw.groundAt(ch.pos.x + wx * k, ch.pos.z + wz * k, ch.pos.y + 2) === -Infinity) {
         const c = norm2(-ch.pos.x, -ch.pos.z);
         const nx = c.x * 0.7 - wz * 0.3, nz = c.z * 0.7 + wx * 0.3;
@@ -731,7 +805,14 @@ export class BotBrain {
     for (const d of sim.destructibles) if (d.stage < 3) blockedByDestruct.add(t.cellIndexAt(d.x, d.z));
     for (const s of sim.structures) blockedByDestruct.add(t.cellIndexAt(s.x, s.z));
     // Mejor rodear paragolpes, ejes de rotor y géiseres que pasarles por encima.
-    for (const g of sim.gadgets) if (g.kind !== 'box') blockedByDestruct.add(t.cellIndexAt(g.x, g.z));
+    for (const g of sim.gadgets) if (g.kind !== 'box' && g.kind !== 'boost' && g.kind !== 'roller') blockedByDestruct.add(t.cellIndexAt(g.x, g.z));
+    // Carrera: los carriles de bolas se pisan lo menos posible, y un hueco de una celda se cruza saltando.
+    const hops = sim.mode.id === 'race';
+    const lanes = new Set<number>();
+    for (const g of sim.gadgets) {
+      if (g.kind !== 'roller') continue;
+      for (let s = 0; s <= g.len; s += CELL) lanes.add(t.cellIndexAt(g.x + g.dx * s, g.z + g.dz * s));
+    }
     cost[start] = 0;
     const level = (i: number) => {
       const c = t.cells[i];
@@ -749,13 +830,28 @@ export class BotBrain {
           const nx = cx + dx, nz = cz + dz;
           if (nx < 0 || nz < 0 || nx >= t.w || nz >= t.h) continue;
           const ni = nz * t.w + nx;
-          if (!t.isWalkable(ni)) continue;
+          if (!t.isWalkable(ni)) {
+            // Hueco (vacío o piso caído) de una celda con piso del otro lado, en línea recta.
+            if (!hops || (dx && dz) || t.cells[ni].type === CellType.Wall) continue;
+            const fx = cx + dx * 2, fz = cz + dz * 2;
+            if (fx < 0 || fz < 0 || fx >= t.w || fz >= t.h) continue;
+            const fi = fz * t.w + fx;
+            if (!t.isWalkable(fi) || level(fi) > level(cur) || blockedByDestruct.has(fi)) continue;
+            const hc = cost[cur] + 4.5;
+            if (hc < cost[fi]) {
+              if (cost[fi] === Infinity) open.push(fi);
+              cost[fi] = hc;
+              prev[fi] = cur;
+            }
+            continue;
+          }
           if (dx && dz && (!t.isWalkable(cz * t.w + nx) || !t.isWalkable(nz * t.w + cx))) continue;
           const dl = level(ni) - level(cur);
           if (dl > 1) continue;
           let c = dx && dz ? 1.42 : 1;
           if (dl >= 1) c += 2; // salto
           if (blockedByDestruct.has(ni)) c += 3;
+          if (lanes.has(ni)) c += 1.2;
           if (t.cells[ni].fragile >= 0 && t.tileState[t.cells[ni].fragile] >= 2) c += 2;
           const nc = cost[cur] + c;
           if (nc < cost[ni]) {
@@ -767,10 +863,12 @@ export class BotBrain {
       }
     }
     if (prev[goal] < 0) return [];
-    const out: { x: number; z: number; top: number }[] = [];
+    const out: PathNode[] = [];
     for (let i = goal; i !== start && i >= 0; i = prev[i]) {
       const c = t.cellCenter(i % t.w, Math.floor(i / t.w));
-      out.push({ x: c.x, z: c.z, top: t.topAt(i, c.x, c.z) });
+      const p = prev[i];
+      const far = p >= 0 && Math.abs((p % t.w) - (i % t.w)) + Math.abs(Math.floor(p / t.w) - Math.floor(i / t.w)) > 1 && ((p % t.w) === (i % t.w) || Math.floor(p / t.w) === Math.floor(i / t.w));
+      out.push({ x: c.x, z: c.z, top: t.topAt(i, c.x, c.z), hop: far });
     }
     out.reverse();
     return out;

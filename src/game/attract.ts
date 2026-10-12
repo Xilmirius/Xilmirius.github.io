@@ -1,7 +1,7 @@
 // Fondo del menú: una partida de bots del juego elegido corriendo detrás de la UI ("attract mode").
 import { BotBrain } from '../core/bots';
 import { DT } from '../core/constants';
-import { GAMES, normalizeSettings, type GameId } from '../core/games';
+import { GAMES, mapsFor, normalizeSettings, themeOf, type GameId } from '../core/games';
 import { Simulation } from '../core/sim';
 import { F_DEAD, FrameBuffer, buildWorldFrame } from '../core/snapshot';
 import { DEFAULT_SETTINGS, HERO_IDS } from '../core/types';
@@ -22,6 +22,8 @@ export class AttractMode {
   private followT = 0;
   private follow = 1;
   private endT = 0;
+  /** Cuántas veces se armó la partida (para ir cambiando de mapa). */
+  private round = Math.floor(Math.random() * 8);
   private disposed = false;
 
   constructor(private container: HTMLElement, readonly game: GameId = 'arena') {
@@ -58,8 +60,11 @@ export class AttractMode {
   private build() {
     const g = GAMES[this.game];
     const roster = Array.from({ length: g.demo.bots }, (_, i) => ({ pid: 'demo' + i, name: '', hero: HERO_IDS[i % HERO_IDS.length], team: i % 2, bot: true }));
+    // Los juegos con recorrido muestran un mapa distinto cada vez, con el tema que le queda.
+    const maps = mapsFor(g);
+    const map = g.demo.tour ? maps[this.round++ % maps.length] : g.demo.map;
     const settings = normalizeSettings({
-      ...DEFAULT_SETTINGS, mode: g.id === 'arena' ? 'kills' : g.modes[0], map: g.demo.map, theme: g.demo.theme,
+      ...DEFAULT_SETTINGS, mode: g.id === 'arena' ? 'kills' : g.modes[0], map, theme: (g.demo.tour && themeOf(map)) || g.demo.theme,
       killTarget: 9999, timeLimit: 99999, lives: 5,
     });
     this.sim = new Simulation({ settings, roster, seed: Date.now() % 100000 });

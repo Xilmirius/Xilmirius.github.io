@@ -9,7 +9,8 @@ import type { ClientMsg, LobbyState, MatchInit, MatchResultInfo, RosterInfo } fr
 import { parseCommand, Simulation } from '../core/sim';
 import { buildMeFrame, buildWorldFrame, encodeWorld, FrameBuffer } from '../core/snapshot';
 import { validHat } from '../core/cosmetics';
-import { enterMode, gameOf, normalizeSettings, sidesOf } from '../core/games';
+import { cupMaps, newCup, scoreCup, type CupState } from '../core/cup';
+import { enterMode, gameOf, mapsFor, normalizeSettings, sidesOf, themeOf } from '../core/games';
 import { mobaMapFor } from '../core/maps';
 import { DEFAULT_SETTINGS, HERO_IDS, type HeroId, type MatchSettings, type RosterEntry } from '../core/types';
 import { db } from '../db/persistence';
@@ -71,6 +72,10 @@ export class HostSession {
   private gameId: string | null = null;
   private announceT = 0;
   private closed = false;
+  /** Copa en curso (varias carreras seguidas con puntos), o null. */
+  cup: CupState | null = null;
+  /** Héroe con el que corre cada bot durante la copa (para que no cambie de una pista a otra). */
+  private cupHeroes = new Map<string, HeroId>();
 
   constructor(private me: { pid: string; name: string; hero: HeroId; hat: string }, readonly offline: boolean, private cb: SessionCallbacks) {
     this.code = offline ? 'LOCAL' : makeCode();
@@ -264,7 +269,10 @@ export class HostSession {
   setSettings(s: Partial<MatchSettings>) {
     const cur = this.lobby.settings;
     const base = s.mode && s.mode !== cur.mode ? enterMode(cur, s.mode) : cur;
+    const map = cur.map;
     Object.assign(cur, normalizeSettings({ ...base, ...s }));
+    // Al cambiar de mapa entra el tema que le queda (salvo que en el mismo cambio se haya elegido otro).
+    if (cur.map !== map && s.theme === undefined) cur.theme = themeOf(cur.map) ?? cur.theme;
     const humans = this.lobby.players.filter((p) => !p.bot).length;
     this.lobby.settings.bots = Math.max(0, Math.min(MAX_PLAYERS - humans, this.lobby.settings.bots));
     this.emitLobby();
@@ -300,10 +308,20 @@ export class HostSession {
     return null;
   }
 
-  startMatch(): string | null {
+  /** next: sigue la copa en curso con su próxima pista (si no, empieza una partida nueva). */
+  startMatch(next = false): string | null {
     const err = this.canStart();
     if (err) return err;
     const s = normalizeSettings(this.lobby.settings);
+    if (!next || !this.cup || this.cup.round >= this.cup.maps.length) {
+      this.cup = s.cup > 1 ? newCup(cupMaps(s.map, s.cup, mapsFor(gameOf(s.mode)))) : null;
+      this.cupHeroes.clear();
+    }
+    if (this.cup) {
+      // Cada pista de la copa, con su tema.
+      s.map = this.cup.maps[this.cup.round];
+      s.theme = themeOf(s.map) ?? s.theme;
+    }
     const humans = this.lobby.players.filter((p) => p.connected);
     const roster: RosterEntry[] = humans.map((p) => ({ pid: p.pid, name: p.name, hero: p.hero, team: p.team, bot: false, hat: p.hat }));
     const t = [0, 0];
@@ -313,8 +331,9 @@ export class HostSession {
       const team = t[0] <= t[1] ? 0 : 1;
       t[team]++;
       const free = HERO_IDS.filter((h) => !used.has(h));
-      const hero = (free.length ? free : HERO_IDS)[Math.floor(Math.random() * (free.length || HERO_IDS.length))];
+      const hero = this.cupHeroes.get(`bot-${i}`) ?? (free.length ? free : HERO_IDS)[Math.floor(Math.random() * (free.length || HERO_IDS.length))];
       used.add(hero);
+      if (this.cup) this.cupHeroes.set(`bot-${i}`, hero);
       roster.push({ pid: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], hero, team, bot: true, botLevel: s.botLevel, hat: ['none', 'party', 'horns', 'tophat'][i % 4] });
     }
     // Asedio: el mapa sale del tamaño de los equipos (1 línea hasta 2v2, 2 líneas en 3v3).
@@ -325,6 +344,7 @@ export class HostSession {
     for (const ch of this.sim.chars) if (ch.bot) this.brains.set(ch.id, new BotBrain(s.botLevel, seed + ch.id));
     const rosterInfo: RosterInfo[] = this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: c.name, team: c.team, hero: c.hero, bot: c.bot, hat: c.hat }));
     this.init = { settings: s, roster: rosterInfo, seed, tick: 0, matchId: uuid4() };
+    if (this.cup) this.init.cup = { round: this.cup.round, maps: this.cup.maps, points: { ...this.cup.points } };
     this.lobby.inMatch = true;
     this.frames.clear();
     this.localEvents = [];
@@ -397,21 +417,32 @@ export class HostSession {
     const sim = this.sim!;
     this.resultSent = true;
     const r = sim.result ?? { winner: -1, draw: true, reason: '' };
+    const standings = sim.mode.standings?.(sim) ?? [];
+    const placeOf = new Map(standings.map((s) => [s.id, s]));
     const res: MatchResultInfo = {
       winner: r.winner, draw: r.draw, reason: r.reason, duration: sim.elapsed, teams: sim.settings.teams,
       players: sim.chars.map((c) => ({
+        place: placeOf.get(c.id)?.place, time: placeOf.get(c.id)?.time,
         id: c.id, pid: c.pid, name: c.name, hero: c.hero, team: c.team, bot: c.bot,
         kills: c.kills, deaths: c.deaths, assists: c.assists, heatDealt: c.heatDealt, level: c.level, cs: c.cs,
         destroyed: c.destroyed, pickups: c.pickups, billiards: c.billiards, bestLaunch: Math.round(c.bestLaunch), lethals: c.lethals, saves: c.saves, hat: c.hat,
       })),
     };
+    if (this.cup && standings.length) res.cup = scoreCup(this.cup, standings, (id) => sim.charById.get(id));
     this.lastResult = res;
     this.broadcast({ t: 'end', res });
     this.cb.onEnd(res);
     if (this.init && !this.offline) void db.saveMatch(this.gameId, this.init, res);
   }
 
+  /** Después de los resultados: la próxima pista de la copa si queda alguna; si no, a la sala. */
+  continueMatch() {
+    if (this.cup && this.cup.round < this.cup.maps.length && !this.startMatch(true)) return;
+    this.backToLobby();
+  }
+
   backToLobby() {
+    this.cup = null;
     this.sim = null;
     this.init = null;
     this.lobby.inMatch = false;

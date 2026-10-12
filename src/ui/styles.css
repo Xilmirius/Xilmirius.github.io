@@ -294,14 +294,15 @@ img.aicon { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: mi
 .board td, .results td { padding: 5px 8px; border-top: 1px solid var(--line); font-weight: 700; }
 .board td i, .results td i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .board tr.me td, .results tr.me td { color: var(--accent2); }
-.results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, 96vw); background: var(--bg2); border: 2px solid var(--line); border-radius: 22px; padding: 18px 22px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7); text-align: center; text-shadow: none; animation: pop 0.35s ease-out; }
+.results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, 96vw); max-height: 96vh; overflow-y: auto; background: var(--bg2); border: 2px solid var(--line); border-radius: 22px; padding: 18px 22px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7); text-align: center; text-shadow: none; animation: pop 0.35s ease-out; }
 @keyframes pop { from { transform: translate(-50%, -50%) scale(0.8); opacity: 0; } }
 .res-title { font-family: var(--title); font-size: 56px; }
 .res-title.win { color: var(--accent2); }
 .res-title.lose { color: var(--bad); }
 .res-sub { font-family: var(--title); font-size: 24px; }
 .res-reason { color: var(--muted); margin-bottom: 10px; }
-.res-buttons { display: flex; gap: 10px; justify-content: center; margin-top: 14px; align-items: center; }
+/* Los botones quedan a la vista aunque el resto no entre en la pantalla y haya que desplazarse. */
+.res-buttons { display: flex; gap: 10px; justify-content: center; margin: 14px -22px -18px; padding: 10px 22px 14px; align-items: center; position: sticky; bottom: -18px; background: var(--bg2); border-top: 1px solid var(--line); border-radius: 0 0 20px 20px; }
 .res-buttons .wait { padding: 8px 14px; }
 
 /* ═══════════════ CASINO VISUAL: feedback por todos lados ═══════════════ */
@@ -710,3 +711,37 @@ img.aicon { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: mi
 .record b { font-family: var(--title); font-weight: 400; font-size: 15px; }
 .record small { color: var(--muted); font-weight: 700; }
 .gb-record { margin: 6px 0 0; font-size: 13px; font-weight: 800; color: var(--accent2); }
+
+/* ── Carrera: la pista en una tira, el puesto en grande y la tabla de la copa ── */
+.hud-top .rstrip { position: relative; width: min(520px, 62vw); height: 10px; margin: 13px auto 5px; background: rgba(0, 0, 0, 0.5); border-radius: 999px; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14); }
+.hud-top .rstrip i { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--c); border: 2px solid #14101e; transition: left 0.25s linear; }
+.hud-top .rstrip i.me { width: 20px; height: 20px; margin: -10px 0 0 -10px; border-color: #fff; box-shadow: 0 0 10px var(--c); z-index: 2; }
+.hud-top .rstrip b { position: absolute; right: -24px; top: -8px; font-size: 16px; }
+.hud-top .scores.race { gap: 6px; }
+.hud-top .scores.race .score { padding: 2px 10px; font-size: 13px; border-bottom-width: 3px; }
+.hud-top .scores.race .score em { font-style: normal; font-family: var(--title); color: var(--c); }
+.hud-top .scores.race .score b { font-size: 14px; color: var(--txt); }
+.hud-top .scores.race .score.me { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45); }
+.hud-pos { position: absolute; left: 3%; top: 30%; text-align: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+.hud-pos.on { opacity: 1; }
+.hud-pos b { display: block; font-family: var(--title); font-weight: 400; font-size: 100px; line-height: 0.9; color: #fff; -webkit-text-stroke: 3px #1c1428; paint-order: stroke fill; text-shadow: 0 6px 0 rgba(0, 0, 0, 0.55); }
+.hud-pos b sup { font-size: 42px; }
+.hud-pos span { font-family: var(--title); font-size: 15px; color: #fff; text-shadow: 0 2px 0 #000; }
+.hud-pos.p1 b { color: #ffd23f; text-shadow: 0 0 26px rgba(255, 210, 63, 0.7), 0 6px 0 rgba(0, 0, 0, 0.55); }
+.hud-pos.bump b { animation: posBump 0.4s cubic-bezier(0.2, 2, 0.4, 1); }
+@keyframes posBump { 0% { transform: scale(1.55) rotate(-6deg); } 100% { transform: scale(1); } }
+.cup-line { margin: 4px 0 8px; font-family: var(--title); font-size: 17px; color: #ffd23f; }
+.cup-line b { font-weight: 400; color: var(--txt); }
+.podium { display: flex; justify-content: center; align-items: flex-end; gap: 10px; margin: 8px 0 10px; }
+.pod { display: flex; flex-direction: column; align-items: center; width: 150px; }
+.pod span { font-weight: 900; font-size: 14px; margin-bottom: 2px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pod.me span { color: var(--accent2); }
+.pod b { font-size: 30px; line-height: 1; font-weight: 400; }
+.pod em { display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 2px; border-radius: 10px 10px 0 0; font-style: normal; font-family: var(--title); font-size: 24px; color: #1c1428; }
+.pod.p1 em { height: 64px; background: linear-gradient(#ffe38a, #ffc629); }
+.pod.p2 em { height: 44px; background: linear-gradient(#eef1f6, #b9c0cc); }
+.pod.p3 em { height: 30px; background: linear-gradient(#f0b98a, #c9824f); }
+.results .race-table td.pl { font-family: var(--title); font-size: 18px; }
+.results .race-table th:nth-child(2), .results .race-table td:nth-child(2) { text-align: left; }
+.results .race-table td.gain { color: var(--good); }
+.results .race-table td.tot { font-family: var(--title); font-size: 18px; color: #ffd23f; }

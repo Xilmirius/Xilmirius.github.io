@@ -21,7 +21,7 @@ Cada juego se declara en un solo lugar ([src/core/games.ts](src/core/games.ts)):
 - 3 modos de arena: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
 - **🏰 Asedio (MOBA)**: bases, torres, núcleo y oleadas de esbirros; 1 línea hasta 2v2 y 2 líneas en 3v3, el Coloso, campamentos, minimapa, `B` para volver a la base y forja en la base. Sin barra de vida: los puentes están sobre el vacío. Diseño en [docs/MOBA.md](docs/MOBA.md).
 - **🧟 Horda (zombis)**: cooperativo de 1 a 6 **con armas en vez de poderes**. Clic dispara: pistola (balas infinitas), **uzi**, **escopeta** y **lanzacohetes**, más **C4**; las armas y la munición caen en cajas. Las oleadas no paran de crecer, así que se gana cumpliendo una cadena de **misiones** (encender el generador, destruir los nidos, asegurar la antena, juntar el combustible, derribar a la Mole Madre) hasta la **extracción**. Cada zona asegurada queda como **mini base** con torreta, y cada misión cumplida te deja **elegir una mejora entre tres** (más daño, balas perforantes, zombis que explotan en cadena...), así cada partida arma un personaje distinto. Tres dificultades, récords personales y mapa propio, **El Refugio**. Detalle en [docs/ZOMBIS.md](docs/ZOMBIS.md).
-- **🏁 Carrera de obstáculos**: todos contra todos hasta la meta por **La Pista**, pasando puertas en orden. Sin habilidades: golpes, empujón, salto, dash y los ítems de un solo uso que dan las cajas ❓. Si te caés, reaparecés en la última puerta.
+- **🏁 Carrera de obstáculos**: todos contra todos hasta la meta, pasando puertas en orden. Sin habilidades: golpes, empujón, salto, dash y los ítems de un solo uso que dan las cajas ❓. Si te caés, reaparecés en la última puerta. **Cuatro pistas**, cada una con lo suyo: **La Pista** (la clásica), **El Serpentín** (curvas, aceleradores y atajos que se caen), **La Bolera** (bolas que ruedan contra vos) y **El Derrumbe** (paredes que se rompen a puro dash). Se corre suelta o en **copa**: varias pistas seguidas con puntos, tabla y podio. Diseño en [docs/CARRERA.md](docs/CARRERA.md).
 - **Artefactos en los mapas** además de los minerales: **resortes** que te lanzan, **paragolpes** que te rebotan, **rotores** que barren (se saltan), **géiseres** que avisan y disparan, y **barriles explosivos**. La arena **El Flipper** está armada alrededor de ellos.
 - Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela. Por defecto habilidades en **Q 2 3**, ulti en **E** e ítems en **1 R F**; todas las teclas se reasignan en Ajustes → Controles.
 - Pantalla completa desde el menú, la pausa o la partida.
@@ -157,11 +157,12 @@ src/
     terrain.ts     Terreno como grilla de alturas; baldosas frágiles
     collision.ts   Colisión terreno + obstáculos
     heroes/        Un archivo por héroe (kit de 4 habilidades + básico)
-    gadgets.ts     Artefactos del mapa: resortes, paragolpes, rotores, géiseres, barriles, cajas de ítems
+    gadgets.ts     Artefactos del mapa: resortes, paragolpes, rotores, géiseres, barriles, cajas de ítems, aceleradores y lanzabolas
     horde.ts       Horda: oleadas, IA de los zombis, misiones, mini bases y cajas de suministros
     perks.ts       Horda: las mejoras que se eligen al cumplir cada misión
     weapons.ts     Armas: pistola, uzi, escopeta (impacto instantáneo), lanzacohetes y C4
-    race.ts        Carrera de obstáculos: puertas, reaparición y llegada
+    race.ts        Carrera de obstáculos: puertas, puesto, reaparición y llegada
+    cup.ts         Copa: varias carreras seguidas con puntos
     items.ts       Ítems pasivos/activos
     mutations.ts   Rutas de mutación (Tanque/Carry/Support)
     modes.ts       Modos de juego (interfaz agnóstica)
@@ -217,6 +218,7 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 ## 10. Límites conocidos / próximos pasos
 
 - Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
+- Carrera: las pistas nuevas y la copa están probadas con bots, no con gente; lo que falta está en [docs/CARRERA.md](docs/CARRERA.md).
 - Horda: la dificultad y las mejoras están ajustadas con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.

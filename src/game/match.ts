@@ -101,6 +101,7 @@ export class MatchRunner {
     this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups });
     this.cw = new CollisionWorld(this.view.terrain);
     this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c), this.view.terrain);
+    if (init.settings.mode === 'race') this.hud.introRace(init.cup);
     const spawns = this.view.terrain.spawns.team[me?.team ?? 0] ?? [];
     if (spawns.length) this.baseAt = { x: spawns.reduce((a, p) => a + p.x, 0) / spawns.length, z: spawns.reduce((a, p) => a + p.z, 0) / spawns.length };
     this.view.onImpact = (stop) => this.impact(stop);
@@ -423,14 +424,15 @@ export class MatchRunner {
     this.hud.update(w, local, this.me, dt, { ping, fps: this.fps, showFps: getPrefs().showFps, kind: this.session.isHost ? 'host' : 'client' });
   }
 
-  showResults(res: MatchResultInfo, onBack: () => void, onLeave: () => void) {
+  /** onStop: cortar una copa por la mitad (el botón principal sigue con la próxima pista). */
+  showResults(res: MatchResultInfo, onBack: () => void, onLeave: () => void, onStop?: () => void) {
     this.hud.toggleForge(false);
     const meRes = res.players.find((p) => p.id === this.localId);
     // Hasta dónde se llegó (la Horda lo lleva en el estado del modo, no en el resultado).
     const hd = (this.latestWorld ?? this.frames.latest())?.mode.horde;
-    const ctx: MatchContext = { mode: this.settings.mode, difficulty: this.settings.difficulty, wave: hd?.wave ?? 0, step: hd?.step ?? 0 };
+    const ctx: MatchContext = { mode: this.settings.mode, map: this.settings.map, difficulty: this.settings.difficulty, wave: hd?.wave ?? 0, step: hd?.step ?? 0 };
     const reward = applyMatch(res, meRes, this.hud.live, ctx);
-    this.hud.showResults(res, this.session.isHost, onBack, onLeave, reward, ctx);
+    this.hud.showResults(res, this.session.isHost, onBack, onLeave, reward, ctx, onStop);
     audio.setWind(0);
     if (meRes) {
       const won = !res.draw && res.winner === meRes.team;

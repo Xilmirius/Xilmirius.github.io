@@ -13,7 +13,7 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import type { RosterInfo } from '../core/protocol';
 import { stepPickup } from '../core/sim';
-import { F_DASH, F_DEAD, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
+import { F_DASH, F_DEAD, F_HASTE, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
 import { Backdrop } from './backdrop';
@@ -303,6 +303,8 @@ export class GameView {
         if (sp > 16) this.particles.trail(cf.x, cf.y + 0.7, cf.z, tc, 0.14, 0.3);
       }
       if (cf.fl & F_DASH) this.sparks.trail(cf.x, cf.y + 0.5, cf.z, tc, 0.12, 0.3);
+      // Envión de un acelerador: estela naranja mientras dura.
+      else if (cf.fl & F_HASTE && !(cf.fl & F_DEAD) && Math.hypot(cf.vx, cf.vz) > 4) this.sparks.trail(cf.x, cf.y + 0.35, cf.z, GADGET_COLORS.boost, 0.1, 0.35);
       if (cf.fl & F_RECALL) {
         // Volviendo a la base: chispas del equipo que suben en espiral.
         const a = this.time * 9 + c.id;
@@ -788,6 +790,15 @@ export class GameView {
           G.ring(e.x, e.y + 0.1, e.z, 2.2, GADGET_COLORS.geyser, 0.45);
           S.burst(e.x, e.y + 0.3, e.z, 22, GADGET_COLORS.geyser, { speed: 2.2, up: 13, size: 0.08, life: 0.8, gravity: 12 });
           L.flash(e.x, e.y + 1, e.z, GADGET_COLORS.geyser, 30, 9, 0.35);
+        } else if (e.w === 'boost') {
+          this.gadgets.boost(e.i);
+          G.ring(e.x, e.y + 0.1, e.z, 1.8, GADGET_COLORS.boost, 0.3);
+          S.burst(e.x, e.y + 0.3, e.z, 12, GADGET_COLORS.boost, { speed: 4, up: 3, size: 0.07, life: 0.45 });
+          if (e.id === me) F.add(e.x, e.y + 2, e.z, '⚡ ¡Envión!', 'mat', { size: 20, life: 0.8, rise: 1.2 });
+        } else if (e.w === 'roller') {
+          G.ring(e.x, e.y + 0.6, e.z, 2, GADGET_COLORS.roller, 0.3);
+          S.burst(e.x, e.y + 0.8, e.z, 14, 0xdfe4ff, { speed: 5, up: 4, size: 0.08, life: 0.5 });
+          L.flash(e.x, e.y + 0.8, e.z, GADGET_COLORS.roller, 30, 8, 0.25);
         } else if (e.w === 'rise') {
           // Un zombi sale del borde del mapa.
           P.burst(e.x, e.y + 0.1, e.z, 10, DUST, { speed: 2.5, up: 3, size: 0.16, life: 0.7, gravity: 5 });
@@ -800,6 +811,11 @@ export class GameView {
         }
         break;
       }
+      case 'ram':
+        // Embestida contra cobertura.
+        G.ring(e.x, e.y + 0.7, e.z, 1.6, 0xffffff, 0.25);
+        P.burst(e.x, e.y + 0.6, e.z, 10, DUST, { speed: 4, up: 3, size: 0.14, life: 0.5, gravity: 6 });
+        break;
       case 'gate': {
         const pos = this.charPos(e.id);
         if (!pos) break;

@@ -5,7 +5,8 @@ const log = (...a: unknown[]) => { if (process.env.SIM_LOG) appendFileSync(proce
 import { BotBrain } from '../src/core/bots';
 import { CollisionWorld } from '../src/core/collision';
 import { DT, KILL_Y, LEVEL_H, STAGE_AT, ULT_PER_HEAT } from '../src/core/constants';
-import { BARREL, GEYSER, geyserPhase, PAD_V, ROTOR, rotorAngle } from '../src/core/gadgets';
+import { CUP_POINTS, cupMaps, cupPoints, newCup, scoreCup } from '../src/core/cup';
+import { BARREL, BOOST, GEYSER, geyserPhase, PAD_V, ROLLER, rollerBalls, ROTOR, rotorAngle } from '../src/core/gadgets';
 import { emptyInput, BTN } from '../src/core/input';
 import { GAME_IDS, GAMES, enterGame, enterMode, gameOf, mapsFor, MODE_INFO, normalizeSettings, sidesOf } from '../src/core/games';
 import { CRATE_KINDS, HORDE, MISSIONS, type HordeMode } from '../src/core/horde';
@@ -14,7 +15,7 @@ import { DASH_IDLE, defaultMoveParams, newMoveOut, stepMove, type MoveState } fr
 import { NO_MODS } from '../src/core/mutations';
 import { PERK, PERK_IDS, PERKS, perkLv, type PerkId } from '../src/core/perks';
 import { HEROES } from '../src/core/heroes';
-import type { RaceMode } from '../src/core/race';
+import { lapTime, RACE, type RaceMode } from '../src/core/race';
 import { parseCommand, Simulation } from '../src/core/sim';
 import { buildWorldFrame, decodeWorld, encodeWorld, buildMeFrame } from '../src/core/snapshot';
 import { Terrain } from '../src/core/terrain';
@@ -396,6 +397,194 @@ describe('modos nuevos', () => {
     expect(sim.chars.every((c) => c.eliminated)).toBe(true);
     expect(sim.phase).toBe('end');
     expect(sim.result?.winner).toBe(1);
+  });
+});
+
+describe('Carrera: pistas, piezas nuevas y copa', () => {
+  const RACE_MAPS = Object.keys(MAPS).filter((k) => MAPS[k].kind === 'race');
+  /** Carrera lista para probar una pieza: en juego, con el primer héroe parado donde se pida. */
+  const race = (map: string, n = 2) => {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, mode: 'race', map }, roster: roster(n), seed: 5 });
+    sim.phase = 'play';
+    return { sim, m: sim.mode as RaceMode, a: sim.chars[0], t: sim.terrain };
+  };
+  const cell = (t: Terrain, ix: number, iz: number) => ({ ...t.cellCenter(ix, iz), i: iz * t.w + ix });
+  const place = (c: { pos: { x: number; y: number; z: number }; vel: { x: number; y: number; z: number }; input: unknown; grounded: boolean }, x: number, z: number, y = 0) => {
+    c.pos = { x, y, z };
+    c.vel = { x: 0, y: 0, z: 0 };
+    c.grounded = y === 0;
+    c.input = emptyInput();
+  };
+
+  it('hay cuatro pistas, cada una con su tema, y los lanzabolas tienen carril', () => {
+    expect(RACE_MAPS.length).toBeGreaterThanOrEqual(4);
+    for (const id of RACE_MAPS) {
+      expect(MAPS[id].theme, id).toBeTruthy();
+      for (const g of new Terrain(id).gadgets) if (g.kind === 'roller') expect(g.len, id).toBeGreaterThan(6);
+    }
+    // El calentamiento de La Bolera: del lanzabolas al pozo hay diez celdas de carril.
+    const w = new Terrain('bolera').gadgets.find((g) => g.kind === 'roller' && g.dx === -1)!;
+    expect(w.len).toBe(21);
+  });
+
+  it('los bots terminan las pistas nuevas: curvas, bolas, paredes que hay que romper y zanjas que hay que saltar', () => {
+    for (const map of RACE_MAPS.filter((id) => id !== 'pista')) {
+      const r = runMatch({ mode: 'race', map, timeLimit: 300 }, 4, 320);
+      const m = r.sim.mode as RaceMode;
+      expect(m.order.length, map).toBe(4);
+      expect(r.sim.elapsed, map).toBeLessThan(150);
+      log('race', { map, t: Math.round(r.sim.elapsed), order: m.order });
+    }
+  }, 120000);
+
+  it('acelerador: pisarlo te da un envión que se acaba', () => {
+    const { sim, a } = race('serpentin');
+    const g = sim.gadgets.find((x) => x.kind === 'boost')!;
+    const base = sim.charSpeed(a);
+    place(a, g.x, g.z);
+    sim.step();
+    expect(sim.drainEvents().some((e) => e.k === 'gad' && e.w === 'boost' && e.id === a.id)).toBe(true);
+    expect(sim.charSpeed(a)).toBeCloseTo(base * (1 + BOOST.haste), 3);
+    place(a, g.x + 4, g.z);
+    for (let i = 0; i < (BOOST.time + 0.2) * 60; i++) { a.pos.x = g.x + 4; sim.step(); }
+    expect(sim.charSpeed(a)).toBeCloseTo(base, 3);
+  });
+
+  it('piso flojo: se cae al pisarlo y vuelve solo; fuera de la Carrera, pisarlo no lo rompe', () => {
+    const { sim, a, t } = race('serpentin');
+    const fi = 0, c = t.cellBounds(t.fragile[fi]);
+    const x = (c.minX + c.maxX) / 2, z = (c.minZ + c.maxZ) / 2;
+    place(a, x, z);
+    sim.step();
+    expect(t.tileState[fi]).toBe(3); // se afloja
+    for (let i = 0; i < 0.9 * 60; i++) sim.step();
+    expect(t.tileState[fi]).toBe(4); // se cayó (y el héroe con ella)
+    expect(a.grounded).toBe(false);
+    place(a, t.spawns.ffa[0].x, t.spawns.ffa[0].z);
+    for (let i = 0; i < (sim.rules.tileRegen + 1) * 60; i++) { place(a, t.spawns.ffa[0].x, t.spawns.ffa[0].z); sim.step(); }
+    expect(t.tileState[fi]).toBe(0);
+    // En la Arena el mismo piso aguanta que lo pisen.
+    const arena = new Simulation({ settings: { ...DEFAULT_SETTINGS, map: 'cantera' }, roster: roster(2), seed: 5 });
+    arena.phase = 'play';
+    const b = arena.terrain.cellBounds(arena.terrain.fragile[0]);
+    place(arena.chars[0], (b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2);
+    for (let i = 0; i < 90; i++) arena.step();
+    expect(arena.terrain.tileState[0]).toBe(0);
+  });
+
+  it('bolas: ruedan por su carril, te llevan puesto y se saltan', () => {
+    const { sim, a } = race('bolera');
+    const g = sim.gadgets.find((x) => x.kind === 'roller' && x.dx === -1)!;
+    // Cada bola avanza a ROLLER.speed y las del mismo carril van separadas.
+    const b0 = rollerBalls(g.idx, 600, g.len), b1 = rollerBalls(g.idx, 606, g.len);
+    expect(b0.length).toBeGreaterThanOrEqual(1);
+    expect(b1[0] - b0[0]).toBeCloseTo(ROLLER.speed * 0.1, 5);
+    for (const s of b0) expect(s).toBeLessThanOrEqual(g.len);
+    // Parado en el carril, la próxima bola me pega y me lleva para donde rueda (hacia el oeste).
+    const x = g.x - 8;
+    place(a, x, g.z);
+    let hit = false;
+    for (let i = 0; i < ROLLER.gap * 60 + 30 && !hit; i++) {
+      sim.step();
+      hit = sim.drainEvents().some((e) => e.k === 'gad' && e.w === 'roller' && e.id === a.id);
+    }
+    expect(hit).toBe(true);
+    expect(a.vel.x).toBeLessThan(-3);
+    // Por arriba de la bola no pega.
+    const sim2 = race('bolera');
+    const g2 = sim2.sim.gadgets.find((y) => y.kind === 'roller' && y.dx === -1)!;
+    let hit2 = false;
+    for (let i = 0; i < ROLLER.gap * 60 + 30; i++) {
+      place(sim2.a, g2.x - 8, g2.z, ROLLER.h + 0.4);
+      sim2.sim.step();
+      hit2 ||= sim2.sim.drainEvents().some((e) => e.k === 'gad' && e.w === 'roller');
+    }
+    expect(hit2).toBe(false);
+  });
+
+  it('el dash rompe la cobertura contra la que choca (solo con las reglas de la Carrera)', () => {
+    const ram = (mode: ModeId, map: string) => {
+      const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, mode, map }, roster: roster(2), seed: 5 });
+      sim.phase = 'play';
+      const a = sim.chars[0];
+      const d = sim.destructibles.find((x) => x.kind === 'goo' && !x.explosive)!;
+      place(a, d.x - 1.6, d.z, d.y);
+      a.input = { ...emptyInput(), mx: 1, mz: 0, ax: d.x, az: d.z, b: BTN.DASH };
+      sim.step();
+      a.input = { ...emptyInput(), mx: 1, mz: 0, ax: d.x, az: d.z };
+      for (let i = 0; i < 12; i++) sim.step();
+      return { d, ram: sim.drainEvents().some((e) => e.k === 'ram') };
+    };
+    const inRace = ram('race', 'derrumbe');
+    expect(inRace.ram).toBe(true);
+    expect(inRace.d.stage).toBe(3); // la pared de goo cae de un dash
+    const inArena = ram('stock', 'cantera');
+    expect(inArena.ram).toBe(false);
+    expect(inArena.d.stage).toBe(0);
+  });
+
+  it('el avance se mide por la pista: en una curva cerrada va adelante el que más recorrió, no el que está más cerca en línea recta', () => {
+    const { sim, m, a, t } = race('serpentin');
+    const b = sim.chars[1];
+    m.next.set(a.id, 1);
+    m.next.set(b.id, 1);
+    // A todavía va por la primera recta, casi arriba de la puerta siguiente; B ya está saliendo de la curva, más lejos en línea recta.
+    const pa = cell(t, 22, 3), pb = cell(t, 40, 9), gate = t.gates[1];
+    place(a, pa.x, pa.z);
+    place(b, pb.x, pb.z);
+    expect(Math.hypot(pb.x - gate.x, pb.z - gate.z)).toBeGreaterThan(Math.hypot(pa.x - gate.x, pa.z - gate.z));
+    expect(m.progress(sim, b)).toBeGreaterThan(m.progress(sim, a));
+    expect(m.rank(sim, b)).toBe(1);
+    expect(m.rank(sim, a)).toBe(2);
+    expect(sim.mode.hud(sim).race!.rank).toEqual([2, 1]);
+  });
+
+  it('posiciones al terminar, con el tiempo de cada uno; las cajas le dan al último ítems para alcanzar', () => {
+    const { sim, m, t } = race('pista', 3);
+    const [a, b, c] = sim.chars;
+    const run = (ch: typeof a) => { for (const g of t.gates) { place(ch, g.x, g.z); sim.step(); } };
+    sim.elapsed = 20;
+    run(b);
+    sim.elapsed = 31.5;
+    run(a);
+    const st = m.standings(sim);
+    expect(st.map((s) => s.id)).toEqual([b.id, a.id, c.id]);
+    expect(st.map((s) => s.place)).toEqual([1, 2, 3]);
+    expect(st[0].time).toBeGreaterThan(19.9);
+    expect(st[1].time).toBeGreaterThan(st[0].time);
+    expect(st[2].time).toBe(-1);
+    expect(sim.mode.hud(sim).race!.times.length).toBe(2);
+    // El que va último recibe algo para alcanzar; el primero (si siguiera corriendo), algo para molestar.
+    const fresh = race('pista', 4);
+    const [first, second, third, last] = fresh.sim.chars;
+    fresh.m.next.set(first.id, 2);
+    fresh.m.next.set(second.id, 1);
+    fresh.m.next.set(third.id, 1);
+    for (let i = 0; i < 20; i++) {
+      expect(RACE.behind).toContain(fresh.m.boxItem(fresh.sim, last));
+      expect(RACE.ahead).toContain(fresh.m.boxItem(fresh.sim, first));
+    }
+    expect(lapTime(75.26)).toBe('1:15.2');
+  });
+
+  it('copa: las pistas que se corren, los puntos por puesto y la tabla', () => {
+    expect(cupMaps('bolera', 3, ['pista', 'serpentin', 'bolera', 'derrumbe'])).toEqual(['bolera', 'derrumbe', 'pista']);
+    expect([1, 2, 3, 7].map(cupPoints)).toEqual([CUP_POINTS[0], CUP_POINTS[1], CUP_POINTS[2], 0]);
+    for (let i = 1; i < CUP_POINTS.length; i++) expect(CUP_POINTS[i]).toBeLessThan(CUP_POINTS[i - 1]);
+    const who = (id: number) => ({ pid: `p${id}`, name: `J${id}` });
+    const cup = newCup(['pista', 'serpentin']);
+    const r1 = scoreCup(cup, [{ id: 0, place: 1, time: 30 }, { id: 1, place: 2, time: 32 }, { id: 2, place: 3, time: -1 }], who);
+    expect([r1.round, r1.final]).toEqual([0, false]);
+    expect(r1.table.map((r) => [r.pid, r.gained, r.total])).toEqual([['p0', 10, 10], ['p1', 7, 7], ['p2', 5, 5]]);
+    // Segunda pista: p2 gana y empata en puntos con p0; va adelante el que ganó la última.
+    const r2 = scoreCup(cup, [{ id: 2, place: 1, time: 30 }, { id: 1, place: 2, time: 32 }, { id: 0, place: 3, time: 40 }], who);
+    expect(r2.final).toBe(true);
+    expect(r2.table.map((r) => [r.pid, r.total])).toEqual([['p2', 15], ['p0', 15], ['p1', 14]]);
+    // La copa solo existe en la Carrera y nunca tiene más pistas que las que hay.
+    const base = enterGame({ ...DEFAULT_SETTINGS }, 'race');
+    expect(base.cup).toBe(3);
+    expect(normalizeSettings({ ...base, cup: 99 }).cup).toBe(RACE_MAPS.length);
+    expect(normalizeSettings({ ...base, mode: 'stock', cup: 4 }).cup).toBe(1);
   });
 });
 
