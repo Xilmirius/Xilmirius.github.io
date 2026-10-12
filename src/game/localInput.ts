@@ -19,7 +19,8 @@ export class LocalInput {
   mouse = { x: 0, y: 0, ndcX: 0, ndcY: 0, left: false, right: false };
   private latch = 0;
   enabled = true;
-  onKey: (code: string) => void = () => {};
+  /** Tecla apretada. Si devuelve true, la tecla ya se usó (no cuenta para lanzar ni para moverse). */
+  onKey: (code: string) => boolean | void = () => {};
   /** Habilidad armada y lanzamientos (la conecta la partida con el estado del personaje). */
   cast: CastControl;
   /** Un clic que se usó para lanzar/cancelar no cuenta como ataque/empujón hasta soltarlo. */
@@ -58,7 +59,7 @@ export class LocalInput {
     const a = this.action(e.code);
     // Teclas del juego: que no hagan lo del navegador (Tab cambia el foco, Espacio baja la página...).
     if (a || e.code === 'Tab' || e.code === 'Space') e.preventDefault();
-    if (!e.repeat) this.onKey(e.code);
+    if (!e.repeat && this.onKey(e.code)) return;
     if (!this.enabled) return;
     if (a && CAST_ACTIONS.has(a)) { if (!e.repeat) this.cast.key(a as CastKey); return; }
     this.keys.add(e.code);

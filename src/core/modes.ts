@@ -64,6 +64,8 @@ export interface GameMode {
   respawnTime?(sim: Simulation, ch: Character): number;
   /** Dónde reaparece (por defecto, el punto de su equipo más lejos de los rivales). */
   respawnAt?(sim: Simulation, ch: Character): { x: number; z: number } | null;
+  /** Un héroe eligió una de las mejoras que tenía ofrecidas (i: cuál). */
+  onPerk?(sim: Simulation, ch: Character, i: number): void;
   /** El modo no usa el tiempo límite (no se avisan los últimos minutos). */
   untimed?: boolean;
 }

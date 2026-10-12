@@ -11,10 +11,11 @@ import type { Character, Structure, UnitKind } from './entities';
 import type { GameMode, ModeHud, ModeResult } from './modes';
 import { steer } from './moba/mode';
 import { NO_MODS } from './mutations';
+import { PERK, PERK_IDS, PERKS, perkLv } from './perks';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { Family } from './types';
-import { C4, giveWeapon, type WeaponId } from './weapons';
+import { C4, c4Max, crateAmmo, giveWeapon, WEAPON_IDS, WEAPONS, type WeaponId } from './weapons';
 
 export const ZOMBIE_TEAM = 1;
 export type ZombieKind = 'zombie' | 'runner' | 'brute' | 'spitter' | 'titan';
@@ -63,6 +64,15 @@ export const HORDE = {
   baseCool: 7,
   /** Heat que se enfría todo el equipo al cumplir una misión. */
   missionCool: 30,
+  /** Al cumplir una misión, la próxima oleada no sale antes de estos segundos: un respiro para elegir la mejora. */
+  breather: 7,
+  /**
+   * La horda también crece: por cada misión cumplida (que es cuando los héroes eligen una mejora) los zombis
+   * aguantan más, pegan más y salen más. Sin esto, con las mejoras el final sería un paseo.
+   */
+  threatHp: 0.15,
+  threatDmg: 0.07,
+  threatCount: 0.15,
   /** Sin recibir golpes durante `coolAfter` segundos, un héroe se enfría solo a `coolRate` por segundo: despegarse sirve. */
   coolAfter: 3,
   coolRate: 5,
@@ -200,6 +210,8 @@ export class HordeMode implements GameMode {
   private field = new Float32Array(0);
   private fieldT = 0;
   private fieldOk = false;
+  /** Torretas de bolsillo elegidas por alguien que no tenía dónde plantarla (estaba fuera de juego o en el aire). */
+  private owed = new Map<Character, number>();
 
   init(sim: Simulation) {
     sim.heroVsUnit = HORDE.heroVsUnit;
@@ -251,7 +263,7 @@ export class HordeMode implements GameMode {
   private compose(sim: Simulation, n: number): ZombieKind[] {
     const heroes = sim.chars.length;
     const grow = n <= HORDE.softCap ? n : HORDE.softCap + (n - HORDE.softCap) * 0.5;
-    const total = Math.round((4 + 1.7 * grow) * (0.2 + 0.7 * heroes) * this.level.count);
+    const total = Math.round((4 + 1.7 * grow) * (0.2 + 0.7 * heroes) * this.level.count * (1 + HORDE.threatCount * this.step));
     const out: ZombieKind[] = [];
     const brutes = n >= 3 ? Math.ceil((Math.floor(n / 3) * heroes) / 2) : 0;
     while (out.length < total - brutes) {
@@ -289,8 +301,8 @@ export class HordeMode implements GameMode {
 
   private spawnAt(sim: Simulation, kind: ZombieKind, x: number, z: number, fixedHp = 0): Character {
     const def = ZOMBIES[kind];
-    // Cada oleada llegan un poco más duros.
-    const hp = fixedHp || def.hp * (1 + 0.06 * Math.max(0, this.wave - 1));
+    // Cada oleada llegan un poco más duros, y cada misión cumplida, bastante más.
+    const hp = (fixedHp || def.hp * (1 + 0.06 * Math.max(0, this.wave - 1))) * (1 + HORDE.threatHp * this.step);
     const u = sim.addUnit(kind as UnitKind, ZOMBIE_TEAM, x, z, { name: def.name, family: def.family, hp, speed: def.speed, kbTaken: def.kbTaken });
     u.ai = { kind, target: null, think: sim.rng.range(0, 0.3), windup: 0, aim: null, stuck: 0 } satisfies ZombieAI;
     u.invuln = 0.5;
@@ -333,7 +345,80 @@ export class HordeMode implements GameMode {
     this.tickNests(sim, dt, alive);
     this.tickCrates(sim, dt);
     this.tickBases(sim, dt);
+    this.tickPerks(sim, dt);
     this.tickMission(sim, dt);
+  }
+
+  // ───────────── mejoras (core/perks.ts) ─────────────
+
+  /** Tres mejoras distintas para este héroe, sorteadas por peso entre las que todavía puede subir. */
+  private rollOffer(sim: Simulation, ch: Character): number[] {
+    const fallen = sim.chars.some((c) => c.eliminated);
+    const pool = PERK_IDS.map((id, i) => ({ i, w: perkLv(ch, id) >= PERKS[id].max ? 0 : PERKS[id].weight * (id === 'life' && fallen ? 4 : 1) })).filter((p) => p.w > 0);
+    const out: number[] = [];
+    while (out.length < PERK.options && pool.length) {
+      let r = sim.rng.next() * pool.reduce((s, p) => s + p.w, 0);
+      let k = pool.findIndex((p) => (r -= p.w) < 0);
+      if (k < 0) k = pool.length - 1;
+      out.push(pool.splice(k, 1)[0].i);
+    }
+    return out;
+  }
+
+  private tickPerks(sim: Simulation, dt: number) {
+    for (const c of sim.chars) {
+      if (!c.offer.length) {
+        if (c.picks <= 0 || c.eliminated) continue;
+        c.picks--;
+        c.offer = this.rollOffer(sim, c);
+        c.offerT = PERK.time;
+        continue;
+      }
+      c.offerT -= dt;
+      // Los bots eligen al rato (cualquiera); a una persona que no eligió se le da la primera.
+      if (c.bot && c.offerT <= PERK.time - PERK.botTime) this.onPerk(sim, c, sim.rng.int(0, c.offer.length - 1));
+      else if (c.offerT <= 0) this.onPerk(sim, c, 0);
+    }
+    for (const [c, n] of this.owed) {
+      if (!c.alive || !c.grounded || !this.plantTurret(sim, c)) continue;
+      if (n <= 1) this.owed.delete(c);
+      else this.owed.set(c, n - 1);
+    }
+  }
+
+  onPerk(sim: Simulation, ch: Character, i: number) {
+    const idx = ch.offer[i];
+    if (idx === undefined) return;
+    const id = PERK_IDS[idx];
+    ch.offer = [];
+    while (ch.perks.length < PERK_IDS.length) ch.perks.push(0);
+    ch.perks[idx]++;
+    // Las que hacen algo en el momento.
+    if (id === 'ammo' && ch.primary >= 0) ch.ammo = Math.max(ch.ammo, crateAmmo(ch, WEAPONS[WEAPON_IDS[ch.primary]]));
+    else if (id === 'demo') ch.c4 = Math.min(c4Max(ch), ch.c4 + PERK.c4);
+    else if (id === 'turret') this.owed.set(ch, (this.owed.get(ch) ?? 0) + 1);
+    else if (id === 'life') {
+      ch.lives++;
+      const back = sim.chars.find((c) => c.eliminated);
+      if (back) {
+        back.eliminated = false;
+        back.lives = 1;
+        back.respawnT = 1.5;
+      }
+    }
+    sim.recalcStats(ch);
+    sim.emit({ k: 'perk', id: ch.id, p: idx });
+  }
+
+  /** Una torreta al lado del héroe, del lado que haya lugar. */
+  private plantTurret(sim: Simulation, ch: Character): boolean {
+    const f = ch.facing;
+    for (const a of [0, Math.PI / 2, -Math.PI / 2, Math.PI]) {
+      const x = ch.pos.x + Math.sin(f + a) * 1.3, z = ch.pos.z + Math.cos(f + a) * 1.3;
+      if (Math.abs(sim.groundY(x, z, -99) - ch.pos.y) > 0.3 || sim.cw.blockAt(x, z, 0.5, ch.pos.y)) continue;
+      if (sim.buildTurret(ch, x, z, PERK.turretHp, PERK.turretTime, { ...NO_MODS, heat: 3 })) return true;
+    }
+    return false;
   }
 
   // ───────────── misiones ─────────────
@@ -377,6 +462,9 @@ export class HordeMode implements GameMode {
     if (m.kind === 'extract') { this.won = true; return; }
     if (m.kind === 'hold' && z) this.makeBase(sim, z);
     for (const c of sim.chars) if (c.alive) sim.coolHeat(c, HORDE.missionCool);
+    // El premio: una mejora a elegir para cada uno, y un respiro antes de la próxima oleada.
+    for (const c of sim.chars) if (!c.eliminated) c.picks++;
+    this.waveT = Math.max(this.waveT, HORDE.breather);
     this.step++;
     this.startMission(sim);
   }
@@ -584,7 +672,7 @@ export class HordeMode implements GameMode {
   private take(sim: Simulation, c: Character, cr: Crate) {
     const kind = CRATE_KINDS[cr.kind];
     if (kind === 'fuel') { /* cuenta para la misión: ver tickMission */ }
-    else if (kind === 'c4') c.c4 = Math.min(C4.max, c.c4 + C4.perCrate);
+    else if (kind === 'c4') c.c4 = Math.min(c4Max(c), c.c4 + C4.perCrate);
     else if (kind === 'med') {
       for (const h of sim.chars) if (h.alive && d2(h.pos, c.pos) <= HORDE.medRadius) sim.coolHeat(h, HORDE.medCool);
     } else giveWeapon(sim, c, kind);
@@ -764,7 +852,7 @@ export class HordeMode implements GameMode {
 
   private strike(sim: Simulation, u: Character, def: ZombieDef, ai: ZombieAI, tg: Character) {
     u.cds.basic = def.cd;
-    const heat = def.heat * this.level.dmg;
+    const heat = def.heat * this.level.dmg * (1 + HORDE.threatDmg * this.step);
     if (def.slam) {
       sim.blast(u, ZOMBIE_TEAM, u.pos.x, u.pos.y + 0.6, u.pos.z, { radius: def.slam, heat, kb: def.kb, up: 1.5, destruct: 30, tile: 30, fx: 'slam' }, NO_MODS);
       sim.emit({ k: 'uatk', id: u.id, tg: tg.id });
@@ -786,9 +874,22 @@ export class HordeMode implements GameMode {
     sim.hit(tg, u, { heat, kb: def.kb, dirX: dx / d, dirZ: dz / d, fx: 'minion' });
   }
 
-  onUnitDeath(_sim: Simulation, _u: Character, killer: Character | null) {
+  onUnitDeath(sim: Simulation, u: Character, killer: Character | null, fell: boolean) {
     this.kills++;
-    if (killer && killer.unit === 'hero') killer.cs++;
+    if (!killer || killer.unit !== 'hero') return;
+    killer.cs++;
+    const cold = perkLv(killer, 'cold');
+    if (cold) sim.coolHeat(killer, PERK.cold * cold);
+    // Reacción en cadena: el que cae explota, y lo que mate esa explosión explota también.
+    const chain = perkLv(killer, 'chain');
+    if (chain && !fell) {
+      const { x, y, z } = u.pos;
+      sim.schedule(PERK.chainDelay, () => {
+        sim.blast(killer, killer.team, x, y + 0.6, z, {
+          radius: PERK.chainRadius + PERK.chainRadiusPerLevel * (chain - 1), heat: PERK.chainHeat * chain, kb: PERK.chainKb, up: 1.5, fx: 'chain',
+        }, NO_MODS);
+      });
+    }
   }
 
   result(sim: Simulation): ModeResult | null {

@@ -12,7 +12,7 @@ import { CORE, TOWER } from '../core/moba/defs';
 import { ROUTE_MODS } from '../core/mutations';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { TEAM_COLORS } from '../core/constants';
-import type { AbilitySlot, HeroId } from '../core/types';
+import type { AbilitySlot, HeroId, MatchSettings } from '../core/types';
 import type { AimView } from '../render/indicator';
 import type { TimedEvent } from '../core/events';
 import { type InputFrame } from '../core/input';
@@ -27,7 +27,7 @@ import { Hud } from '../ui/hud';
 import type { CastCheck, CastKey } from './castControl';
 import { actionOf, keyName, onBindsChange } from './keybinds';
 import { LocalInput } from './localInput';
-import { applyMatch } from './profile';
+import { applyMatch, type MatchContext } from './profile';
 import { Ticker } from './ticker';
 
 const STRUCT_DIM: Record<string, [number, number]> = {
@@ -73,6 +73,7 @@ export class MatchRunner {
   private lag = 0;
   private stopT = 0;
   private readonly rules: Ruleset;
+  private readonly settings: MatchSettings;
   private heroId: HeroId | null = null;
   private teamColor = TEAM_COLORS[0];
   /** Equipo de cada héroe (para elegir a quién mirar cuando te quedás sin vidas). */
@@ -93,6 +94,7 @@ export class MatchRunner {
     const me = init.roster.find((r) => r.pid === session.localPid);
     this.localId = me ? me.id : -1;
     this.rules = rulesFor(init.settings);
+    this.settings = init.settings;
     this.heroId = me ? me.hero : null;
     this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
     for (const r of init.roster) this.teams.set(r.id, r.team);
@@ -130,7 +132,9 @@ export class MatchRunner {
 
   private onResize = () => this.view.resize();
 
-  private onKey(code: string) {
+  private onKey(code: string): boolean | void {
+    // Con una mejora para elegir en pantalla, 1, 2 y 3 son para eso.
+    if (this.hud.perkKey(code)) return true;
     const a = actionOf(code);
     if (a === 'forge' && this.rules.crafting) this.hud.toggleForge();
     else if (a === 'board') { this.boardHeld = true; this.hud.showBoard(true); }
@@ -422,8 +426,11 @@ export class MatchRunner {
   showResults(res: MatchResultInfo, onBack: () => void, onLeave: () => void) {
     this.hud.toggleForge(false);
     const meRes = res.players.find((p) => p.id === this.localId);
-    const reward = applyMatch(res, meRes, this.hud.live);
-    this.hud.showResults(res, this.session.isHost, onBack, onLeave, reward);
+    // Hasta dónde se llegó (la Horda lo lleva en el estado del modo, no en el resultado).
+    const hd = (this.latestWorld ?? this.frames.latest())?.mode.horde;
+    const ctx: MatchContext = { mode: this.settings.mode, difficulty: this.settings.difficulty, wave: hd?.wave ?? 0, step: hd?.step ?? 0 };
+    const reward = applyMatch(res, meRes, this.hud.live, ctx);
+    this.hud.showResults(res, this.session.isHost, onBack, onLeave, reward, ctx);
     audio.setWind(0);
     if (meRes) {
       const won = !res.draw && res.winner === meRes.team;

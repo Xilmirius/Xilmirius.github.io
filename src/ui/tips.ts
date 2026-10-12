@@ -9,6 +9,7 @@ import type { AbilityDef, AimShape } from '../core/heroes/types';
 import { ITEM_BY_ID, type ItemDef } from '../core/items';
 import { gameOf, MODE_INFO } from '../core/games';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR, ROUTE_MODS } from '../core/mutations';
+import { PERK, PERKS, type PerkId } from '../core/perks';
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
 import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, type ModeId, type Route } from '../core/types';
 import { C4, WEAPON_IDS, WEAPONS, type WeaponId } from '../core/weapons';
@@ -184,6 +185,7 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
     'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que enfría. Disparar te frena: hay que elegir entre correr y tirar.',
     'Las oleadas <b>no paran de crecer</b>. Se gana cumpliendo las <b>misiones</b> del mapa, una tras otra, hasta la <b>extracción</b>.',
     'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde enfriarse y punto de reaparición.',
+    `Al cumplir cada misión <b>elegís una mejora</b> entre tres (teclas <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> o clic): más daño, balas que atraviesan, zombis que explotan... Tenés ${PERK.time} s; se acumulan hasta el final.`,
     '<b>Zombis</b> (lentos), <b>Corredores</b> (rápidos y frágiles), <b>Escupidores</b> (a distancia, avisan dónde cae) y <b>Moles</b> (enormes: su golpe se ve venir). A todos se los puede <b>tirar al vacío</b>.',
   ],
   race: () => [
@@ -219,6 +221,13 @@ export function c4Tip() {
   return head('🧨', 'C4', keyName('r'))
     + p(`Dejás una carga a tus pies: avisa el área y explota a los ${C4.fuse} s. <b>No lastima a tu equipo</b>, pero rompe el piso frágil y hace estallar los barriles.`)
     + p(`Viene en las cajas (${C4.perCrate} cargas, hasta ${C4.max}). Plantala y alejate: los zombis te siguen hasta ella.`, 'tt-note');
+}
+
+/** Una mejora de la Horda que ya tenés (nivel: cuántas veces la elegiste). */
+export function perkTip(id: PerkId, level: number) {
+  const k = PERKS[id];
+  return head(k.icon, k.name) + p(k.desc + '.')
+    + (k.max > 1 && k.max < 10 ? p(`Nivel ${level} de ${k.max}: el efecto se suma con cada nivel.`, 'tt-note') : '');
 }
 
 export function modeTip(id: ModeId) {

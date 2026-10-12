@@ -20,7 +20,7 @@ Cada juego se declara en un solo lugar ([src/core/games.ts](src/core/games.ts)):
 - Dos **reglas** sobre el mismo núcleo: **⚡ Brawler** (por defecto: todo desbloqueado, la ulti se carga pegando, dash con Shift; nada que administrar) y **🧬 Completo** (niveles, materiales, forja de ítems y mutaciones, reparación).
 - 3 modos de arena: **Vidas**, **Ring-outs** y **Control de zona**. Reglas y modos se combinan libremente (ver [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md)).
 - **🏰 Asedio (MOBA)**: bases, torres, núcleo y oleadas de esbirros; 1 línea hasta 2v2 y 2 líneas en 3v3, el Coloso, campamentos, minimapa, `B` para volver a la base y forja en la base. Sin barra de vida: los puentes están sobre el vacío. Diseño en [docs/MOBA.md](docs/MOBA.md).
-- **🧟 Horda (zombis)**: cooperativo de 1 a 6 **con armas en vez de poderes**. Clic dispara: pistola (balas infinitas), **uzi**, **escopeta** y **lanzacohetes**, más **C4**; las armas y la munición caen en cajas. Las oleadas no paran de crecer, así que se gana cumpliendo una cadena de **misiones** (encender el generador, destruir los nidos, asegurar la antena, juntar el combustible, derribar a la Mole Madre) hasta la **extracción**. Cada zona asegurada queda como **mini base** con torreta. Tres dificultades y mapa propio, **El Refugio**. Detalle en [docs/ZOMBIS.md](docs/ZOMBIS.md).
+- **🧟 Horda (zombis)**: cooperativo de 1 a 6 **con armas en vez de poderes**. Clic dispara: pistola (balas infinitas), **uzi**, **escopeta** y **lanzacohetes**, más **C4**; las armas y la munición caen en cajas. Las oleadas no paran de crecer, así que se gana cumpliendo una cadena de **misiones** (encender el generador, destruir los nidos, asegurar la antena, juntar el combustible, derribar a la Mole Madre) hasta la **extracción**. Cada zona asegurada queda como **mini base** con torreta, y cada misión cumplida te deja **elegir una mejora entre tres** (más daño, balas perforantes, zombis que explotan en cadena...), así cada partida arma un personaje distinto. Tres dificultades, récords personales y mapa propio, **El Refugio**. Detalle en [docs/ZOMBIS.md](docs/ZOMBIS.md).
 - **🏁 Carrera de obstáculos**: todos contra todos hasta la meta por **La Pista**, pasando puertas en orden. Sin habilidades: golpes, empujón, salto, dash y los ítems de un solo uso que dan las cajas ❓. Si te caés, reaparecés en la última puerta.
 - **Artefactos en los mapas** además de los minerales: **resortes** que te lanzan, **paragolpes** que te rebotan, **rotores** que barren (se saltan), **géiseres** que avisan y disparan, y **barriles explosivos**. La arena **El Flipper** está armada alrededor de ellos.
 - Habilidades estilo MOBA: la tecla **arma** (se ve el área), **clic izquierdo** lanza, **clic derecho** cancela. Por defecto habilidades en **Q 2 3**, ulti en **E** e ítems en **1 R F**; todas las teclas se reasignan en Ajustes → Controles.
@@ -159,6 +159,7 @@ src/
     heroes/        Un archivo por héroe (kit de 4 habilidades + básico)
     gadgets.ts     Artefactos del mapa: resortes, paragolpes, rotores, géiseres, barriles, cajas de ítems
     horde.ts       Horda: oleadas, IA de los zombis, misiones, mini bases y cajas de suministros
+    perks.ts       Horda: las mejoras que se eligen al cumplir cada misión
     weapons.ts     Armas: pistola, uzi, escopeta (impacto instantáneo), lanzacohetes y C4
     race.ts        Carrera de obstáculos: puertas, reaparición y llegada
     items.ts       Ítems pasivos/activos
@@ -216,7 +217,7 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 ## 10. Límites conocidos / próximos pasos
 
 - Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
-- Horda: la dificultad está ajustada con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
+- Horda: la dificultad y las mejoras están ajustadas con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
 - Juego de teclado y mouse (no hay controles táctiles).

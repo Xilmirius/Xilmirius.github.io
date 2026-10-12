@@ -84,6 +84,8 @@ export interface MeFrame {
   dt: number; dx: number; dz: number; ad: number; dsh: number;
   /** Armas: arma principal (-1 = ninguna), balas que le quedan y cargas de C4. */
   pri: number; am: number; c4: number;
+  /** Mejoras: nivel de cada una (por índice en PERK_IDS), las que tiene para elegir ahora y los segundos que le quedan. */
+  pk: number[]; of: number[]; ot: number;
 }
 
 const r2 = round2;
@@ -177,6 +179,7 @@ export function buildMeFrame(sim: Simulation, c: Character): MeFrame {
     air: c.stats.airControl, rest: c.stats.restitution, maj: c.stats.maxAirJumps, jm: c.stats.jumpMul,
     dt: r2(c.dashT), dx: r2(c.dashX), dz: r2(c.dashZ), ad: c.airDashes, dsh: sim.rules.dash ? 1 : 0,
     pri: c.primary, am: c.ammo, c4: c.c4,
+    pk: [...c.perks], of: [...c.offer], ot: Math.max(0, Math.ceil(c.offerT)),
   };
 }
 

@@ -22,6 +22,8 @@ import { DecorView } from './decorView';
 import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView } from './fx';
 import { buildGunMesh, CRATE_COLORS, HordeView, TRACER_COLORS } from './hordeView';
 import { CRATE_INFO, CRATE_KINDS } from '../core/horde';
+import { PERK_IDS, PERKS } from '../core/perks';
+import { SHOT_CRIT } from '../core/weapons';
 import { GADGET_COLORS, GadgetsView } from './gadgetsView';
 import { AimIndicator, type AimView } from './indicator';
 import { FixedView, NEUTRAL_COLOR, UnitsView, ZOMBIE_COLOR } from './mobaView';
@@ -44,6 +46,7 @@ const CONFETTI = [0xff4f8b, 0xffe14a, 0x4fd1ff, 0x7dff6a, 0xb070ff, 0xff8a3d];
 const DANGER_RED = 0xff3b30;
 const DUST = 0xb89a78;
 const GOLD = 0xffc629;
+const CRIT_COLOR = 0xffd23f;
 
 export interface ViewOptions {
   shadows: boolean;
@@ -70,7 +73,7 @@ const FX_COLORS: Record<string, number> = {
   metal: 0x8fa3b8, stone: 0xc9a27a, build: 0xffc94a, buildstone: 0xc9a27a, goolob: 0x7bea4f,
   minion: 0xc9a27a, fountain: 0xff5a4a, cannon: 0xff8a3d, spark: 0x7fe3ff, tbolt: 0xff5a4a, coreshot: 0xff5a4a,
   bumper: GADGET_COLORS.bumper, rotor: GADGET_COLORS.rotor, geyser: GADGET_COLORS.geyser, barrel: GADGET_COLORS.barrel,
-  bullet: 0xffe08a, rocket: 0xff8a3c, c4: 0xff5a3c,
+  bullet: 0xffe08a, rocket: 0xff8a3c, c4: 0xff5a3c, chain: 0xffb02e,
 };
 /** Efectos que toman el color del atacante (su héroe) en vez de uno fijo. */
 const ATTACKER_FX = new Set(['punch', 'wrench', 'push', 'pushbig']);
@@ -117,6 +120,7 @@ export class GameView {
   private pickupKind: 'materials' | 'ult' | 'none';
   localId = -1;
   myTeam = 0;
+  private critT = -9;
   /** Lo que se está apuntando (tecla mantenida), lo setea el bucle de partida cada frame. */
   aim: AimView | null = null;
   onImpact: ImpactFn = () => {};
@@ -600,8 +604,19 @@ export class GameView {
         P.burst(f.x + Math.cos(f.f) * 0.3, my, f.z - Math.sin(f.f) * 0.3, 1, 0xd9b44a, { speed: 2.2, up: 3, size: 0.05, life: 0.5, gravity: 14 });
         for (let i = 0; i + 3 < e.p.length; i += 4) {
           const x = e.p[i], y = e.p[i + 1], z = e.p[i + 2], what = e.p[i + 3];
-          this.horde.tracer(mx, my, mz, x, y, z, col, shotgun ? 0.035 : e.w === 1 ? 0.04 : 0.055, shotgun ? 0.11 : 0.08);
-          if (what === 1) {
+          const crit = what === SHOT_CRIT;
+          this.horde.tracer(mx, my, mz, x, y, z, crit ? CRIT_COLOR : col, (shotgun ? 0.035 : e.w === 1 ? 0.04 : 0.055) * (crit ? 1.9 : 1), shotgun ? 0.11 : crit ? 0.13 : 0.08);
+          if (crit) {
+            // Crítico: chispazo dorado y aviso (los tuyos, con texto).
+            P.burst(x, y, z, 6, ZOMBIE_COLOR, { speed: 4.5, up: 3.5, size: 0.11, life: 0.5 });
+            S.burst(x, y, z, 9, CRIT_COLOR, { speed: 7, up: 3, size: 0.06, life: 0.3, gravity: 5 });
+            G.sparkle(x, y, z, CRIT_COLOR, 0.55);
+            // Con una ráfaga salen varios por segundo: el texto, de a uno.
+            if (e.id === me && this.time - this.critT > 0.4) {
+              this.critT = this.time;
+              F.add(x, y + 1.3, z, '¡CRÍTICO!', 'dmg mine', { size: 20, life: 0.7, color: '#ffd23f' });
+            }
+          } else if (what === 1) {
             // Dio en un cuerpo: salpicón.
             P.burst(x, y, z, 3, ZOMBIE_COLOR, { speed: 2.5, up: 2, size: 0.09, life: 0.4 });
             S.burst(x, y, z, 2, col, { speed: 4, up: 2, size: 0.04, life: 0.2, gravity: 4 });
@@ -611,6 +626,17 @@ export class GameView {
           }
         }
         if (e.id === me && shotgun) this.onImpact(HITSTOP.light);
+        break;
+      }
+      case 'perk': {
+        // Eligió una mejora: columna de chispas y el ícono sobre la cabeza.
+        const p = this.charPos(e.id);
+        const k = PERKS[PERK_IDS[e.p]];
+        if (!p || !k) break;
+        G.ring(p.x, p.y + 0.08, p.z, 1.5, CRIT_COLOR, 0.45);
+        S.burst(p.x, p.y + 0.4, p.z, 18, CRIT_COLOR, { speed: 1.6, up: 8, size: 0.07, life: 0.8, gravity: 5 });
+        L.flash(p.x, p.y + 1, p.z, CRIT_COLOR, 30, 8, 0.3);
+        if (this.worthText(p.x, p.z, e.id)) F.add(p.x, p.y + 2.3, p.z, k.icon, 'dmg', { size: e.id === me ? 34 : 26, life: 1.2, rise: 1.4 });
         break;
       }
       case 'c4': {

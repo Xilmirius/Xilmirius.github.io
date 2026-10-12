@@ -431,6 +431,13 @@ export class AudioEngine {
       case 'rocket': this.noiseHit(o, 'bandpass', 450, 0.55, 0.55, 2600); this.tone(o, 'sawtooth', 190, 70, 0.35, 0.22); break;
       case 'c4plant': this.tone(o, 'square', 720, 480, 0.07, 0.14); this.noiseHit(o, 'lowpass', 420, 0.09, 0.35); break;
       case 'c4beep': this.tone(o, 'square', 1900 * pr, 1900 * pr, 0.05, 0.13); break;
+      // Confirmaciones de las armas: tus balas dieron, fue un crítico, bajaste a uno.
+      case 'hitmark': this.tone(o, 'square', 1900 * pr, 1500, 0.025, 0.07); break;
+      case 'crit': this.tone(o, 'square', 1320, 1980, 0.07, 0.1); this.tone(o, 'triangle', 2640, 2640, 0.1, 0.08, 0.03); this.noiseHit(o, 'highpass', 4200, 0.04, 0.18); break;
+      case 'kill': this.tone(o, 'triangle', 620 * pr, 190, 0.09, 0.2); this.noiseHit(o, 'lowpass', 900, 0.07, 0.22, 240); break;
+      // Mejoras: aparecen las cartas, y elegiste una.
+      case 'perkoffer': [67, 72, 76].forEach((n, i) => this.tone(o, 'triangle', NOTE(n), NOTE(n), 0.16, 0.12, i * 0.07)); break;
+      case 'perk': [72, 76, 79, 84, 88].forEach((n, i) => this.tone(o, 'square', NOTE(n), NOTE(n), 0.16, 0.08, i * 0.05)); this.tone(o, 'sine', 400, 1400, 0.4, 0.1); this.noiseHit(o, 'highpass', 3800, 0.2, 0.1, undefined, 0.2); break;
       case 'swap': this.tone(o, 'square', 880, 560, 0.03, 0.1); this.noiseHit(o, 'highpass', 3000, 0.03, 0.22, undefined, 0.06); break;
       case 'loot': [76, 81, 88].forEach((n, i) => this.tone(o, 'triangle', NOTE(n), NOTE(n), 0.14, 0.14, i * 0.06)); this.noiseHit(o, 'highpass', 3500, 0.05, 0.15); break;
       case 'whoosh': this.noiseHit(o, 'bandpass', 400, 0.35, 0.35, 3000); break;
@@ -529,6 +536,9 @@ export class AudioEngine {
   /** Límite de sonidos de esbirros peleando entre ellos (si no, veinte golpes por segundo tapan todo). */
   private unitT = 0;
   private shotSkip = 0;
+  private markT = 0;
+  private killChain = 0;
+  private killT = 0;
 
   private unitOk() {
     const now = performance.now();
@@ -556,6 +566,8 @@ export class AudioEngine {
         break;
       case 'boom':
         if (e.c === 'c4') { this.play('quake', vol, pan); this.play('boom', vol, pan, 0.8); }
+        // Reacción en cadena: muchas seguidas, así que cortas y más agudas.
+        else if (e.c === 'chain') this.play('boom', vol * 0.45, pan, 1.5 + Math.random() * 0.3);
         else if (e.r >= 3) this.play(e.c === 'quake' ? 'quake' : 'boom', vol, pan);
         else if (e.r >= 1.5) this.play(e.c === 'build' ? 'metal' : e.c === 'buildstone' ? 'stone' : e.c === 'wave' ? 'push' : 'boom', vol * 0.8, pan);
         else if (e.c === 'shard' || e.c === 'lance') this.play('crystal', vol * 0.4, pan);
@@ -619,6 +631,14 @@ export class AudioEngine {
         // Las ráfagas ajenas, salteadas: seis uzis a la vez taparían todo lo demás.
         if (!mine && e.w === 1 && this.shotSkip++ % 2) break;
         this.play(['pistol', 'uzi', 'shotgun'][e.w] ?? 'pistol', vol * (mine ? 0.85 : 0.5), pan, 0.94 + Math.random() * 0.12);
+        if (mine) {
+          // Tus balas dieron: un tic (y otro más fuerte si fue crítico), sin tapar la ráfaga.
+          let hit = 0;
+          for (let i = 3; i < e.p.length; i += 4) hit = Math.max(hit, e.p[i] === 3 ? 2 : e.p[i] === 1 ? 1 : 0);
+          const now = performance.now();
+          if (hit === 2) this.play('crit', 0.5);
+          else if (hit === 1 && now - this.markT > 60) { this.markT = now; this.play('hitmark', 0.35, 0, 0.95 + Math.random() * 0.1); }
+        }
         break;
       }
       case 'wpn': if (e.id === localId) this.play(e.e ? 'deny' : 'swap', 0.8); break;
@@ -636,7 +656,17 @@ export class AudioEngine {
         break;
       }
       // ── Asedio (MOBA) ──
-      case 'udie': if (!e.fall && (e.by === localId || this.unitOk())) this.play('crack', vol * (e.by === localId ? 0.7 : 0.35), pan); break;
+      case 'udie':
+        if (!e.fall && (e.by === localId || this.unitOk())) this.play('crack', vol * (e.by === localId ? 0.7 : 0.35), pan);
+        if (e.by === localId && localId >= 0) {
+          // Bajas seguidas: cada una suena un poco más aguda.
+          const now = performance.now();
+          this.killChain = now - this.killT < 1500 ? Math.min(this.killChain + 1, 10) : 0;
+          this.killT = now;
+          this.play('kill', 0.5, 0, Math.pow(2, this.killChain / 12));
+        }
+        break;
+      case 'perk': if (e.id === localId) this.play('perk', 0.85); else this.play('pickup', vol * 0.5, pan); break;
       case 'tshot': this.play('bolt', vol * 0.8, pan, 0.7); break;
       case 'shit': if (e.by === localId) this.play(e.h > 0 ? 'metal' : 'shield', 0.45, pan); break;
       case 'sdown': this.play('quake', 1); this.play('boom', 1); this.play('crowd', 0.8); break;

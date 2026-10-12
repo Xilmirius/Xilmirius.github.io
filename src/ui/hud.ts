@@ -4,9 +4,10 @@ import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
 import { ITEMS, ITEM_BY_ID, ITEM_TAGS, type ItemTag } from '../core/items';
-import { gameOf, MODE_INFO } from '../core/games';
+import { gameOf, LOBBY_OPTIONS, MODE_INFO } from '../core/games';
 import { CRATE_INFO, CRATE_KINDS, MISSIONS } from '../core/horde';
-import { WEAPON_IDS, WEAPONS } from '../core/weapons';
+import { PERK_IDS, PERKS } from '../core/perks';
+import { SHOT_CRIT, WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
 import type { MatchResultInfo, PlayerResult, RosterInfo } from '../core/protocol';
 import type { Command } from '../core/sim';
@@ -14,10 +15,10 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, c4Tip, dashTip, gunTip, itemIdTip, itemTip, levelTip, matTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, c4Tip, dashTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
-import { ACH_BY_ID, unlock, xpToNext, type MatchReward } from '../game/profile';
+import { ACH_BY_ID, unlock, xpToNext, type MatchContext, type MatchReward } from '../game/profile';
 import { HAT_BY_ID } from '../core/cosmetics';
 import { clear, colorHex, fmtTime, h } from './dom';
 import { Minimap } from './minimap';
@@ -53,6 +54,16 @@ export class Hud {
   private board: HTMLDivElement;
   private results: HTMLDivElement | null = null;
   private gunEl: HTMLElement | null = null;
+  // Mejoras de la Horda: las tres cartas para elegir, la fila de las que ya tenés y la marca de impacto en el cursor.
+  private perkEl = h('div', { class: 'hud-perks' });
+  private perkRow = h('div', { class: 'perkrow' });
+  private hitEl = h('div', { class: 'hud-hit' });
+  private mouse = { x: 0, y: 0 };
+  private hitT = 0;
+  /** Bajas seguidas con armas (se corta al rato sin bajar a nadie). */
+  private spree = 0;
+  private spreeT = 0;
+  private spreeTier = -1;
   private slotEls = new Map<string, { root: HTMLElement; cd: HTMLElement; txt: HTMLElement; lock: HTMLElement; icon: HTMLElement; mut: HTMLElement }>();
   private lastMe: MeFrame | null = null;
   private lastLocal: CharFrame | null = null;
@@ -86,7 +97,7 @@ export class Hud {
   private multi = new Map<number, { n: number; t: number }>();
   private firstKo = false;
   /** Estadísticas de la partida para el perfil (logros y XP de cuenta). */
-  live = { bestCombo: 0, bestMulti: 0, bestStreak: 0, mutations: 0 };
+  live = { bestCombo: 0, bestMulti: 0, bestStreak: 0, mutations: 0, bestSpree: 0 };
   onFlash: (color: number, amount: number) => void = () => {};
 
   constructor(
@@ -99,12 +110,16 @@ export class Hud {
   ) {
     for (const r of roster) this.byId.set(r.id, r);
     this.root = h('div', { class: 'hud' });
-    const bottom = h('div', { class: 'hud-bottom' }, this.body, h('div', { class: 'hud-mid' }, this.deny, this.bar, this.hint), h('div', { class: 'hud-right' }, this.mats));
+    const bottom = h('div', { class: 'hud-bottom' }, this.body, h('div', { class: 'hud-mid' }, this.perkEl, this.deny, this.perkRow, this.bar, this.hint), h('div', { class: 'hud-right' }, this.mats));
     this.forge = h('div', { class: 'forge hidden' });
     this.board = h('div', { class: 'board hidden' });
     // Botón chico de pantalla completa arriba a la derecha (el menú de pausa también lo tiene).
     const fs = fullscreenButton('fs-mini');
     this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, this.comboEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    if (rules.weapons) {
+      this.root.append(this.hitEl);
+      window.addEventListener('mousemove', this.onMouse, { passive: true });
+    }
     parent.appendChild(this.root);
     this.buildBar();
     if (rules.pickups === 'materials') this.buildMats();
@@ -224,6 +239,7 @@ export class Hud {
       this.renderMats(me);
       if (this.forgeOpen) this.renderForge();
     }
+    if (this.rules.weapons) this.renderPerks(me, w.phase === 'play');
     this.denyT -= dt;
     this.deny.style.opacity = this.denyT > 0 ? '1' : '0';
     this.tickJuice(w, local, me, dt);
@@ -382,6 +398,97 @@ export class Hud {
     }
   }
 
+  /** Mejoras: las cartas para elegir (si hay una oferta) y la fila de las que ya tenés. */
+  private renderPerks(me: MeFrame | null, playing: boolean) {
+    const offer = playing && me ? me.of : [];
+    const key = offer.join(',');
+    if (this.perkEl.dataset.k !== key) {
+      this.perkEl.dataset.k = key;
+      clear(this.perkEl);
+      this.perkEl.classList.toggle('on', offer.length > 0);
+      if (offer.length && me) {
+        this.perkEl.append(
+          h('div', { class: 'perk-head' }, 'Elegí una mejora ', h('b', null, '')),
+          h('div', { class: 'perk-cards' }, offer.map((idx, i) => {
+            const p = PERKS[PERK_IDS[idx]];
+            const lv = me.pk[idx] ?? 0;
+            return h('button', { class: 'perk-card', onclick: () => this.pickPerk(i) },
+              h('span', { class: 'pk-key' }, String(i + 1)),
+              h('span', { class: 'pk-ic' }, p.icon),
+              h('b', null, p.name),
+              h('small', null, p.desc),
+              p.max > 1 && p.max < 10 ? h('em', null, lv ? `nivel ${lv} → ${lv + 1}` : `hasta nivel ${p.max}`) : null);
+          })),
+        );
+        audio.play('perkoffer', 0.7);
+      }
+    }
+    if (offer.length && me) {
+      const b = this.perkEl.querySelector('.perk-head b');
+      const t = `${me.ot} s`;
+      if (b && b.textContent !== t) { b.textContent = t; b.classList.toggle('low', me.ot <= 5); }
+    }
+    const owned = me ? me.pk.map((n, i) => (n > 0 ? `${i}:${n}` : '')).filter(Boolean).join(',') : this.perkRow.dataset.k ?? '';
+    if (this.perkRow.dataset.k !== owned) {
+      this.perkRow.dataset.k = owned;
+      clear(this.perkRow);
+      me?.pk.forEach((n, i) => {
+        const p = PERKS[PERK_IDS[i]];
+        if (n > 0 && p) this.perkRow.append(tip(h('span', { class: 'pk' }, p.icon, n > 1 ? h('i', null, String(n)) : null), () => perkTip(p.id, n)));
+      });
+    }
+  }
+
+  private pickPerk(i: number) {
+    if (!this.perkEl.classList.contains('on')) return;
+    // Se esconden ya: la respuesta del host tarda un instante y no hay que elegir dos veces.
+    this.perkEl.classList.remove('on');
+    this.send({ c: 'perk', i });
+  }
+
+  /** Con una oferta en pantalla, las teclas 1, 2 y 3 eligen. Devuelve true si la tecla se usó para eso. */
+  perkKey(code: string): boolean {
+    const m = /^(?:Digit|Numpad)([1-3])$/.exec(code);
+    if (!m || !this.perkEl.classList.contains('on') || Number(m[1]) > (this.lastMe?.of.length ?? 0)) return false;
+    this.pickPerk(Number(m[1]) - 1);
+    return true;
+  }
+
+  private onMouse = (e: MouseEvent) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; };
+
+  /** Marca en el cursor: tus balas dieron (0), fue un crítico (1) o bajaste a uno (2). La más importante gana por un instante. */
+  private hitMark(rank: 0 | 1 | 2) {
+    const now = performance.now();
+    if (rank < this.hitRank && now - this.hitT < 140) return;
+    this.hitT = now;
+    this.hitRank = rank;
+    const r = this.root.getBoundingClientRect();
+    this.hitEl.style.left = `${this.mouse.x - r.left}px`;
+    this.hitEl.style.top = `${this.mouse.y - r.top}px`;
+    this.hitEl.className = 'hud-hit on ' + ['', 'crit', 'kill'][rank];
+    restart(this.hitEl);
+  }
+  private hitRank = 0;
+
+  /** Bajaste a un zombi: suma a la racha, que se muestra donde va el combo. */
+  private onSpree() {
+    this.spree++;
+    this.spreeT = SPREE_TIME;
+    this.live.bestSpree = Math.max(this.live.bestSpree, this.spree);
+    if (this.spree < 3) return;
+    const tier = SPREE_TIERS.filter((t) => this.spree >= t[0]).length - 1;
+    const label = tier >= 0 ? SPREE_TIERS[tier][1] : 'bajas';
+    this.comboEl.innerHTML = `<b>x${this.spree}</b><span>${label}</span>`;
+    this.comboEl.className = `hud-combo on t${Math.max(0, tier)}`;
+    restart(this.comboEl);
+    if (tier > this.spreeTier) {
+      this.spreeTier = tier;
+      audio.play('combo', 0.6, 0, Math.pow(2, tier / 6));
+      audio.say(label.replace(/[¡!]/g, ''));
+      this.onFlash([0xffe14a, 0xff8a3d, 0xff4f8b, 0xb070ff, 0x4fd1ff, 0xffffff][tier] ?? 0xffffff, 0.12 + tier * 0.04);
+    }
+  }
+
   private renderBar(c: CharFrame, me: MeFrame) {
     const hero = HEROES[this.me!.hero];
     if (this.rules.weapons) this.renderGuns(c, me);
@@ -499,6 +606,16 @@ export class Hud {
         if (this.combo >= 5) this.announce(`COMBO x${this.combo}`, COMBO_TIERS.filter((t) => this.combo >= t[0]).pop()?.[1] ?? '', 'combo-end');
         this.combo = 0;
         this.comboTier = -1;
+        this.comboEl.classList.remove('on');
+      }
+    }
+    // Racha de bajas (armas)
+    if (this.spree > 0) {
+      this.spreeT -= dt;
+      if (this.spreeT <= 0) {
+        if (this.spree >= SPREE_TIERS[0][0]) this.announce(`RACHA x${this.spree}`, SPREE_TIERS.filter((t) => this.spree >= t[0]).pop()?.[1] ?? '', 'combo-end');
+        this.spree = 0;
+        this.spreeTier = -1;
         this.comboEl.classList.remove('on');
       }
     }
@@ -685,6 +802,32 @@ export class Hud {
       } break;
       case 'deny': if (e.id === this.localId) { this.deny.textContent = DENY_TEXT[e.w] ?? e.w; this.denyT = 1.6; } break;
       case 'wpn': if (e.id === this.localId && e.e) this.localDeny('Sin balas: volvés a la pistola'); break;
+      case 'shot': {
+        if (e.id !== me || me < 0) break;
+        let rank = -1;
+        for (let i = 3; i < e.p.length; i += 4) rank = Math.max(rank, e.p[i] === SHOT_CRIT ? 1 : e.p[i] === 1 ? 0 : -1);
+        if (rank >= 0) this.hitMark(rank as 0 | 1);
+        break;
+      }
+      case 'udie':
+        if (e.by === me && me >= 0 && this.rules.weapons) { this.hitMark(2); this.onSpree(); }
+        break;
+      case 'perk': {
+        const p = PERKS[PERK_IDS[e.p]];
+        const who = this.byId.get(e.id);
+        if (!p || !who) break;
+        if (e.id === me) this.showCenter(`${p.icon} ${p.name}`, 1.5, 'good');
+        else {
+          // Lo que eligen los demás, en el costado: sirve para saber con quién contás para qué.
+          const row = h('div', { class: 'feed-row in' });
+          row.innerHTML = `<b style="color:${colorHex(TEAM_COLORS[who.team % TEAM_COLORS.length])}">${esc(who.name)}</b> ${p.icon} ${esc(p.name)}`;
+          this.feed.prepend(row);
+          while (this.feed.children.length > 5) this.feed.lastChild?.remove();
+          setTimeout(() => row.classList.add('out'), 5000);
+          setTimeout(() => row.remove(), 5600);
+        }
+        break;
+      }
       case 'loot': if (e.id === this.localId) {
         const c = CRATE_INFO[CRATE_KINDS[e.c]];
         if (c) this.showCenter(`${c.icon} ${c.name}`, 1.1, 'good');
@@ -872,47 +1015,50 @@ export class Hud {
 
   // ───────────── resultados ─────────────
 
-  showResults(res: MatchResultInfo, isHost: boolean, onBack: () => void, onLeave: () => void, reward: MatchReward | null = null) {
+  showResults(res: MatchResultInfo, isHost: boolean, onBack: () => void, onLeave: () => void, reward: MatchReward | null = null, ctx: MatchContext | null = null) {
     this.results?.remove();
     this.centerT = 0;
     this.center.style.opacity = '0';
+    this.comboEl.classList.remove('on');
+    this.perkEl.classList.remove('on');
     const me = this.me;
     const won = !res.draw && me && me.team === res.winner;
-    const coop = gameOf(this.lastMode).coopNames;
+    const game = gameOf(this.lastMode);
+    const coop = game.coopNames;
+    // Cada juego cuenta su partida con sus columnas y sus premios.
+    const view = game.id === 'horde' ? HORDE_RESULTS : BRAWL_RESULTS;
     const winnerName = res.draw ? 'Empate' : coop ? coop[res.winner === 0 ? 0 : 1]
       : res.teams === 'ffa' ? res.players.find((p) => p.team === res.winner)?.name ?? '?' : `Equipo ${TEAM_NAMES[res.winner]}`;
-    const score = (p: PlayerResult) => p.kills * 3 + p.assists + p.heatDealt / 100 + p.lethals + p.billiards * 2 + p.saves * 2;
-    const mvp = [...res.players].sort((a, b) => score(b) - score(a))[0];
-    const rows = [...res.players].sort((a, b) => a.team - b.team || b.kills - a.kills).map((p) => {
+    const mvp = [...res.players].sort((a, b) => view.mvp(b) - view.mvp(a))[0];
+    const rows = [...res.players].sort((a, b) => a.team - b.team || view.mvp(b) - view.mvp(a)).map((p) => {
       const col = colorHex(TEAM_COLORS[p.team % TEAM_COLORS.length]);
       const hat = p.hat && p.hat !== 'none' ? HAT_BY_ID[p.hat]?.icon ?? '' : '';
-      return `<tr class="${p.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${hat} ${esc(p.name)}${p.bot ? ' 🤖' : ''}${p === mvp ? ' <span class="mvp">MVP</span>' : ''}</td><td>${HEROES[p.hero].name}</td><td>${p.level}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${p.assists}</td><td>${Math.round(p.heatDealt)}</td></tr>`;
+      return `<tr class="${p.id === this.localId ? 'me' : ''}"><td><i style="background:${col}"></i>${hat} ${esc(p.name)}${p.bot ? ' 🤖' : ''}${p === mvp ? ' <span class="mvp">MVP</span>' : ''}</td><td>${HEROES[p.hero].name}</td>${view.cols.map(([, get]) => `<td>${get(p)}</td>`).join('')}</tr>`;
     }).join('');
     // Premios: cada categoría la gana alguien (si hay algo que premiar).
-    const award = (icon: string, title: string, key: (p: PlayerResult) => number, fmt: (v: number) => string) => {
+    const awards = view.awards.map(([icon, title, key, fmt]) => {
       const best = [...res.players].sort((a, b) => key(b) - key(a))[0];
       if (!best || key(best) <= 0) return '';
       return `<div class="award${best.id === this.localId ? ' mine' : ''}"><div class="aw-ic">${icon}</div><b>${title}</b><span>${esc(best.name)}</span><em>${fmt(key(best))}</em></div>`;
-    };
-    const awards = [
-      award('💥', 'Rey del ring-out', (p) => p.kills, (v) => `${v} sacados`),
-      award('🧹', 'Farmeador', (p) => p.cs ?? 0, (v) => `${v} esbirros rematados`),
-      award('☠️', 'Verdugo', (p) => p.lethals, (v) => `${v} golpes letales`),
-      award('🎱', 'Billarista', (p) => p.billiards, (v) => `${v} carambolas`),
-      award('🚀', 'Cañón humano', (p) => p.bestLaunch, (v) => `lanzó a ${v} m/s`),
-      award('🔨', 'Demoledor', (p) => p.destroyed, (v) => `${v} coberturas`),
-      award('💎', 'Coleccionista', (p) => p.pickups, (v) => `${v} materiales`),
-      award('🪂', 'Fénix', (p) => p.saves, (v) => `${v} salvadas`),
-      award('🔥', 'Horno', (p) => p.heatDealt, (v) => `${Math.round(v)} de heat`),
-    ].filter(Boolean).join('');
+    }).filter(Boolean).join('');
+    let title = res.draw ? '🤝 Empate' : won ? '🏆 ¡VICTORIA!' : me ? '💀 Derrota' : '🏁 Fin';
+    let sub = res.draw ? '' : 'Ganó: ' + esc(winnerName);
+    if (game.id === 'horde' && !res.draw && ctx) {
+      // Horda: lo que importa es hasta dónde llegó el equipo.
+      title = res.winner === 0 ? '🚁 ¡EXTRACCIÓN!' : '🧟 Los alcanzó la horda';
+      const level = LOBBY_OPTIONS.difficulty.names?.[ctx.difficulty - 1];
+      sub = `Oleada ${Math.max(1, ctx.wave)} · ${ctx.step} de ${MISSIONS.length} misiones${level ? ' · ' + level : ''}`;
+    }
+    const records = (reward?.records ?? []).map((r) => `<div class="record"><b>${esc(r.label)}: ${esc(r.value)}</b>${r.old ? `<small>antes ${esc(r.old)}</small>` : ''}</div>`).join('');
 
     const box = h('div', { class: 'results' });
     box.innerHTML = `
-      <div class="res-title ${res.draw ? '' : won ? 'win' : 'lose'}">${res.draw ? '🤝 Empate' : won ? '🏆 ¡VICTORIA!' : me ? '💀 Derrota' : '🏁 Fin'}</div>
-      <div class="res-sub" style="color:${res.draw ? '#fff' : colorHex(TEAM_COLORS[res.winner % TEAM_COLORS.length])}">${res.draw ? '' : 'Ganó: ' + esc(winnerName)}</div>
+      <div class="res-title ${res.draw ? '' : won ? 'win' : 'lose'}">${title}</div>
+      <div class="res-sub" style="color:${res.draw ? '#fff' : colorHex(TEAM_COLORS[res.winner % TEAM_COLORS.length])}">${sub}</div>
       <div class="res-reason">${esc(res.reason)} · duró ${fmtTime(res.duration)}</div>
+      ${records ? `<div class="records"><span>🏅 ${reward!.records.length === 1 ? 'Récord personal' : 'Récords personales'}</span>${records}</div>` : ''}
       <div class="awards">${awards}</div>
-      <table><thead><tr><th>Jugador</th><th>Héroe</th><th>Nv</th><th>Sacó</th><th>Cayó</th><th>Asist.</th><th>Heat</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>Jugador</th><th>Héroe</th>${view.cols.map(([name]) => `<th>${name}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
       <div class="reward"></div>`;
     const btns = h('div', { class: 'res-buttons' },
       isHost ? h('button', { class: 'btn primary', onclick: onBack }, 'Volver al lobby') : h('div', { class: 'wait' }, 'Esperando que el host vuelva al lobby…'),
@@ -922,6 +1068,7 @@ export class Hud {
     this.results = box;
     this.root.appendChild(box);
     if (won) this.confettiRain(120);
+    if (records) audio.play('jackpot', 0.7);
     if (reward) this.animateReward(box.querySelector('.reward') as HTMLElement, reward);
   }
 
@@ -991,14 +1138,52 @@ export class Hud {
     }
   }
 
-  dispose() { this.root.remove(); }
+  dispose() {
+    window.removeEventListener('mousemove', this.onMouse);
+    this.root.remove();
+  }
 }
 
 function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+type Award = [icon: string, title: string, key: (p: PlayerResult) => number, fmt: (v: number) => string];
+/** Cómo cuenta su partida cada juego en la pantalla de resultados: columnas, premios y a quién se destaca. */
+interface ResultView { cols: [string, (p: PlayerResult) => string | number][]; awards: Award[]; mvp: (p: PlayerResult) => number }
+
+const BRAWL_RESULTS: ResultView = {
+  cols: [['Nv', (p) => p.level], ['Sacó', (p) => p.kills], ['Cayó', (p) => p.deaths], ['Asist.', (p) => p.assists], ['Heat', (p) => Math.round(p.heatDealt)]],
+  awards: [
+    ['💥', 'Rey del ring-out', (p) => p.kills, (v) => `${v} sacados`],
+    ['🧹', 'Farmeador', (p) => p.cs ?? 0, (v) => `${v} esbirros rematados`],
+    ['☠️', 'Verdugo', (p) => p.lethals, (v) => `${v} golpes letales`],
+    ['🎱', 'Billarista', (p) => p.billiards, (v) => `${v} carambolas`],
+    ['🚀', 'Cañón humano', (p) => p.bestLaunch, (v) => `lanzó a ${v} m/s`],
+    ['🔨', 'Demoledor', (p) => p.destroyed, (v) => `${v} coberturas`],
+    ['💎', 'Coleccionista', (p) => p.pickups, (v) => `${v} materiales`],
+    ['🪂', 'Fénix', (p) => p.saves, (v) => `${v} salvadas`],
+    ['🔥', 'Horno', (p) => p.heatDealt, (v) => `${Math.round(v)} de heat`],
+  ],
+  mvp: (p) => p.kills * 3 + p.assists + p.heatDealt / 100 + p.lethals + p.billiards * 2 + p.saves * 2,
+};
+
+const HORDE_RESULTS: ResultView = {
+  cols: [['Zombis', (p) => p.cs ?? 0], ['Rompió', (p) => p.destroyed], ['Cajas', (p) => p.pickups], ['Cayó', (p) => p.deaths]],
+  awards: [
+    ['🧟', 'Exterminador', (p) => p.cs ?? 0, (v) => (v === 1 ? '1 zombi' : `${v} zombis`)],
+    ['🔨', 'Demoledor', (p) => p.destroyed, (v) => `rompió ${v} entre nidos y coberturas`],
+    ['📦', 'Acaparador', (p) => p.pickups, (v) => (v === 1 ? '1 caja' : `${v} cajas`)],
+    ['🚀', 'Cañón humano', (p) => p.bestLaunch, (v) => `lanzó a ${v} m/s`],
+    ['🛡️', 'Intocable', (p) => (p.deaths === 0 ? 1 : 0), () => 'no cayó nunca'],
+  ],
+  mvp: (p) => (p.cs ?? 0) + p.destroyed * 4 + p.pickups - p.deaths * 5,
+};
+
 const COMBO_TIERS: [number, string][] = [[3, '¡Combo!'], [5, '¡Brutal!'], [8, '¡Salvaje!'], [12, '¡Bestial!'], [16, '¡INHUMANO!'], [22, '¡¡RUBBLE!!']];
+/** Racha de bajas con armas: se corta a los SPREE_TIME segundos sin bajar a nadie. */
+const SPREE_TIERS: [number, string][] = [[6, '¡Racha!'], [12, '¡Carnicería!'], [20, '¡Masacre!'], [30, '¡Exterminio!'], [45, '¡IMPARABLE!'], [65, '¡¡LEYENDA!!']];
+const SPREE_TIME = 3.5;
 
 /** Reinicia la animación CSS de un elemento. */
 function restart(el: HTMLElement) {

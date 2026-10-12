@@ -38,8 +38,10 @@ export type SimEvent =
   | { k: 'gate'; id: number; i: number; n: number; fin: number }
   | { k: 'gad'; w: string; i: number; id: number; x: number; y: number; z: number; it?: string }
   // ── Armas (core/weapons.ts) ──
-  // Disparo de impacto instantáneo. w: índice del arma · p: por cada bala [x, y, z, qué tocó (0 nada, 1 cuerpo, 2 sólido)], todo seguido
+  // Disparo de impacto instantáneo. w: índice del arma · p: por cada punto que tocó una bala [x, y, z, qué tocó (0 nada,
+  // 1 cuerpo, 2 sólido, 3 cuerpo con crítico)], todo seguido. Una bala perforante deja un punto por cuerpo atravesado.
   | { k: 'shot'; id: number; w: number; p: number[] }
+  | { k: 'perk'; id: number; p: number } // eligió una mejora (p: índice en PERK_IDS)
   | { k: 'wpn'; id: number; w: number; e: number } // cambió de arma (e: 1 = se quedó sin balas)
   | { k: 'c4'; id: number; x: number; y: number; z: number; f: number } // plantó una carga (f: segundos de mecha)
   | { k: 'loot'; id: number; c: number; x: number; y: number; z: number } // agarró una caja de suministros (c: qué traía)

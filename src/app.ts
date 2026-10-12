@@ -11,7 +11,7 @@ import { FAMILY_COLORS, FAMILY_NAMES, HERO_IDS, type HeroId, type MatchSettings,
 import { db } from './db/persistence';
 import { AttractMode } from './game/attract';
 import { MatchRunner } from './game/match';
-import { ACHIEVEMENTS, getProfile, setHat, xpToNext } from './game/profile';
+import { ACHIEVEMENTS, getProfile, recordsOf, setHat, xpToNext } from './game/profile';
 import { HATS, HAT_BY_ID } from './core/cosmetics';
 import { ClientSession } from './net/client';
 import { HostSession, MAX_PLAYERS } from './net/host';
@@ -120,7 +120,9 @@ export class App {
           h('div', { class: 'gb-info' },
             h('h2', null, `${g.icon} ${g.name}`, h('small', null, g.tagline)),
             h('p', null, g.desc),
-            h('div', { class: 'tags' }, h('span', { class: 'tag strong' }, `👥 ${g.players}`), g.highlights.map((t) => h('span', { class: 'tag' }, t)))),
+            h('div', { class: 'tags' }, h('span', { class: 'tag strong' }, `👥 ${g.players}`), g.highlights.map((t) => h('span', { class: 'tag' }, t))),
+            // Tus marcas en este juego, si ya jugaste.
+            recordsOf(g.id).length ? h('p', { class: 'gb-record' }, `🏅 Tus récords: ${recordsOf(g.id).join(' · ')}`) : null),
           h('div', { class: 'gb-actions' },
             h('button', { class: 'btn primary big', onclick: () => this.host(false) }, '🎮 Crear sala'),
             h('button', { class: 'btn big', onclick: () => this.host(true) }, g.sides === 'coop' ? '🤖 Jugar con bots' : '🤖 Práctica vs bots'),

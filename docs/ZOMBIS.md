@@ -11,7 +11,7 @@ Pilares:
 
 1. **Las armas se sienten**: ráfaga de uzi, escopetazo que tira para atrás, cohete y C4 que mandan zombis al vacío.
 2. **Siempre hay algo que hacer además de sobrevivir**: un objetivo marcado que obliga a moverse y a defender una posición.
-3. **Lo que ganás queda**: cada zona asegurada es una **mini base** que ayuda en lo que sigue.
+3. **Lo que ganás queda**: cada zona asegurada es una **mini base** que ayuda en lo que sigue, y cada misión cumplida te da una **mejora** a elegir.
 
 ## 2. Dónde vive cada cosa
 
@@ -21,11 +21,13 @@ Pilares:
 | Su mapa, **El Refugio** (`kind: 'horde'`) | `src/core/maps/index.ts` |
 | Reglas: sin poderes, con armas (`weapons`), piso frágil que se rearma en 12 s | `src/core/rules.ts` (`horde`) |
 | Armas, disparo instantáneo, cohete y C4 | `src/core/weapons.ts` |
+| Mejoras: la lista y sus números | `src/core/perks.ts` |
 | Oleadas, IA de zombis, misiones, nidos, jefe, mini bases y cajas | `src/core/horde.ts` |
 | Bots que disparan, van al objetivo, juntan cajas y plantan C4 | `src/core/bots.ts` (`decideHorde`) |
 | Trazas, C4 en el piso, cajas, mini bases y arma en la mano | `src/render/hordeView.ts`, `src/render/beanView.ts` |
 | Nido y Mole Madre | `src/render/propsView.ts`, `src/render/mobaView.ts` |
-| Arma y munición, misión en curso, avisos | `src/ui/hud.ts` |
+| Arma y munición, misión en curso, cartas de mejora, racha, resultados | `src/ui/hud.ts` |
+| Récords personales | `src/game/profile.ts` |
 | Sonidos de las armas | `src/audio/audio.ts` |
 
 ## 3. Controles
@@ -86,7 +88,48 @@ Cada zona asegurada queda como mini base: una **torreta** que no vence, un lugar
 
 La Horda se juega en su propio mapa, **El Refugio**, y no en las arenas del brawler: un fuerte elevado en el centro con dos entradas, pasillos entre muros, cobertura y barriles. Los mapas de la Horda **no llevan artefactos de pista** (resortes, paragolpes, rotores, géiseres): son de la Arena y de la Carrera, y en un juego de zombis no pintan nada. Hay un test que lo exige. Los barriles sí van, porque explotan a tiros.
 
-## 6. Oleadas, cajas y dificultad
+## 6. Mejoras
+
+Al cumplir cada misión (menos la extracción), **cada héroe elige una mejora entre tres**. Se acumulan hasta el final, así que cada partida arma un personaje distinto: el que tira rápido, el de las explosiones, el que aguanta. Son cinco elecciones por partida.
+
+- Aparecen tres cartas sobre la barra. Se elige con las teclas `1`, `2` y `3` o con un clic. Hay 20 s; si no elegís, se te da la primera. La partida no se frena, pero al cumplir una misión la próxima oleada no sale antes de 7 s.
+- La oferta se sortea por peso entre las que todavía podés subir. Si se cumplen dos misiones seguidas, la segunda oferta espera a que elijas la primera.
+- Las que ya tenés se ven en una fila sobre la barra, con su nivel. Lo que eligen los demás aparece en el costado.
+- Los bots eligen solos (al azar) al segundo.
+
+| Mejora | Qué hace | Niveles |
+|---|---|---|
+| 🔥 **Pólvora brava** | +25 % de daño con todas las armas | 3 |
+| ⚡ **Gatillo fácil** | Disparás 20 % más rápido | 3 |
+| 🦅 **Ojo de halcón** | 15 % de golpes críticos: daño ×2,5 y más empuje | 3 |
+| 🎯 **Balas perforantes** | Cada bala atraviesa un zombi más | 2 |
+| 💣 **Reacción en cadena** | El zombi que bajás explota y lastima a los de al lado; los que caen por esa explosión explotan también | 2 |
+| 🎒 **Bandolera** | Las cajas traen 50 % más balas, y te recarga el arma al elegirla | 2 |
+| ❄️ **Sangre fría** | Cada zombi que bajás te enfría | 2 |
+| 🛡️ **Piel curtida** | Recibís 20 % menos de heat y te empujan menos | 2 |
+| 🧨 **Demoledor** | +2 cargas de C4 ahora, llevás 2 más y explotan más grande | 2 |
+| ❤️ **Segundo aliento** | +1 vida; si hay un compañero eliminado, vuelve al juego con una vida | 2 |
+| 👟 **Piernas livianas** | Disparar ya no te frena y corrés 8 % más | 1 |
+| 🔫 **Pistolas gemelas** | La pistola dispara de a dos balas | 1 |
+| 🗼 **Torreta de bolsillo** | Planta una torreta a tu lado por 90 s | sin tope |
+
+La lista y los números están en `src/core/perks.ts`; quién las ofrece y lo que hacen al elegirlas, en `horde.ts` (`tickPerks`, `onPerk`); lo que cambian de las armas, en `weapons.ts`. La elección viaja como un comando (`perk`) y el estado, en el frame propio de cada jugador (`MeFrame.pk`, `of`, `ot`).
+
+**La horda también crece.** Con las mejoras solas el final era un paseo (en las pruebas, los bots ganaban siempre sin caerse), así que por cada misión cumplida los zombis aguantan 15 % más, pegan 7 % más y salen 15 % más (`HORDE.threatHp`, `threatDmg`, `threatCount`). Vale también para los nidos que escupen, la escolta y el jefe.
+
+### Que disparar se sienta
+
+- **Marca en el cursor**: blanca cuando tus balas dan, dorada si fue crítico y roja cuando bajás a uno. Cada una con su sonido; las bajas seguidas suenan cada vez más agudas.
+- **Racha de bajas**: desde tres bajas seguidas (sin que pasen 3,5 s) aparece el contador, con sus escalones (¡Racha!, ¡Carnicería!, ¡Masacre!...).
+- Un crítico se ve en la traza (más gruesa y dorada) y siempre muestra su número, aunque el arma sea la uzi.
+
+## 7. Resultados y récords
+
+La pantalla de resultados de la Horda es propia: dice hasta qué oleada y cuántas misiones llegó el equipo, y cuenta zombis, cosas rotas, cajas y caídas en vez de ring-outs. Cada juego define sus columnas y sus premios (`BRAWL_RESULTS`, `HORDE_RESULTS` en `ui/hud.ts`).
+
+Se guardan **récords personales** en el perfil local: extracción más rápida y oleada más alta (por dificultad), más zombis en una partida y racha más larga. Al superarlos se avisa en los resultados, y se ven en la tarjeta del juego en la vitrina.
+
+## 8. Oleadas, cajas y dificultad
 
 - **Oleadas**: la primera a los 5 s y después una cada 22 s, sin esperar a que se limpie la anterior (si no queda ningún zombi, la siguiente sale en 4 s). Crecen con el número de oleada y con la cantidad de héroes; después de la 12 siguen creciendo a la mitad del ritmo.
 - **Zombis**: Zombi (lento), Corredor (rápido y frágil), Escupidor (a distancia, avisa dónde cae) y Mole (enorme, golpe en área que se ve venir). Hay un tope de zombis vivos a la vez que sube con los héroes.
@@ -94,11 +137,11 @@ La Horda se juega en su propio mapa, **El Refugio**, y no en las arenas del braw
 - **Heat**: no hay barra de vida, como en todo RUBBLE. Un héroe se enfría solo al rato de no recibir golpes, más rápido en una mini base, de golpe con un botiquín y un poco al cumplir cada misión.
 - **Dificultad** (la elige el host): Fácil, Normal y Difícil cambian cuántos zombis salen y cuánto pegan (`HORDE_LEVELS`).
 
-En las partidas de bots de prueba en El Refugio, en Normal: de dos a seis bots de nivel normal o difícil completan la cadena en 3 a 5 minutos perdiendo alguna vida; un bot solo a veces gana y a veces cae cerca del final; y los bots de nivel fácil llegan a la extracción pero no la completan.
+En las partidas de bots de prueba en El Refugio, con las mejoras y la horda creciendo: de dos a cinco bots suelen completar la cadena en 3 a 5 minutos perdiendo alguna vida (alguna partida se va a 7 minutos y alguna se pierde); seis la completan en 3 sin caerse; un bot solo tarda de 6 a 9 minutos y a veces cae en la extracción. El resultado cambia mucho de una partida a otra, más que entre dificultades.
 
-## 7. Lo que falta o hay que decidir jugando
+## 9. Lo que falta o hay que decidir jugando
 
-- **Probarlo con gente**: todo el ajuste viene de bots, que apuntan mejor y se organizan peor que una persona.
+- **Probarlo con gente**: todo el ajuste viene de bots, que apuntan mejor y se organizan peor que una persona. Vale el doble para las mejoras: los bots eligen al azar, una persona va a armar combinaciones (cadena + perforantes + crítico) y hay que ver si alguna rompe el juego.
 - **Más mapas**: hay uno solo.
 - **Más misiones**: escoltar una carga, llevar algo de un punto a otro, proteger a un sobreviviente.
 - ¿El C4 con mecha alcanza, o conviene detonarlo a distancia?

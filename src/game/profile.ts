@@ -1,6 +1,7 @@
 // Perfil local del jugador: nivel de cuenta, estadísticas totales, logros y sombreros.
 // Vive en localStorage (no requiere login). Es la capa de "gamificación" entre partidas.
 import { HATS } from '../core/cosmetics';
+import { gameOf, LOBBY_OPTIONS, type GameId } from '../core/games';
 import type { MatchResultInfo, PlayerResult } from '../core/protocol';
 
 const KEY = 'rubble.profile';
@@ -17,6 +18,8 @@ export interface Profile {
   heroes: string[];
   achievements: string[];
   hat: string;
+  /** Marcas personales por juego (ver RECORDS). */
+  records: Record<string, number>;
 }
 
 export interface AchievementDef { id: string; name: string; desc: string; icon: string }
@@ -51,6 +54,7 @@ function load(): Profile {
   return {
     xp: p.xp ?? 0, level: p.level ?? 1, matches: p.matches ?? 0, wins: p.wins ?? 0, kills: p.kills ?? 0, deaths: p.deaths ?? 0,
     bestCombo: p.bestCombo ?? 0, bestStreak: p.bestStreak ?? 0, heroes: p.heroes ?? [], achievements: p.achievements ?? [], hat: p.hat ?? 'none',
+    records: p.records ?? {},
   };
 }
 
@@ -89,6 +93,57 @@ export interface MatchLiveStats {
   bestMulti: number;
   bestStreak: number;
   mutations: number;
+  /** Bajas seguidas con armas (Horda). */
+  bestSpree: number;
+}
+
+/** Lo que la partida sabe y el resultado no trae: a qué se jugó y hasta dónde se llegó. */
+export interface MatchContext {
+  mode: string;
+  difficulty: number;
+  /** Horda: oleada alcanzada y misiones cumplidas. */
+  wave: number;
+  step: number;
+}
+
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const levelName = (d: number) => LOBBY_OPTIONS.difficulty.names?.[d - 1] ?? `nivel ${d}`;
+
+/** Marcas personales. `lower`: gana el número más chico (un tiempo). */
+const RECORDS: Record<string, { label: string; fmt: (v: number) => string; lower?: boolean }> = {
+  'horde.time': { label: 'Extracción más rápida', fmt: mmss, lower: true },
+  'horde.wave': { label: 'Oleada más alta', fmt: (v) => `oleada ${v}` },
+  'horde.kills': { label: 'Más zombis en una partida', fmt: (v) => `${v} zombis` },
+  'horde.spree': { label: 'Racha más larga', fmt: (v) => `x${v}` },
+};
+
+export interface RecordLine { label: string; value: string; old: string | null }
+
+/** Anota la marca si es mejor que la guardada. `sub` separa variantes (la dificultad). */
+function record(out: RecordLine[], key: string, sub: string, subName: string, v: number) {
+  const def = RECORDS[key];
+  const p = getProfile();
+  const k = sub ? `${key}.${sub}` : key;
+  const old = p.records[k];
+  if (!def || !(v > 0) || (old !== undefined && (def.lower ? v >= old : v <= old))) return;
+  p.records[k] = v;
+  out.push({ label: def.label + (subName ? ` (${subName})` : ''), value: def.fmt(v), old: old !== undefined ? def.fmt(old) : null });
+}
+
+/** Las marcas guardadas de un juego, para mostrarlas en la vitrina. */
+export function recordsOf(game: GameId): string[] {
+  const p = getProfile();
+  const out: string[] = [];
+  if (game === 'horde') {
+    for (const d of [3, 2, 1]) {
+      const t = p.records[`horde.time.${d}`];
+      if (t !== undefined) { out.push(`extracción en ${mmss(t)} (${levelName(d)})`); break; }
+    }
+    const wave = Math.max(0, ...[1, 2, 3].map((d) => p.records[`horde.wave.${d}`] ?? 0));
+    if (wave) out.push(`oleada ${wave}`);
+    if (p.records['horde.spree']) out.push(`racha x${p.records['horde.spree']}`);
+  }
+  return out;
 }
 
 export interface MatchReward {
@@ -100,13 +155,16 @@ export interface MatchReward {
   toXp: number;
   newAchievements: string[];
   newHats: string[];
+  /** Marcas personales superadas en esta partida. */
+  records: RecordLine[];
 }
 
 /** Aplica el resultado de una partida al perfil y devuelve el desglose para animarlo. */
-export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, live: MatchLiveStats): MatchReward | null {
+export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, live: MatchLiveStats, ctx?: MatchContext): MatchReward | null {
   if (!me) return null;
   const p = getProfile();
   const won = !res.draw && me.team === res.winner;
+  const horde = !!ctx && gameOf(ctx.mode).id === 'horde';
   const xp: { label: string; amount: number }[] = [];
   xp.push({ label: 'Partida jugada', amount: 60 });
   if (won) xp.push({ label: '¡Victoria!', amount: 120 });
@@ -117,6 +175,11 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
   if (me.saves) xp.push({ label: `${me.saves} salvadas`, amount: me.saves * 30 });
   if (me.destroyed) xp.push({ label: `${me.destroyed} demoliciones`, amount: me.destroyed * 3 });
   if (live.bestCombo >= 5) xp.push({ label: `Combo x${live.bestCombo}`, amount: live.bestCombo * 3 });
+  if (horde && ctx) {
+    if (me.cs) xp.push({ label: `${me.cs} zombis`, amount: Math.min(250, me.cs) });
+    if (ctx.step) xp.push({ label: `${ctx.step} ${ctx.step === 1 ? 'misión cumplida' : 'misiones cumplidas'}`, amount: ctx.step * 25 });
+    if (live.bestSpree >= 12) xp.push({ label: `Racha x${live.bestSpree}`, amount: Math.min(120, live.bestSpree * 2) });
+  }
   const total = xp.reduce((a, b) => a + b.amount, 0);
 
   const fromLevel = p.level, fromXp = p.xp;
@@ -129,6 +192,14 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
   p.bestCombo = Math.max(p.bestCombo, live.bestCombo);
   p.bestStreak = Math.max(p.bestStreak, live.bestStreak);
   if (!p.heroes.includes(me.hero)) p.heroes.push(me.hero);
+  const records: RecordLine[] = [];
+  if (horde && ctx) {
+    const d = String(ctx.difficulty), dn = levelName(ctx.difficulty);
+    if (won) record(records, 'horde.time', d, dn, Math.round(res.duration));
+    record(records, 'horde.wave', d, dn, ctx.wave);
+    record(records, 'horde.kills', '', '', me.cs ?? 0);
+    record(records, 'horde.spree', '', '', live.bestSpree);
+  }
   save();
 
   const got: string[] = [];
@@ -151,5 +222,5 @@ export function applyMatch(res: MatchResultInfo, me: PlayerResult | undefined, l
   check('veteran', p.matches >= 10);
   check('champion', p.wins >= 10);
   const newHats = HATS.filter((h) => h.level > fromLevel && h.level <= p.level).map((h) => h.id);
-  return { xp, total, fromLevel, fromXp, toLevel: p.level, toXp: p.xp, newAchievements: got, newHats };
+  return { xp, total, fromLevel, fromXp, toLevel: p.level, toXp: p.xp, newAchievements: got, newHats, records };
 }

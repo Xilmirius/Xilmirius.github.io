@@ -12,12 +12,14 @@ import { CRATE_KINDS, HORDE, MISSIONS, type HordeMode } from '../src/core/horde'
 import { MAPS } from '../src/core/maps';
 import { DASH_IDLE, defaultMoveParams, newMoveOut, stepMove, type MoveState } from '../src/core/movement';
 import { NO_MODS } from '../src/core/mutations';
+import { PERK, PERK_IDS, PERKS, perkLv, type PerkId } from '../src/core/perks';
+import { HEROES } from '../src/core/heroes';
 import type { RaceMode } from '../src/core/race';
 import { parseCommand, Simulation } from '../src/core/sim';
 import { buildWorldFrame, decodeWorld, encodeWorld, buildMeFrame } from '../src/core/snapshot';
 import { Terrain } from '../src/core/terrain';
 import { DEFAULT_SETTINGS, HERO_IDS, type MatchSettings, type ModeId, type RosterEntry, type HeroId } from '../src/core/types';
-import { C4, WEAPON_IDS, WEAPONS } from '../src/core/weapons';
+import { C4, c4Max, giveWeapon, SHOT_CRIT, WEAPON_IDS, WEAPONS } from '../src/core/weapons';
 
 function mkState(x: number, y: number, z: number): MoveState {
   return { pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, facing: 0, grounded: true, airJumps: 1, coyote: 0, prevB: 0, tumble: 0, hitstun: 0, stun: 0, hitSlide: 0, ...DASH_IDLE };
@@ -563,6 +565,282 @@ describe('armas (Horda)', () => {
     sim.step();
     expect(m.nests.length).toBe(0);
     expect(m.step).toBe(2);
+  });
+});
+
+describe('mejoras (Horda)', () => {
+  const idx = (id: PerkId) => PERK_IDS.indexOf(id);
+
+  /** Partida de Horda en juego con un héroe con pistola, sin cajas ni zombis sueltos, mirando hacia +x. */
+  function setup(n = 1) {
+    const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, mode: 'horde', map: 'refugio' }, roster: roster(n), seed: 4 });
+    sim.phase = 'play';
+    const m = sim.mode as HordeMode;
+    const a = sim.chars[0];
+    sim.step();
+    sim.drainEvents();
+    a.weapon = 0;
+    a.primary = -1;
+    a.ammo = 0;
+    m.crates.length = 0;
+    const zombie = (dx: number, dz = 0, hp = 500) => {
+      const u = sim.addUnit('zombie', 1, a.pos.x + dx, a.pos.z + dz, { name: 'Zombi', family: 'goo', hp, speed: 0, kbTaken: 1 });
+      u.ai = null;
+      u.pos.y = a.pos.y;
+      return u;
+    };
+    const fire = () => {
+      a.input = { ...emptyInput(), ax: a.pos.x + 6, az: a.pos.z, b: BTN.BASIC };
+      a.prevB = 0;
+      a.cds.basic = 0;
+      sim.step();
+      return sim.drainEvents();
+    };
+    /** Le da una mejora como si la hubiera elegido de una oferta. */
+    const give = (id: PerkId, ch = a) => {
+      ch.offer = [idx(id)];
+      m.onPerk(sim, ch, 0);
+      return sim.drainEvents();
+    };
+    return { sim, a, m, zombie, fire, give };
+  }
+
+  it('cada mejora tiene nombre, texto y lugar en la lista que viaja por la red', () => {
+    expect(new Set(PERK_IDS).size).toBe(PERK_IDS.length);
+    expect(Object.keys(PERKS).sort()).toEqual([...PERK_IDS].sort());
+    for (const id of PERK_IDS) {
+      const p = PERKS[id];
+      expect(p.id).toBe(id);
+      expect(p.name.length).toBeGreaterThan(2);
+      expect(p.desc.length).toBeGreaterThan(8);
+      expect(p.max).toBeGreaterThan(0);
+      expect(p.weight).toBeGreaterThan(0);
+    }
+  });
+
+  it('cumplir una misión le ofrece tres mejoras distintas a cada héroe y da un respiro antes de la próxima oleada', () => {
+    const { sim, a, m } = setup(2);
+    const b = sim.chars[1];
+    expect(a.offer.length).toBe(0);
+    const z = m.zone!;
+    let done = false;
+    for (let i = 0; i < (MISSIONS[0].need + 2) * 60 && !done; i++) {
+      for (const u of sim.units) if (u.alive) sim.killUnit(u, null, false);
+      a.pos = { x: z.x, y: sim.groundY(z.x, z.z, 0), z: z.z };
+      a.vel = { x: 0, y: 0, z: 0 };
+      sim.step();
+      done = sim.drainEvents().some((e) => e.k === 'alert' && e.w === 'horde_done');
+    }
+    expect(done).toBe(true);
+    sim.step();
+    for (const c of [a, b]) {
+      expect(c.offer.length).toBe(PERK.options);
+      expect(new Set(c.offer).size).toBe(PERK.options);
+      expect(c.offerT).toBeGreaterThan(PERK.time - 1);
+    }
+    const me = buildMeFrame(sim, a);
+    expect(me.of).toEqual(a.offer);
+    expect(me.ot).toBe(PERK.time);
+    expect(m.hud(sim).horde!.next).toBeGreaterThanOrEqual(HORDE.breather - 1);
+  });
+
+  it('la horda también crece: con cada misión cumplida los zombis aguantan más y pegan más', () => {
+    const { sim, a, m } = setup();
+    // Un zombi de verdad, como los saca la oleada.
+    const spawn = () => {
+      const before = new Set(sim.units);
+      (m as unknown as { spawnAt(s: Simulation, k: string, x: number, z: number): unknown }).spawnAt(sim, 'zombie', a.pos.x + 3, a.pos.z);
+      return sim.units.find((x) => !before.has(x))!;
+    };
+    const early = spawn();
+    m.step = 4;
+    const late = spawn();
+    expect(late.maxHp).toBeCloseTo(early.maxHp * (1 + HORDE.threatHp * 4), 3);
+  });
+
+  it('elegir es un comando: sube el nivel, avisa con un evento y la oferta se cierra', () => {
+    const { sim, a } = setup();
+    a.offer = [idx('dmg'), idx('rate'), idx('skin')];
+    a.offerT = PERK.time;
+    expect(parseCommand({ c: 'perk', i: 1 })).toEqual({ c: 'perk', i: 1 });
+    expect(parseCommand({ c: 'perk', i: 9 })).toBeNull();
+    expect(parseCommand({ c: 'perk', i: '1' })).toBeNull();
+    sim.queueCommand(a.pid, { c: 'perk', i: 1 });
+    sim.step();
+    const ev = sim.drainEvents();
+    expect(ev.some((e) => e.k === 'perk' && e.id === a.id && e.p === idx('rate'))).toBe(true);
+    expect(perkLv(a, 'rate')).toBe(1);
+    expect(perkLv(a, 'dmg')).toBe(0);
+    expect(a.offer.length).toBe(0);
+    expect(buildMeFrame(sim, a).pk[idx('rate')]).toBe(1);
+    // Sin oferta, el comando no hace nada.
+    sim.queueCommand(a.pid, { c: 'perk', i: 0 });
+    sim.step();
+    expect(a.perks.reduce((s, n) => s + n, 0)).toBe(1);
+  });
+
+  it('si no elegís a tiempo se te da la primera, y un bot elige solo', () => {
+    const { sim, a } = setup(2);
+    const bot = sim.chars[1];
+    bot.bot = true;
+    a.offer = [idx('skin'), idx('dmg')];
+    a.offerT = 0.05;
+    bot.offer = [idx('dmg'), idx('rate'), idx('cold')];
+    bot.offerT = PERK.time;
+    for (let i = 0; i < 10; i++) sim.step();
+    expect(perkLv(a, 'skin')).toBe(1);
+    expect(bot.offer.length).toBe(3);
+    for (let i = 0; i < PERK.botTime * 60 + 5; i++) sim.step();
+    expect(bot.offer.length).toBe(0);
+    expect(bot.perks.reduce((s, n) => s + n, 0)).toBe(1);
+  });
+
+  it('no se ofrece una mejora que ya está al tope', () => {
+    const { sim, a, m, give } = setup();
+    for (const id of PERK_IDS) for (let i = 0; i < PERKS[id].max && id !== 'turret'; i++) give(id);
+    a.picks = 1;
+    a.input = emptyInput();
+    sim.step();
+    // Solo queda la que no tiene tope.
+    expect(a.offer).toEqual([idx('turret')]);
+    void m;
+  });
+
+  it('Pólvora brava y Gatillo fácil: más daño por bala y menos espera entre disparos', () => {
+    const { a, zombie, fire, give } = setup();
+    const z = zombie(4);
+    give('dmg');
+    give('rate');
+    fire();
+    expect(z.hp).toBeCloseTo(500 - WEAPONS.pistol.dmg * (1 + PERK.dmg) * HORDE.heroVsUnit, 1);
+    expect(a.cdMax.basic).toBeCloseTo(WEAPONS.pistol.cd / (1 + PERK.rate), 3);
+  });
+
+  it('Balas perforantes: la bala sigue de largo y le pega al de atrás', () => {
+    const { zombie, fire, give } = setup();
+    const near = zombie(4), mid = zombie(6), far = zombie(8);
+    give('pierce');
+    const shot = fire().find((e) => e.k === 'shot');
+    expect(near.hp).toBeLessThan(500);
+    expect(mid.hp).toBeLessThan(500);
+    expect(far.hp).toBe(500);
+    // Un punto por cada cuerpo tocado.
+    expect(shot && shot.k === 'shot' && shot.p.length).toBe(8);
+  });
+
+  it('Ojo de halcón: el crítico pega más fuerte, se marca en el disparo y muestra su número', () => {
+    const { a, zombie, fire, give } = setup();
+    zombie(4, 0, 100000);
+    for (let i = 0; i < PERKS.crit.max; i++) give('crit');
+    a.primary = a.weapon = WEAPON_IDS.indexOf('uzi');
+    a.ammo = 500;
+    let crits = 0, plain = 0;
+    for (let i = 0; i < 200; i++) {
+      const ev = fire();
+      const shot = ev.find((e) => e.k === 'shot');
+      const crit = !!shot && shot.k === 'shot' && shot.p[3] === SHOT_CRIT;
+      // La uzi no avisa cada bala, pero el crítico sí.
+      expect(ev.some((e) => e.k === 'hit')).toBe(crit);
+      if (crit) crits++; else plain++;
+    }
+    const p = PERK.crit * PERKS.crit.max;
+    expect(crits).toBeGreaterThan(200 * p * 0.6);
+    expect(plain).toBeGreaterThan(200 * (1 - p) * 0.6);
+  });
+
+  it('Pistolas gemelas y Piernas livianas: dos balas por disparo y sin frenarse al tirar', () => {
+    const { sim, a, zombie, fire, give } = setup();
+    const z = zombie(4);
+    give('twin');
+    give('legs');
+    const shot = fire().find((e) => e.k === 'shot');
+    expect(shot && shot.k === 'shot' && shot.p.length).toBe(8);
+    expect(z.hp).toBeCloseTo(500 - WEAPONS.pistol.dmg * 2 * HORDE.heroVsUnit, 1);
+    expect(sim.charSpeed(a)).toBeCloseTo(a.stats.speed, 5);
+    expect(a.stats.speed).toBeCloseTo(HEROES[a.hero].speed * PERK.legsSpeed * (a.family === 'stone' || a.family === 'metal' ? 0.97 : 1), 3);
+  });
+
+  it('Bandolera y Demoledor: más balas por caja y más cargas de C4', () => {
+    const { sim, a, give } = setup();
+    giveWeapon(sim, a, 'uzi');
+    a.ammo = 3;
+    give('ammo');
+    expect(a.ammo).toBe(Math.round(WEAPONS.uzi.ammo * (1 + PERK.ammo)));
+    const c4 = a.c4;
+    give('demo');
+    expect(a.c4).toBe(c4 + PERK.c4);
+    expect(c4Max(a)).toBe(C4.max + PERK.c4);
+  });
+
+  it('Piel curtida y Sangre fría: se recibe menos heat y cada baja enfría', () => {
+    const { sim, a, zombie, give } = setup();
+    const z = zombie(1.2, 0, 10);
+    const before = a.stats.heatTaken;
+    give('skin');
+    expect(a.stats.heatTaken).toBeCloseTo(before * PERK.skinHeat, 5);
+    sim.hit(a, z, { heat: 20, kb: 0, dirX: 1, dirZ: 0, fx: 'minion' });
+    const heat = a.heat;
+    expect(heat).toBeCloseTo(20 * before * PERK.skinHeat, 3);
+    give('cold');
+    sim.killUnit(z, a, false);
+    expect(a.heat).toBeCloseTo(heat - PERK.cold, 3);
+  });
+
+  it('Reacción en cadena: el zombi bajado explota, y los que caen por esa explosión también', () => {
+    const { sim, a, zombie, fire, give } = setup();
+    give('chain');
+    const first = zombie(4, 0, 5), second = zombie(5.2, 0, 20), third = zombie(6.4, 0, 20), far = zombie(4, 6, 20);
+    fire();
+    expect(first.alive).toBe(false);
+    expect(second.alive).toBe(true);
+    a.input = emptyInput();
+    const booms: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      sim.step();
+      for (const e of sim.drainEvents()) if (e.k === 'boom' && e.c === 'chain') booms.push(i);
+    }
+    expect(second.alive).toBe(false);
+    expect(third.alive).toBe(false);
+    expect(far.alive).toBe(true);
+    // Tres explosiones, una detrás de la otra.
+    expect(booms.length).toBe(3);
+    expect(booms[2]).toBeGreaterThan(booms[0]);
+    expect(a.cs).toBe(3);
+    expect(a.heat).toBe(0);
+  });
+
+  it('Torreta de bolsillo: aparece al lado del héroe cuando tiene dónde plantarla', () => {
+    const { sim, a, give } = setup();
+    const before = sim.structures.filter((s) => s.kind === 'turret').length;
+    // Fuera de juego no hay dónde plantarla: queda debiéndose hasta que vuelve y pisa el suelo.
+    a.alive = false;
+    a.respawnT = 0.5;
+    a.input = emptyInput();
+    give('turret');
+    for (let i = 0; i < 20; i++) sim.step();
+    expect(a.alive).toBe(false);
+    expect(sim.structures.filter((s) => s.kind === 'turret').length).toBe(before);
+    for (let i = 0; i < 200; i++) sim.step();
+    expect(a.alive && a.grounded).toBe(true);
+    const t = sim.structures.filter((s) => s.kind === 'turret');
+    expect(t.length).toBe(before + 1);
+    expect(Math.hypot(t[t.length - 1].x - a.pos.x, t[t.length - 1].z - a.pos.z)).toBeLessThan(2);
+  });
+
+  it('Segundo aliento: suma una vida y devuelve al juego a un compañero eliminado', () => {
+    const { sim, a, give } = setup(2);
+    const mate = sim.chars[1];
+    mate.alive = false;
+    mate.lives = 0;
+    mate.eliminated = true;
+    const lives = a.lives;
+    give('life');
+    expect(a.lives).toBe(lives + 1);
+    expect(mate.eliminated).toBe(false);
+    a.input = emptyInput();
+    for (let i = 0; i < 150; i++) sim.step();
+    expect(mate.alive).toBe(true);
+    expect(mate.lives).toBe(1);
   });
 });
 

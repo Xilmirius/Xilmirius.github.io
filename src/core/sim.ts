@@ -22,6 +22,7 @@ import { dirOf, norm2, type V3 } from './math';
 import { createMode, type GameMode, type ModeResult } from './modes';
 import { canAct, DASH_IDLE, defaultMoveParams, newMoveOut, stepMove } from './movement';
 import { MUTATION_COST, NO_MODS, ROUTE_MODS, SUPPORT_RADIUS, SUPPORT_SHIELD, type Mods } from './mutations';
+import { PERK, perkLv } from './perks';
 import { Rng } from './rng';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from './rules';
 import { Terrain, TILE_CRUMBLING, TILE_GONE, TILE_INTACT } from './terrain';
@@ -37,12 +38,17 @@ export interface SimConfig {
 export type Command =
   | { c: 'craft'; id: string }
   | { c: 'sell'; id: string }
-  | { c: 'mutate'; slot: AbilitySlot; route: Route };
+  | { c: 'mutate'; slot: AbilitySlot; route: Route }
+  /** Elegir una de las mejoras ofrecidas (i: cuál de las que tiene en pantalla). */
+  | { c: 'perk'; i: number };
 
 /** Valida un comando que llegó por la red (dato no confiable). Devuelve null si no es un comando bien formado. */
 export function parseCommand(raw: unknown): Command | null {
   if (!raw || typeof raw !== 'object') return null;
   const m = raw as Record<string, unknown>;
+  if (m.c === 'perk') {
+    return typeof m.i === 'number' && Number.isInteger(m.i) && m.i >= 0 && m.i < PERK.options ? { c: 'perk', i: m.i } : null;
+  }
   if (m.c === 'craft' || m.c === 'sell') {
     return typeof m.id === 'string' && Object.hasOwn(ITEM_BY_ID, m.id) ? { c: m.c, id: m.id } : null;
   }
@@ -368,6 +374,10 @@ export class Simulation {
     }
     s.heatDealt *= 1 + 0.03 * (ch.level - 1);
     s.kbTaken *= 1 - 0.02 * (ch.level - 1);
+    // Mejoras de la Horda (core/perks.ts).
+    const skin = perkLv(ch, 'skin');
+    if (skin) { s.heatTaken *= PERK.skinHeat ** skin; s.kbTaken *= PERK.skinKb ** skin; }
+    if (perkLv(ch, 'legs')) s.speed *= PERK.legsSpeed;
     ch.stats = s;
   }
 
@@ -472,7 +482,9 @@ export class Simulation {
     this.commands = [];
     for (const { pid, cmd } of cmds) {
       const ch = this.charByPid.get(pid);
-      if (!ch || !this.rules.crafting) continue;
+      if (!ch) continue;
+      if (cmd.c === 'perk') { this.mode.onPerk?.(this, ch, cmd.i); continue; }
+      if (!this.rules.crafting) continue;
       if (this.rules.forgeAtBase && ch.alive && !this.atBase(ch) && cmd.c !== 'sell') {
         this.deny(ch, this.rules.recall ? 'La fragua está en tu base (B para volver)' : 'La fragua está en tu base');
         continue;

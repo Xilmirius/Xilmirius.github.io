@@ -116,6 +116,12 @@ export class Character implements MoveState {
   /** > 0: acaba de disparar (se mueve más lento, ver WeaponDef.move). */
   gunT = 0;
   gunMove = 1;
+  // Mejoras (core/perks.ts): cuántas veces eligió cada una (por índice en PERK_IDS), las que tiene para elegir
+  // ahora (índices; vacío = ninguna oferta), los segundos que le quedan para decidir y las ofertas que le deben.
+  perks: number[] = [];
+  offer: number[] = [];
+  offerT = 0;
+  picks = 0;
   // Estadísticas para premios y feedback
   destroyed = 0;
   pickups = 0;
