@@ -93,6 +93,7 @@ export class RaceMode implements GameMode {
       this.next.set(c.id, 0);
     }
     const t = sim.terrain;
+    this.placeOnStartLine(sim);
     const start = t.spawns.ffa[0] ?? { x: 0, z: 0 };
     t.gates.forEach((g, i) => {
       const d = distanceField(t, g.cells);
@@ -100,6 +101,43 @@ export class RaceMode implements GameMode {
       const s = d[t.cellIndexAt(from.x, from.z)];
       this.dist.push(d);
       this.span.push(s > 0 && s < Infinity ? s : 1);
+    });
+  }
+
+  /**
+   * Si las salidas ('*') están todas en una sola fila o columna, repone a los corredores equidistantes sobre
+   * esa línea (del centro de la primera al de la última, no en centros de celda) y sortea el orden con el rng
+   * de la partida, mirando todos hacia la primera puerta. Si están desparramadas, no toca nada: se queda con
+   * el reparto por celda que ya hizo `Simulation.spawnPoint`.
+   */
+  private placeOnStartLine(sim: Simulation) {
+    const t = sim.terrain;
+    const pts = t.spawns.ffa;
+    if (pts.length < 2) return;
+    const sameX = pts.every((p) => Math.abs(p.x - pts[0].x) < 1e-6);
+    const sameZ = pts.every((p) => Math.abs(p.z - pts[0].z) < 1e-6);
+    if (!sameX && !sameZ) return;
+    const axis: 'x' | 'z' = sameX ? 'z' : 'x';
+    const coords = pts.map((p) => p[axis]);
+    const lo = Math.min(...coords), hi = Math.max(...coords);
+    const other = sameX ? pts[0].x : pts[0].z;
+    const gate = t.gates[0];
+    const gx = gate ? gate.x : other, gz = gate ? gate.z : (lo + hi) / 2;
+    const order = sim.chars.map((c) => c.id);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = sim.rng.int(0, i);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const n = order.length;
+    order.forEach((id, k) => {
+      const at = n > 1 ? lo + ((hi - lo) * k) / (n - 1) : (lo + hi) / 2;
+      const ch = sim.charById.get(id);
+      if (!ch) return;
+      const pos = axis === 'z' ? { x: other, y: 0, z: at } : { x: at, y: 0, z: other };
+      pos.y = sim.groundY(pos.x, pos.z, pos.y);
+      ch.pos = pos;
+      ch.ppos = { ...pos };
+      ch.facing = Math.atan2(gx - pos.x, gz - pos.z);
     });
   }
 

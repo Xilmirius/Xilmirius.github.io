@@ -31,7 +31,7 @@ Cada pista tiene su tema visual, que entra solo al elegirla (`theme` en el mapa)
 | **La Bolera** | Neón | Bolas que ruedan contra vos. Un calentamiento con dos carriles, el callejón (cuatro carriles de bolas y, en los carriles libres, paragolpes que te obligan a cruzarlos), un cruce con bolas que van de lado a lado y los pinos antes de la meta. Es la más corta. |
 | **El Derrumbe** | Noche | Una espiral que termina en el centro. Tres paredes para romper a puro dash (la de roca conviene volarla con los barriles), un campo de piso flojo con barriles, eslalon entre rocas, dos zanjas para saltar y una última pared justo antes de la meta. |
 
-Las pistas se escriben en ASCII en `src/core/maps/index.ts` (la leyenda está al principio del archivo). Una pista lleva `kind: 'race'`, seis salidas (`*`), puertas numeradas del `2` al `9` y la meta `F`.
+Las pistas se escriben en ASCII en `src/core/maps/index.ts` (la leyenda está al principio del archivo). Una pista lleva `kind: 'race'`, una columna de cinco salidas (`*`) que cubre el ancho de la zona de salida, puertas numeradas del `2` al `9` y la meta `F`. Los corredores no aparecen en el centro de esas celdas: `RaceMode.init` los reparte equidistantes sobre el segmento que va del centro de la primera a la de la última, con el orden sorteado en cada carrera (`src/core/race.ts`). Si las `*` de un mapa no están en una sola fila o columna, se usa el reparto por celda de siempre (`Simulation.spawnPoint`).
 
 ## 3. Piezas de pista
 
