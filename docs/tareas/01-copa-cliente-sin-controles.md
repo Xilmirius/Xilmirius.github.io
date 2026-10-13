@@ -52,3 +52,37 @@ Que cada partida tenga un número y que inputs y snapshots lo lleven.
 - Un cliente que recarga la página a mitad de una partida vuelve a entrar y se puede mover (el camino de `hello`
   con la partida en curso).
 - `tests/e2e/run.mjs` pasa.
+
+## Notas de ejecución
+
+Se hizo tal como lo planteaba la tarea, sin desvíos: `MatchInit` suma `match: number`, que el host sube en cada
+`startMatch` (`++this.matchNum`); viaja en `ClientMsg['in'].m` y en `HostMsg['s'].m`. El host descarta un `'in'` si
+`msg.m !== this.init.match`; el cliente descarta un `'s'` si `m.m !== this.init.match` (este último chequeo vive en
+`ClientSession.onMessage`, antes de llamar a `onSnapshot`, así el `MatchRunner` nuevo nunca llega a ver un snapshot
+de la partida vieja y su `lastSnapTick` no se corrompe). Los eventos (`ev`) no llevan número: van por el canal
+confiable junto con `start`, como decía la tarea. `PROTOCOL_VERSION` subió a 11.
+
+No hizo falta tocar `MatchRunner` ni `ClientSession.connect`: alcanzó con el número de partida en la capa de red.
+El reconector (`hello` con partida en curso) tampoco lo necesita, porque no es una partida nueva: no sube
+`matchNum`, solo resetea `lastSeq`/`queue` de ese remoto, y el número que ya tenía el cliente en su `this.init`
+sigue siendo el correcto.
+
+**Verlo fallar (paso 1).** Se escribió un script descartable con host + cliente (2 pestañas, Playwright contra
+Edge): crea una sala de Carrera (copa de 3 pistas por defecto), fuerza el fin de la primera pista escribiendo
+directo en `sim.mode.next/order/times` (sin correr la pista entera), espera los resultados, el host aprieta
+"Siguiente pista" y mide cuánto se mueve el personaje del cliente, visto desde `sim.charByPid` en el host. Antes
+del cambio: 0.00 m, tres veces seguidas (confirmado revirtiendo el fix con `git stash` y volviendo a aplicarlo).
+Después del cambio: entre 3 y 4 m, tres veces seguidas. El script no se commitea (vivió en el scratchpad de la
+sesión).
+
+**Lo que sí queda en el repo:** `tests/e2e/run.mjs` ganó dos pasos al final, para que esta regresión no vuelva a
+pasar desapercibida: después del chat, el host arranca una revancha desde la misma sala (otra partida fresca,
+`matchNum` sube igual) y se comprueba que el cliente se sigue moviendo; después, el cliente hace `page.reload()` a
+mitad de esa partida (recupera `?sala=` de la URL y el mismo `pid` de `sessionStorage`) y se comprueba que también
+se puede mover tras reconectar. `npm run build` y `npm run typecheck` sin errores; `tests/e2e/run.mjs` pasa
+(corrido varias veces; una corrida tuvo un fallo aislado en el chat por lentitud del render en software, no
+relacionado con el cambio — al repetir pasó limpio).
+
+Pendiente de que el usuario lo juegue: todo lo de arriba se probó con bots en 0 y un solo cliente remoto; no se
+probó con 2+ clientes reconectando a la vez ni con latencia real (se jugó en local, señalización en el mismo
+navegador).

@@ -50,7 +50,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 
 | | Tarea | Depende de | Qué resuelve |
 |---|---|---|---|
-| [ ] | [01](01-copa-cliente-sin-controles.md) | – | En una copa en multijugador, el que no es host no se puede mover desde la segunda pista |
+| [x] | [01](01-copa-cliente-sin-controles.md) | – | En una copa en multijugador, el que no es host no se puede mover desde la segunda pista |
 | [ ] | [02](02-carrera-salida-en-linea.md) | – | Los corredores salen en dos filas y los de adelante llevan ventaja |
 | [ ] | [03](03-carrera-sin-salto-y-agarrar.md) | 02 | Carrera sin salto ni golpes: agarrar, empujar y un dash que tarda en volver |
 | [ ] | [04](04-horda-barra-de-vida.md) | – | La Horda pasa del heat a una barra de vida |

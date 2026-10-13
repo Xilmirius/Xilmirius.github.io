@@ -102,7 +102,7 @@ export class ClientSession {
       case 'welcome': this.lobby = m.lobby; this.cb.onLobby(m.lobby); break;
       case 'lobby': this.lobby = m.lobby; this.cb.onLobby(m.lobby); break;
       case 'start': this.init = m.init; this.cb.onStart(m.init); break;
-      case 's': this.cb.onSnapshot(decodeWorld(m.w), m.me as MeFrame | null, m.a); break;
+      case 's': if (this.init && m.m === this.init.match) this.cb.onSnapshot(decodeWorld(m.w), m.me as MeFrame | null, m.a); break;
       case 'ev': this.cb.onEvents(m.l); break;
       case 'end': this.cb.onEnd(m.res); break;
       case 'back': this.init = null; this.cb.onBack(); break;
@@ -113,7 +113,8 @@ export class ClientSession {
   }
 
   sendInputs(frames: InputFrame[]) {
-    this.link?.send({ t: 'in', f: frames.map(encodeInput) }, true);
+    if (!this.init) return;
+    this.link?.send({ t: 'in', f: frames.map(encodeInput), m: this.init.match }, true);
   }
 
   pick(hero?: HeroId, team?: number, hat?: string) { this.link?.send({ t: 'pick', hero, team, hat }); }

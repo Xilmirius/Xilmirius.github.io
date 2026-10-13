@@ -72,6 +72,8 @@ export class HostSession {
   private gameId: string | null = null;
   private announceT = 0;
   private closed = false;
+  /** Lo sube `startMatch` en cada partida nueva (viaja en `MatchInit.match`). */
+  private matchNum = 0;
   /** Copa en curso (varias carreras seguidas con puntos), o null. */
   cup: CupState | null = null;
   /** Héroe con el que corre cada bot durante la copa (para que no cambie de una pista a otra). */
@@ -177,7 +179,7 @@ export class HostSession {
         break;
       }
       case 'in': {
-        if (!Array.isArray(msg.f)) break;
+        if (!Array.isArray(msg.f) || !this.init || msg.m !== this.init.match) break;
         for (const a of msg.f) {
           if (!Array.isArray(a)) continue;
           const f = decodeInput(a);
@@ -343,7 +345,7 @@ export class HostSession {
     this.brains.clear();
     for (const ch of this.sim.chars) if (ch.bot) this.brains.set(ch.id, new BotBrain(s.botLevel, seed + ch.id));
     const rosterInfo: RosterInfo[] = this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: c.name, team: c.team, hero: c.hero, bot: c.bot, hat: c.hat }));
-    this.init = { settings: s, roster: rosterInfo, seed, tick: 0, matchId: uuid4() };
+    this.init = { settings: s, roster: rosterInfo, seed, tick: 0, matchId: uuid4(), match: ++this.matchNum };
     if (this.cup) this.init.cup = { round: this.cup.round, maps: this.cup.maps, points: { ...this.cup.points } };
     this.lobby.inMatch = true;
     this.frames.clear();
@@ -400,7 +402,7 @@ export class HostSession {
         if (!r.welcomed) continue;
         const ch = sim.charByPid.get(r.pid);
         const me = ch ? JSON.stringify(buildMeFrame(sim, ch)) : 'null';
-        r.link.sendRaw(`{"t":"s","a":${r.ack},"me":${me},"w":${w}}`, true);
+        r.link.sendRaw(`{"t":"s","a":${r.ack},"m":${this.init!.match},"me":${me},"w":${w}}`, true);
       }
     }
 

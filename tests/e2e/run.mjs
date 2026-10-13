@@ -190,6 +190,31 @@ try {
   await b.press('.chat-input', 'Enter');
   await a.waitForSelector('.chat-log:has-text("gg")', { timeout: 5000 });
   step('chat ok');
+
+  // ── Revancha: otra partida desde la misma sala sigue moviendo al cliente (los números de secuencia no se pisan) ──
+  await a.click('text=Empezar partida');
+  await b.waitForSelector('.hud', { timeout: 10000 });
+  await a.waitForFunction(() => window.__rubble?.session?.sim?.phase === 'play', null, { timeout: 30000 });
+  const moveOnHost = async (key) => {
+    const before = await a.evaluate((pid) => { const c = window.__rubble.session.sim.charByPid.get(pid); return { x: c.pos.x, z: c.pos.z }; }, pidB);
+    await b.keyboard.down(key);
+    await wait(700);
+    await b.keyboard.up(key);
+    await wait(500);
+    const after = await a.evaluate((pid) => { const c = window.__rubble.session.sim.charByPid.get(pid); return { x: c.pos.x, z: c.pos.z }; }, pidB);
+    return Math.hypot(after.x - before.x, after.z - before.z);
+  };
+  const moved2 = await moveOnHost('KeyD');
+  step(`revancha: el cliente se movió ${moved2.toFixed(2)} m`);
+  if (moved2 < 1) throw new Error('El cliente no se pudo mover en la revancha (segunda partida desde la sala)');
+
+  // ── El cliente recarga a mitad de esta partida: vuelve a entrar solo (?sala=) y se puede seguir moviendo ──
+  await b.reload();
+  await b.waitForSelector('.hud', { timeout: 15000 });
+  await wait(1000);
+  const moved3 = await moveOnHost('KeyA');
+  step(`reconexión a mitad de partida: el cliente se movió ${moved3.toFixed(2)} m`);
+  if (moved3 < 1) throw new Error('El cliente que recarga a mitad de partida no se puede mover');
 } catch (e) {
   errors.push('FALLO: ' + (e?.stack ?? e));
 } finally {

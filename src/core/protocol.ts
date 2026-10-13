@@ -40,6 +40,8 @@ export interface MatchInit {
   seed: number;
   tick: number;
   matchId: string;
+  /** Número de partida: lo sube el host en cada `startMatch` para que inputs y snapshots no se mezclen entre una partida y la siguiente (p. ej. al continuar una copa). */
+  match: number;
   /** Copa en curso: qué carrera es esta y cómo viene la tabla. */
   cup?: CupInfo;
 }
@@ -84,7 +86,7 @@ export type HostMsg =
   | { t: 'welcome'; you: string; lobby: LobbyState; v: number }
   | { t: 'lobby'; lobby: LobbyState }
   | { t: 'start'; init: MatchInit }
-  | { t: 's'; a: number; me: any; w: any[] }
+  | { t: 's'; a: number; m: number; me: any; w: any[] }
   | { t: 'ev'; l: TimedEvent[] }
   | { t: 'end'; res: MatchResultInfo }
   | { t: 'back' }
@@ -95,7 +97,7 @@ export type HostMsg =
 export type ClientMsg =
   | { t: 'hello'; pid: string; name: string; v: number }
   | { t: 'pick'; hero?: HeroId; team?: number; hat?: string }
-  | { t: 'in'; f: number[][] }
+  | { t: 'in'; f: number[][]; m: number }
   | { t: 'cmd'; cmd: Command }
   | { t: 'chat'; text: string }
   | { t: 'ping'; ts: number; rtt?: number };
