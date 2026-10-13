@@ -78,6 +78,28 @@ export interface Prefs {
   quickCast: boolean;
   /** Último juego elegido en el menú (core/games.ts). */
   game: string;
+  /** Controles táctiles: 'auto' los muestra en teléfonos y tabletas (o cuando tocás la pantalla jugando). */
+  touch: 'auto' | 'on' | 'off';
+  /** Tamaño de los botones táctiles (1 = el normal). */
+  touchSize: number;
+}
+
+// ───────────── dispositivo ─────────────
+
+/** ¿Es un teléfono o una tableta? (se maneja con los dedos y no tiene mouse) */
+export function touchDevice(): boolean {
+  if (typeof matchMedia === 'undefined') return false;
+  return matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
+}
+
+let touched = false;
+/** Alguien jugó con los dedos en una pantalla que también tiene mouse: de acá en más van los controles táctiles. */
+export function markTouched() { touched = true; }
+
+/** ¿Van los controles táctiles? Lo que diga Ajustes o, en automático, el dispositivo. */
+export function touchMode(): boolean {
+  const t = getPrefs().touch;
+  return t === 'on' || (t === 'auto' && (touched || touchDevice()));
 }
 
 function uuid(): string {
@@ -109,6 +131,8 @@ export function getPrefs(): Prefs {
   if (prefsCache) return prefsCache;
   let p: Partial<Prefs> = {};
   try { p = JSON.parse(localStorage.getItem(PREFS) ?? '{}'); } catch { /* */ }
+  // En un teléfono se arranca liviano: sin sombras ni brillos, pero nítido (la pantalla es chica y densa).
+  const lite = touchDevice();
   prefsCache = {
     name: p.name || 'Jugador' + Math.floor(Math.random() * 900 + 100),
     pid: tabPid(),
@@ -116,14 +140,16 @@ export function getPrefs(): Prefs {
     volMaster: p.volMaster ?? 0.8,
     volMusic: p.volMusic ?? 0.45,
     volSfx: p.volSfx ?? 0.9,
-    shadows: p.shadows ?? true,
-    hiDpi: p.hiDpi ?? false,
+    shadows: p.shadows ?? !lite,
+    hiDpi: p.hiDpi ?? lite,
     showFps: p.showFps ?? false,
     seenHelp: p.seenHelp ?? false,
-    post: p.post ?? true,
+    post: p.post ?? !lite,
     announcer: p.announcer ?? true,
     quickCast: p.quickCast ?? false,
     game: p.game || 'arena',
+    touch: p.touch === 'on' || p.touch === 'off' ? p.touch : 'auto',
+    touchSize: Math.min(1.3, Math.max(0.8, Number(p.touchSize) || 1)),
   };
   return prefsCache;
 }

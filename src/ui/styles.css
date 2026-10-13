@@ -20,9 +20,11 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt); font-family: var(--body); overflow: hidden; user-select: none; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt); font-family: var(--body); overflow: hidden; user-select: none; -webkit-user-select: none; }
+/* Pantallas táctiles: sin zoom con dos dedos ni doble toque, sin "tirar para recargar" y sin el destello al tocar. */
+html { touch-action: pan-x pan-y; overscroll-behavior: none; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 #app { position: fixed; inset: 0; }
-.stage { position: absolute; inset: 0; }
+.stage { position: absolute; inset: 0; touch-action: none; }
 .ui { position: absolute; inset: 0; pointer-events: none; }
 .ui > * { pointer-events: auto; }
 .game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
@@ -745,3 +747,172 @@ img.aicon { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: mi
 .results .race-table th:nth-child(2), .results .race-table td:nth-child(2) { text-align: left; }
 .results .race-table td.gain { color: var(--good); }
 .results .race-table td.tot { font-family: var(--title); font-size: 18px; color: #ffd23f; }
+
+/* ───────────── Controles táctiles ─────────────
+   El HUD con la clase .touch se reacomoda para jugar con los pulgares: palanca a la izquierda, botones a la
+   derecha (son los mismos casilleros de la barra, redondos y en abanico) y el resto arriba, fuera del paso.
+   Cada botón dice dónde va con --x / --y (su centro, en botones, desde la esquina de abajo a la derecha) y --s (tamaño). */
+.slot.touch-only, .touch-top, .touch-zone, .touch-cancel, .touch-reticle, .rotate-hint { display: none; }
+.hud.touch {
+  --u: calc(clamp(44px, 13.4vh, 66px) * var(--ts, 1));
+  --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+  touch-action: none; -webkit-touch-callout: none;
+}
+.hud.touch .hud-bottom, .hud.touch .hud-mid { display: contents; }
+.hud.touch .hud-hint, .hud.touch .slot .key, .hud.touch .gunbox .key, .hud.touch .hud-bar .sep { display: none; }
+.hud.touch .hud-body, .hud.touch .mat, .hud.touch .passives span, .hud.touch .perkrow .pk { pointer-events: none; }
+
+/* La palanca: descansa abajo a la izquierda y aparece donde apoyás el dedo. */
+.hud.touch .touch-zone { display: block; position: absolute; left: 0; top: 24%; bottom: 0; width: 44%; pointer-events: auto; touch-action: none; }
+.touch-stick { position: absolute; left: calc(var(--sl) + var(--u) * 0.85); bottom: calc(var(--sb) + var(--u) * 0.6); width: calc(var(--u) * 2.3); height: calc(var(--u) * 2.3); border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); background: radial-gradient(circle, rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0.13)); opacity: 0.5; transition: opacity 0.15s; pointer-events: none; }
+.touch-stick.on { opacity: 1; transform: translate(-50%, -50%); }
+.touch-stick i { position: absolute; left: 50%; top: 50%; width: 44%; height: 44%; margin: -22% 0 0 -22%; border-radius: 50%; background: rgba(255, 255, 255, 0.4); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4), inset 0 -3px 0 rgba(0, 0, 0, 0.2); }
+
+/* Los botones. */
+.hud.touch .hud-bar { display: block; position: absolute; right: var(--sr); bottom: var(--sb); width: 0; height: 0; padding: 0; border: 0; background: none; }
+.hud.touch .slot, .hud.touch .gunbox { --s: 1; position: absolute; display: flex; width: calc(var(--u) * var(--s)); height: calc(var(--u) * var(--s)); min-width: 0; right: calc(var(--u) * (var(--x) - var(--s) / 2)); bottom: calc(var(--u) * (var(--y) - var(--s) / 2)); padding: 0; border-radius: 50%; overflow: visible; background: rgba(20, 16, 29, 0.7); border: 2px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); pointer-events: auto; touch-action: none; transition: transform 0.06s, filter 0.06s; }
+.hud.touch .slot .ic { font-size: calc(var(--u) * var(--s) * 0.5); line-height: 1; }
+.hud.touch .slot .cd, .hud.touch .slot .lock { border-radius: 50%; }
+.hud.touch .slot .cdt { font-size: calc(var(--u) * var(--s) * 0.4); }
+.hud.touch .slot .cdt.pct { font-size: calc(var(--u) * var(--s) * 0.26); bottom: 14%; }
+.hud.touch .slot .mut { top: -4px; left: 2px; }
+.hud.touch .slot .mut.ammo { top: -6px; right: -2px; left: auto; font-size: 13px; background: #14101d; border-radius: 999px; padding: 0 5px; }
+.hud.touch .slot.item { border-style: dashed; }
+.hud.touch .slot.item.empty { opacity: 0.45; }
+.hud.touch .slot.ult { border-color: var(--accent2); }
+.hud.touch .tbtn.down { transform: scale(0.93); filter: brightness(1.5); border-color: #fff; }
+.hud.touch .slot.armed { transform: scale(1.08); }
+/* Hacia dónde se está arrastrando el dedo. */
+.hud.touch .tbtn.dragged::after { content: ''; position: absolute; left: 50%; top: 50%; width: 36%; height: 36%; margin: -18% 0 0 -18%; border-radius: 50%; background: rgba(255, 255, 255, 0.55); transform: translate(var(--kx, 0), var(--ky, 0)); pointer-events: none; }
+.hud.touch [data-slot='basic'] { --s: 1.7; --x: 1.25; --y: 1.25; border-color: rgba(255, 255, 255, 0.5); }
+.hud.touch [data-slot='jump'] { --s: 1.1; --x: 1.05; --y: 3.05; }
+.hud.touch [data-slot='push'] { --s: 1.1; --x: 2.55; --y: 2.6; }
+.hud.touch [data-slot='dash'] { --s: 1.1; --x: 3.15; --y: 1.15; }
+.hud.touch [data-slot='r'] { --s: 1.2; --x: 4.7; --y: 1; }
+.hud.touch [data-slot='q'] { --x: 4.25; --y: 2.55; }
+.hud.touch [data-slot='e'] { --x: 3.3; --y: 3.85; }
+.hud.touch [data-slot='f'] { --x: 1.95; --y: 4.4; }
+.hud.touch [data-slot='i1'] { --s: 0.9; --x: 6; --y: 0.6; }
+.hud.touch [data-slot='i2'] { --s: 0.9; --x: 6.95; --y: 0.6; }
+.hud.touch [data-slot='i3'] { --s: 0.9; --x: 7.9; --y: 0.6; }
+.hud.touch [data-slot='recall'] { --s: 0.9; --x: 6; --y: 1.6; }
+.hud.touch [data-slot='repair'] { --s: 0.9; --x: 6.95; --y: 1.6; }
+.hud.touch [data-slot='forge'] { --s: 0.9; --x: 7.9; --y: 1.6; }
+/* Sin habilidades (Carrera): los ítems de las cajas van donde irían las habilidades. */
+.hud.touch.no-abil [data-slot='i1'] { --s: 1; --x: 4.25; --y: 2.55; }
+.hud.touch.no-abil [data-slot='i2'] { --s: 1; --x: 3.3; --y: 3.85; }
+.hud.touch.no-abil [data-slot='i3'] { --s: 1; --x: 1.95; --y: 4.4; }
+/* Armas (Horda): el arma en la mano es el botón de disparo; cambiar de arma y C4, en el abanico. */
+.hud.touch.guns [data-slot='r'] { --s: 1; --x: 3.3; --y: 3.85; }
+.hud.touch .gunbox { flex-direction: column; align-items: center; justify-content: center; gap: 0; height: calc(var(--u) * var(--s)); box-shadow: 0 0 14px rgba(255, 201, 74, 0.35); border-color: var(--accent2); }
+.hud.touch .gunbox .gun-ic { font-size: calc(var(--u) * 0.62); }
+.hud.touch .gunbox .gun-info b { display: none; }
+.hud.touch .gunbox .gun-ammo { font-size: calc(var(--u) * 0.36); line-height: 1; }
+/* Soltar una habilidad acá la cancela. */
+.hud.touch.aiming .touch-cancel { display: flex; position: absolute; right: calc(var(--sr) + var(--u) * 3.6); top: calc(var(--st) + 50px); width: calc(var(--u) * 1.25); height: calc(var(--u) * 1.25); align-items: center; justify-content: center; border-radius: 50%; font-family: var(--title); font-size: calc(var(--u) * 0.6); color: #fff; background: rgba(201, 54, 74, 0.55); border: 2px solid rgba(255, 255, 255, 0.5); }
+.hud.touch.aiming .touch-cancel.hot { background: var(--bad); transform: scale(1.15); }
+.touch-reticle.on { display: block; position: absolute; left: 0; top: 0; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.9); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 2px rgba(0, 0, 0, 0.35); pointer-events: none; }
+/* Pausa y tabla (con teclado son Esc y Tab). */
+.hud.touch .touch-top { display: flex; gap: 6px; position: absolute; top: calc(var(--st) + 6px); left: calc(var(--sl) + 8px); }
+.tt-btn { width: 44px; height: 38px; padding: 0; border-radius: 10px; background: var(--panel); border: 2px solid var(--line); color: var(--txt); font-size: 18px; line-height: 1; }
+.tt-btn:active { border-color: var(--accent2); }
+.hud.touch .fs-mini { top: calc(var(--st) + 6px); right: calc(var(--sr) + 8px); width: 44px; height: 38px; }
+.hud.touch .hud-net { top: calc(var(--st) + 17px); right: calc(var(--sr) + 60px); font-size: 11px; }
+.hud.touch.ended .hud-bar, .hud.touch.ended .touch-zone { display: none; }
+
+/* El resto del HUD, más chico y arriba. */
+.hud.touch .hud-body { position: absolute; top: calc(var(--st) + 50px); left: calc(var(--sl) + 8px); width: 172px; padding: 4px 8px 5px; border-radius: 12px; border-width: 1px; }
+.hud.touch .portrait, .hud.touch .shieldtag { display: none; }
+.hud.touch .bodystate { margin-top: 0; font-size: 14px; gap: 6px; }
+.hud.touch .bodystate span { min-width: 66px; }
+.hud.touch .bodystate .pips i { height: 8px; }
+.hud.touch .xp { margin-top: 4px; height: 5px; }
+.hud.touch .xpt { font-size: 10.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud.touch .hud-feed { top: calc(var(--st) + 100px); left: calc(var(--sl) + 8px); width: 220px; gap: 3px; }
+.hud.touch .feed-row { font-size: 11.5px; padding: 2px 8px; border-radius: 8px; }
+.hud.touch .feed-row:nth-child(n + 4) { display: none; }
+.hud.touch .hud-top { top: calc(var(--st) + 6px); max-width: calc(100vw - 230px); }
+.hud.touch .hud-top .mode { font-size: 13px; padding: 3px 10px; white-space: nowrap; }
+.hud.touch .hud-top .scores { margin-top: 4px; gap: 5px; }
+.hud.touch .score { padding: 2px 8px; font-size: 12px; border-bottom-width: 3px; border-radius: 9px; }
+.hud.touch .score b { font-size: 16px; }
+.hud.touch .zone-info { font-size: 11.5px; }
+.hud.touch .hud-top .scores.race { display: none; }
+.hud.touch .hud-top .rstrip { width: min(300px, 34vw); margin-top: 9px; }
+.hud.touch .hud-pos { left: auto; right: calc(var(--sr) + 10px); top: calc(var(--st) + 48px); }
+.hud.touch .hud-pos b { font-size: 56px; -webkit-text-stroke-width: 2px; }
+.hud.touch .hud-pos b sup { font-size: 24px; }
+.hud.touch .hud-pos span { font-size: 11px; display: block; }
+.hud.touch .hud-combo { right: calc(var(--sr) + var(--u) * 5.7); top: 26%; transform: scale(0.75); transform-origin: right center; }
+.hud.touch .hud-center { font-size: 32px; }
+.hud.touch .hud-center.count { font-size: 84px; }
+.hud.touch .hud-center.go { font-size: 70px; }
+.hud.touch .hud-sub { font-size: 19px; white-space: nowrap; }
+.hud.touch .hud-announce { top: 21%; transform: translateX(-50%) scale(0.72); transform-origin: top center; }
+.hud.touch .hud-deny { position: absolute; left: 50%; bottom: calc(var(--sb) + var(--u) * 2.4); transform: translateX(-50%); max-width: 44vw; text-align: center; font-size: 13px; }
+.hud.touch .hud-perks { position: absolute; left: 50%; top: calc(var(--st) + 52px); margin: 0; transform: translateX(-50%) scale(0.8); transform-origin: top center; }
+.hud.touch .perkrow { position: absolute; left: 50%; bottom: calc(var(--sb) + 4px); transform: translateX(-50%) scale(0.85); transform-origin: bottom center; }
+.hud.touch .hud-right { display: contents; }
+.hud.touch .minimap { position: absolute; right: calc(var(--sr) + 8px); top: calc(var(--st) + 50px); width: 150px !important; height: auto !important; }
+.hud.touch .hud-mats { position: absolute; left: calc(var(--sl) + 8px); top: calc(var(--st) + 104px); display: flex; gap: 4px; padding: 3px; border-radius: 10px; border-width: 1px; }
+.hud.touch .mat { flex-direction: row; gap: 3px; min-width: 0; padding: 1px 6px; border-bottom-width: 2px; border-radius: 7px; }
+.hud.touch .mat span, .hud.touch .mat b { font-size: 13px; }
+.hud.touch .passives { display: none; }
+.hud.touch.has-mats .hud-feed { top: calc(var(--st) + 138px); }
+.hud.touch .hud-top .mission { gap: 7px; margin-top: 4px; padding: 2px 10px; border-width: 1px; }
+.hud.touch .hud-top .mission em { font-size: 9.5px; }
+.hud.touch .hud-top .mission b { font-size: 13px; white-space: nowrap; }
+.hud.touch .hud-top .mission small { font-size: 11px; min-width: 0; white-space: nowrap; }
+.hud.touch .hud-top .mbar { width: 64px; height: 7px; }
+.hud.touch .hud-top .moba-bar { margin-top: 4px; gap: 6px; }
+.hud.touch .moba-bar .side { padding: 2px 7px; border-bottom-width: 3px; }
+.hud.touch .moba-bar .side b { font-size: 13px; }
+.hud.touch .moba-bar .core { min-width: 58px; height: 17px; line-height: 17px; font-size: 11px; }
+.hud.touch .hud-ach { top: calc(var(--st) + 50px); transform: translateX(140%) scale(0.8); transform-origin: top right; }
+.hud.touch .hud-ach.on { transform: scale(0.8); }
+/* En un teléfono conviene la pantalla completa: el botón llama la atención al empezar. */
+html:not(:fullscreen) .hud.touch .fs-mini { border-color: var(--accent2); animation: blink 0.7s 8 alternate; }
+.hud.touch .forge { top: calc(var(--st) + 6px); bottom: calc(var(--sb) + 6px); right: calc(var(--sr) + 6px); width: min(470px, 58vw); }
+.hud.touch .board { top: calc(var(--st) + 50px); min-width: 0; width: min(560px, 94vw); padding: 8px 10px; pointer-events: auto; }
+.hud.touch .board table { font-size: 13px; }
+
+/* Con el teléfono parado no se puede jugar: se pide girarlo. */
+@media (orientation: portrait) {
+  html.touch-ui.in-match .rotate-hint { display: flex; position: fixed; inset: 0; z-index: 80; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: rgba(20, 14, 30, 0.94); font-family: var(--title); font-size: 26px; }
+  .rotate-hint i { font-style: normal; font-size: 64px; animation: rotateHint 1.6s ease-in-out infinite; }
+  .rotate-hint small { font-family: var(--body); font-size: 15px; color: var(--muted); }
+}
+@keyframes rotateHint { 0%, 20% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+
+/* ───────────── Teléfono acostado: menús y sala más compactos ───────────── */
+@media (max-height: 520px) and (orientation: landscape) {
+  .menu.hub { padding: 8px 14px 12px; gap: 6px; }
+  .menu.hub .logo h1 { font-size: 34px; text-shadow: 0 3px 0 #b44d12, 0 6px 0 #5a2708; }
+  .menu.hub .logo p { display: none; }
+  .games { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .gamecard { min-height: 0; padding: 7px 10px; border-radius: 14px; }
+  .gamecard i { font-size: 24px; }
+  .gamecard b { font-size: 18px; margin-top: 2px; }
+  .gamecard span { font-size: 11px; }
+  .gamecard em { top: 6px; right: 6px; font-size: 10px; padding: 2px 6px; }
+  .gamebar { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 8px 14px; }
+  .gamebar h2 { font-size: 22px; }
+  .gamebar p { margin: 2px 0 6px; font-size: 13px; }
+  .gb-actions { min-width: 210px; gap: 6px; }
+  .gb-actions .btn.big { font-size: 17px; padding: 9px 14px; }
+  .hub-bottom { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .lobby { padding: 8px 12px; gap: 8px; }
+  .lobby-body { grid-template-columns: minmax(0, 1.25fr) minmax(250px, 1fr); gap: 10px; }
+  .modal { max-height: 96vh; padding: 10px 14px; }
+  .modal h2 { font-size: 22px; }
+  .modal-buttons { margin-top: 8px; }
+}
+/* El botón de empezar queda a la vista aunque la sala no entre en la pantalla. */
+@media (max-height: 620px) { .lobby .col.right > .btn.primary.big { position: sticky; bottom: 0; z-index: 2; box-shadow: 0 -10px 18px rgba(20, 14, 30, 0.9); } }
+/* Sin mouse no hay "pasar por arriba": que los botones no queden resaltados después de tocarlos. */
+@media (hover: none) {
+  .btn:hover:not(:disabled) { filter: none; transform: none; }
+  .gamecard:hover { transform: none; }
+  .gamecard.on:hover { transform: translateY(-4px); }
+  .gamecard:hover i { transform: none; }
+}

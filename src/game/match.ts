@@ -1,7 +1,7 @@
 // Corre una partida en pantalla, sea como host (simula) o como cliente (predice e interpola).
 import * as THREE from 'three';
 import { audio } from '../audio/audio';
-import { getPrefs, savePrefs } from '../config';
+import { getPrefs, markTouched, savePrefs, touchMode } from '../config';
 import { toast } from '../ui/dom';
 import { CollisionWorld, type Obstacle } from '../core/collision';
 import { BASE_RADIUS, DT, INTERP_TICKS } from '../core/constants';
@@ -10,6 +10,7 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import { CORE, TOWER } from '../core/moba/defs';
 import { ROUTE_MODS } from '../core/mutations';
+import { WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { TEAM_COLORS } from '../core/constants';
 import type { AbilitySlot, HeroId, MatchSettings } from '../core/types';
@@ -24,10 +25,12 @@ import type { ClientSession } from '../net/client';
 import type { HostSession } from '../net/host';
 import { GameView } from '../render/gameView';
 import { Hud } from '../ui/hud';
+import { TouchControls } from '../ui/touchControls';
 import type { CastCheck, CastKey } from './castControl';
 import { actionOf, keyName, onBindsChange } from './keybinds';
 import { LocalInput } from './localInput';
 import { applyMatch, type MatchContext } from './profile';
+import { TouchInput, type AimKind, type AimSpec } from './touchInput';
 import { Ticker } from './ticker';
 
 const STRUCT_DIM: Record<string, [number, number]> = {
@@ -36,6 +39,12 @@ const STRUCT_DIM: Record<string, [number, number]> = {
 const ITEM_KEYS: Record<string, number> = { i1: 0, i2: 1, i3: 2 };
 /** Margen de enfriamiento con el que ya se puede armar (el host guarda el lanzamiento un instante). */
 const ARM_EARLY = 0.3;
+/** Áreas que se apoyan en un punto del piso: al apuntarlas con el dedo importa la distancia, no solo la dirección. */
+const POINT_SHAPES = new Set(['circle', 'wall', 'point', 'blink']);
+/** Ayuda de apuntado (controles táctiles): un cuerpo a cuerpo gira hacia el rival que tiene a esta distancia de más. */
+const ASSIST_MELEE = 3;
+/** ...y una habilidad apunta sola al rival que está hasta esta distancia más allá de su alcance. */
+const ASSIST_EXTRA = 1.5;
 
 export interface MatchHooks {
   onEscape(): void;
@@ -81,6 +90,7 @@ export class MatchRunner {
   private heartT = 0;
   private lowFpsT = 0;
   private offBinds: () => void = () => {};
+  private touchUi: TouchControls | null = null;
   /** Centro de tu base (Asedio: la forja solo funciona ahí). */
   private baseAt: { x: number; z: number } | null = null;
 
@@ -113,6 +123,10 @@ export class MatchRunner {
     this.input.cast.quick = prefs.quickCast;
     this.offBinds = onBindsChange(() => this.hud.refreshKeys());
     this.input.onKey = (code) => this.onKey(code);
+    this.hud.onPause = () => this.hooks.onEscape();
+    // Controles táctiles: de entrada en teléfonos y tabletas; en una pantalla con mouse, al primer toque.
+    if (touchMode()) this.enableTouch();
+    else window.addEventListener('pointerdown', this.onFirstTouch, true);
     this.frames = session.isHost ? (session as HostSession).frames : new FrameBuffer();
     this.ticker = new Ticker(() => this.step());
     window.addEventListener('resize', this.onResize);
@@ -132,6 +146,21 @@ export class MatchRunner {
   }
 
   private onResize = () => this.view.resize();
+
+  private onFirstTouch = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch' || getPrefs().touch !== 'auto') return;
+    markTouched();
+    this.enableTouch();
+  };
+
+  private enableTouch() {
+    window.removeEventListener('pointerdown', this.onFirstTouch, true);
+    if (this.touchUi) return;
+    const t = new TouchInput();
+    this.input.touch = t;
+    this.hud.setTouch(true);
+    this.touchUi = new TouchControls(this.hud, t, this.input.cast, { forge: () => { if (this.rules.crafting) this.hud.toggleForge(); } });
+  }
 
   private onKey(code: string): boolean | void {
     // Con una mejora para elegir en pantalla, 1, 2 y 3 son para eso.
@@ -168,7 +197,13 @@ export class MatchRunner {
     if ((this.latestWorld ?? this.frames.latest())?.phase === 'end') { s.mx = 0; s.mz = 0; s.b = 0; this.input.cast.cancel(); }
     const pos = this.pred ? this.pred.pos : this.localChar();
     const refY = pos ? pos.y : 0;
-    this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
+    const t = this.input.touch;
+    if (t && pos && this.input.touchAim()) {
+      // Con los dedos no hay cursor: el punto apuntado se arma desde el personaje.
+      const o = t.aim(DT, (k) => this.aimSpec(k), (k) => this.aimTarget(k, pos));
+      const x = pos.x + o.x, z = pos.z + o.z, g = this.view.terrain.groundAt(x, z);
+      this.cursor.set(x, g > -Infinity ? g : refY, z);
+    } else this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
     return { seq: ++this.seq, mx: s.mx, mz: s.mz, ax: this.cursor.x, az: this.cursor.z, b: s.b };
   }
 
@@ -200,6 +235,56 @@ export class MatchRunner {
       if (this.mo.airJumped) audio.play('airjump', 0.8);
       if (this.mo.dashed) audio.play('whoosh', 0.8, 0, 1.4);
     }
+  }
+
+  // ───────────── apuntado con los dedos ─────────────
+
+  /** Lo que se apunta con un botón: una habilidad, un ítem o nada en particular (golpe, empujón). */
+  private aimed(k: AimKind): { range: number; radius?: number; shape?: { k: string }; aim?: string } | null {
+    if (k === 'basic' || k === 'push' || !this.heroId) return null;
+    const n = ITEM_KEYS[k];
+    if (n === undefined) return HEROES[this.heroId].abilities[k as AbilitySlot];
+    const it = this.me?.act[n] ? ITEM_BY_ID[this.me.act[n]!] : null;
+    return it ? { range: it.range ?? 0, shape: it.shape } : null;
+  }
+
+  private aimSpec(k: AimKind): AimSpec {
+    const d = this.aimed(k);
+    return { reach: d?.range || 7, point: !!d?.shape && POINT_SHAPES.has(d.shape.k) };
+  }
+
+  /**
+   * Ayuda de apuntado: con el dedo apoyado sin arrastrar se le apunta al rival más cercano que esté al alcance
+   * (o al aliado, si lo que se lanza es para un aliado). Devuelve dónde está, relativo a tu personaje.
+   */
+  private aimTarget(k: AimKind, pos: { x: number; z: number }): { x: number; z: number } | null {
+    const w = this.latestWorld ?? this.frames.latest();
+    const local = this.localChar();
+    if (!w || !local || !this.heroId) return null;
+    const d = this.aimed(k);
+    let range: number;
+    if (d) range = d.range + (d.radius ?? 0) + ASSIST_EXTRA;
+    else if (k === 'push') range = 4.5;
+    else if (this.rules.weapons) range = WEAPONS[WEAPON_IDS[local.wp] ?? 'pistol'].range;
+    else { const b = HEROES[this.heroId].basic; range = b.kind === 'melee' ? b.range + ASSIST_MELEE : b.range; }
+    if (range <= 0) return null;
+    const ally = d?.aim === 'ally';
+    const mine = this.teams.get(this.localId);
+    let best: { x: number; z: number } | null = null, bd = Infinity;
+    // weight: a igual distancia se prefiere a un héroe antes que a una estructura.
+    const see = (x: number, z: number, weight = 1) => {
+      const dist = Math.hypot(x - pos.x, z - pos.z);
+      if (dist <= range && dist * weight < bd) { bd = dist * weight; best = { x: x - pos.x, z: z - pos.z }; }
+    };
+    for (const c of w.chars) {
+      if (c.id === this.localId || (c.fl & F_DEAD)) continue;
+      if ((this.teams.get(c.id) === mine) === ally) see(c.x, c.z);
+    }
+    if (!ally) {
+      for (const u of w.units) if (u.tm !== mine) see(u.x, u.z, 1.1);
+      if (k === 'basic') for (const s of w.structs) if (s.tm !== mine && s.tm >= 0 && s.hp > 0) see(s.x, s.z, 1.6);
+    }
+    return best;
   }
 
   // ───────────── red (cliente) ─────────────
@@ -300,7 +385,7 @@ export class MatchRunner {
     if (!this.rules.crafting && !this.rules.itemBoxes) return 'Estas reglas no tienen ítems';
     const id = me.act[n];
     const it = id ? ITEM_BY_ID[id] : null;
-    if (!it) return this.rules.itemBoxes ? `Espacio ${n + 1} vacío: agarrá una caja ❓ de la pista` : `Espacio ${n + 1} vacío: forjá un ítem activo (${keyName('forge')})`;
+    if (!it) return this.rules.itemBoxes ? `Espacio ${n + 1} vacío: agarrá una caja ❓ de la pista` : `Espacio ${n + 1} vacío: forjá un ítem activo (${this.touchUi ? '⚒️' : keyName('forge')})`;
     const cd = me.cd[SLOTS.indexOf(k as 'i1' | 'i2' | 'i3')];
     if (cd > ARM_EARLY) return `${it.name}: listo en ${Math.ceil(cd)} s`;
     return !it.shape || it.shape.k === 'self' ? 'now' : 'aim';
@@ -337,15 +422,9 @@ export class MatchRunner {
     const dt = Math.min(0.1, (now - this.lastT) / 1000);
     this.lastT = now;
     this.fps = this.fps * 0.95 + (1 / Math.max(0.001, dt)) * 0.05;
-    // Calidad automática: si el postproceso ahoga la PC, se apaga (se puede reactivar en Ajustes).
-    if (this.view.hasPost) {
-      this.lowFpsT = this.fps < 28 ? this.lowFpsT + dt : Math.max(0, this.lowFpsT - dt);
-      if (this.lowFpsT > 4) {
-        this.view.disablePost();
-        savePrefs({ post: false });
-        toast('Bajamos los brillos para que vaya fluido (se reactivan en Ajustes)', 'info', 5000);
-      }
-    }
+    // Calidad automática: si no llega a 28 fps durante unos segundos, se baja un escalón.
+    this.lowFpsT = this.fps < 28 ? this.lowFpsT + dt : Math.max(0, this.lowFpsT - dt);
+    if (this.lowFpsT > 4) { this.lowFpsT = 0; this.lowerQuality(); }
 
     // Velocidad del "tiempo visual": 0 en hitstop, >1 un instante mientras recupera el atraso.
     let rate = 1;
@@ -420,8 +499,37 @@ export class MatchRunner {
     this.hud.setArmed(this.input.armed());
     this.view.renderer.domElement.classList.toggle('aiming', !!this.view.aim);
     this.view.render(w, worldDt, camChar, this.cursor, dt);
+    if (this.touchUi) {
+      // La mira: se ve mientras apuntás vos el golpe o el disparo (arrastrando el botón).
+      const a = this.input.touch?.aiming;
+      const s = this.view.toScreen(this.cursor.x, this.cursor.y + 0.9, this.cursor.z);
+      this.touchUi.aimAt(s.x, s.y, !!local && !(local.fl & F_DEAD) && a?.kind === 'basic' && a.dragged);
+      if (this.input.touchAim()) this.hud.pointer(s.x, s.y);
+    }
     const ping = this.session.isHost ? 0 : (this.session as ClientSession).rtt;
     this.hud.update(w, local, this.me, dt, { ping, fps: this.fps, showFps: getPrefs().showFps, kind: this.session.isHost ? 'host' : 'client' });
+  }
+
+  /**
+   * Baja un escalón de calidad (todo se puede volver a prender en Ajustes): primero los brillos, que es lo que
+   * más pesa. En teléfonos y tabletas, después la resolución y por último las sombras.
+   */
+  private lowerQuality() {
+    const say = (what: string) => toast(`${what} para que vaya fluido (se cambia en Ajustes)`, 'info', 5000);
+    if (this.view.hasPost) {
+      this.view.disablePost();
+      savePrefs({ post: false });
+      say('Bajamos los brillos');
+    } else if (!this.touchUi) return;
+    else if (this.view.pixelRatio > 1) {
+      this.view.setPixelRatio(1);
+      savePrefs({ hiDpi: false });
+      say('Bajamos la resolución');
+    } else if (this.view.shadows) {
+      this.view.disableShadows();
+      savePrefs({ shadows: false });
+      say('Sacamos las sombras');
+    }
   }
 
   /** onStop: cortar una copa por la mitad (el botón principal sigue con la próxima pista). */
@@ -450,6 +558,8 @@ export class MatchRunner {
     cancelAnimationFrame(this.raf);
     this.ticker.stop();
     this.input.dispose();
+    this.touchUi?.dispose();
+    window.removeEventListener('pointerdown', this.onFirstTouch, true);
     this.offBinds();
     this.hud.dispose();
     this.view.dispose();

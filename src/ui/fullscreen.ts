@@ -15,6 +15,9 @@ export async function toggleFullscreen() {
     await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
     const kb = (navigator as unknown as { keyboard?: KeyboardLock }).keyboard;
     await kb?.lock?.(['Escape']).catch(() => {});
+    // Teléfonos: la pantalla queda acostada aunque lo gires (solo se puede trabar en pantalla completa).
+    const so = screen.orientation as unknown as { lock?: (o: string) => Promise<void> } | undefined;
+    await so?.lock?.('landscape').catch(() => {});
   } catch (e) {
     console.warn('[fullscreen]', e);
   }

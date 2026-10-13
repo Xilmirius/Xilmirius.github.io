@@ -69,6 +69,10 @@ export class Hud {
   private nextTimer: ReturnType<typeof setInterval> | null = null;
   private mouse = { x: 0, y: 0 };
   private hitT = 0;
+  /** Controles táctiles a la vista: cambia el acomodo y los carteles ya no nombran teclas. */
+  touch = false;
+  /** Botón de pausa de los controles táctiles (con teclado es Esc). */
+  onPause: () => void = () => {};
   /** Bajas seguidas con armas (se corta al rato sin bajar a nadie). */
   private spree = 0;
   private spreeT = 0;
@@ -124,7 +128,14 @@ export class Hud {
     this.board = h('div', { class: 'board hidden' });
     // Botón chico de pantalla completa arriba a la derecha (el menú de pausa también lo tiene).
     const fs = fullscreenButton('fs-mini');
-    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, this.comboEl, this.posEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    // Con los dedos no hay Esc ni Tab: van como botones (solo se ven con los controles táctiles).
+    const corner = h('div', { class: 'touch-top' },
+      h('button', { class: 'tt-btn', onclick: () => this.onPause() }, '☰'),
+      h('button', { class: 'tt-btn', onclick: () => this.showBoard(this.board.classList.contains('hidden')) }, '📋'));
+    this.root.append(this.top, this.feed, this.center, this.sub, this.status, this.net, fs, corner, this.comboEl, this.posEl, this.announceEl, this.achEl, bottom, this.forge, this.board);
+    this.root.classList.toggle('guns', rules.weapons);
+    this.root.classList.toggle('no-abil', !rules.abilities && !rules.weapons);
+    this.root.classList.toggle('has-mats', rules.pickups === 'materials');
     this.mapName = terrain?.def.name ?? '';
     if (rules.weapons) {
       this.root.append(this.hitEl);
@@ -158,6 +169,27 @@ export class Hud {
   }
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
+
+  /** Pone o saca el acomodo para controles táctiles. */
+  setTouch(on: boolean) {
+    this.touch = on;
+    this.root.classList.toggle('touch', on);
+  }
+
+  /** El casillero de una acción (los controles táctiles los usan de botones). */
+  slot(id: string): HTMLElement | null {
+    return id === 'basic' && this.gunEl ? this.gunEl : this.slotEls.get(id)?.root ?? null;
+  }
+
+  /** Con controles táctiles no hay cursor: la marca de impacto va donde se está apuntando. */
+  pointer(x: number, y: number) {
+    const r = this.root.getBoundingClientRect();
+    this.mouse.x = x + r.left;
+    this.mouse.y = y + r.top;
+  }
+
+  /** " (tecla)" para los carteles. Con controles táctiles no hay teclas que nombrar. */
+  private keyTag(a: ActionId) { return this.touch ? '' : ` (${keyName(a)})`; }
 
   private renderHints() {
     const r = this.rules;
@@ -204,14 +236,21 @@ export class Hud {
       const lock = h('div', { class: 'lock' });
       const ic = h('div', { class: 'ic' }, icon);
       const mut = h('div', { class: 'mut' });
-      const root = tip(h('div', { class: 'slot ' + extra }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, keyFor(slot))), content);
+      const root = tip(h('div', { class: 'slot ' + extra, 'data-slot': slot }, ic, cd, txt, lock, mut, h('div', { class: 'key' }, keyFor(slot))), content);
       this.slotEls.set(slot, { root, cd, txt, lock, icon: ic, mut });
       return root;
     };
     const abilityContent = (s: AbilitySlot) => () => abilityTip(me.hero, s, this.rules, { mut: this.lastMe?.mut[s], level: this.lastLocal?.lv, ult: this.lastMe?.ult });
+    // Lo que con teclado no necesita casillero (saltar, reparar, abrir la forja) y con los dedos sí.
+    const only = (slot: string, icon: string, what: string) => { const el = mk(slot, document.createTextNode(icon), () => what, 'touch-only'); return el; };
+    const extra = [
+      only('jump', '⬆️', '<b>Saltar</b><p>En el aire: segundo salto.</p>'),
+      this.rules.repair ? only('repair', '🔧', '<b>Reparar</b><p>Mantené apretado.</p>') : null,
+      this.rules.crafting ? only('forge', '⚒️', '<b>Forja</b>') : null,
+    ];
     if (this.rules.weapons) {
       // Armas: el arma en la mano con sus balas y las dos teclas que quedan (cambiar de arma y C4).
-      this.gunEl = tip(h('div', { class: 'gunbox' }), () => gunTip(this.lastLocal?.wp ?? 0));
+      this.gunEl = tip(h('div', { class: 'gunbox', 'data-slot': 'basic' }), () => gunTip(this.lastLocal?.wp ?? 0));
       this.bar.append(...[
         this.gunEl,
         mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
@@ -219,6 +258,7 @@ export class Hud {
         h('div', { class: 'sep' }),
         mk('q', document.createTextNode('🔁'), () => swapTip(this.lastLocal?.wp === 0 ? this.lastMe?.pri ?? -1 : 0)),
         mk('r', document.createTextNode('🧨'), c4Tip),
+        ...extra,
       ].filter((x): x is HTMLDivElement => !!x));
       return;
     }
@@ -233,6 +273,7 @@ export class Hud {
         h('div', { class: 'sep' }),
         ...[0, 1, 2].map((i) => mk(`i${i + 1}`, document.createTextNode(''), () => itemIdTip(this.lastMe?.act[i] ?? null), 'item')),
       ] : [],
+      ...extra,
     ].flat().filter((x): x is HTMLDivElement => !!x));
   }
 
@@ -379,11 +420,11 @@ export class Hud {
     if (this.rules.progression) {
       const xpPct = me.xpNext > me.xpPrev ? Math.min(100, ((me.xp - me.xpPrev) / (me.xpNext - me.xpPrev)) * 100) : 100;
       progress = `<div class="xp" data-part="level"><div style="width:${xpPct}%"></div></div>
-      <div class="xpt" data-part="level">${c.lv >= 10 ? 'Nivel máximo' : `Nivel ${c.lv} · XP ${me.xp}/${me.xpNext}`}${this.rules.crafting && me.slots > Object.keys(me.mut).length ? ` · <b class="glow">¡Mutación disponible! (${keyName('forge')})</b>` : ''}</div>`;
+      <div class="xpt" data-part="level">${c.lv >= 10 ? 'Nivel máximo' : `Nivel ${c.lv} · XP ${me.xp}/${me.xpNext}`}${this.rules.crafting && me.slots > Object.keys(me.mut).length ? ` · <b class="glow">¡Mutación disponible!${this.keyTag('forge')}</b>` : ''}</div>`;
     } else if (this.rules.ultCharge) {
       const full = me.ult >= 1;
       progress = `<div class="xp ult${full ? ' full' : ''}" data-part="ult"><div style="width:${Math.round(me.ult * 100)}%"></div></div>
-      <div class="xpt" data-part="ult">${full ? `<b class="glow">⚡ ¡Ulti lista! (${keyName('r')})</b>` : `⚡ Ulti ${Math.floor(me.ult * 100)}%`}</div>`;
+      <div class="xpt" data-part="ult">${full ? `<b class="glow">⚡ ¡Ulti lista!${this.keyTag('r')}</b>` : `⚡ Ulti ${Math.floor(me.ult * 100)}%`}</div>`;
     } else progress = '';
     const html = `
       <div class="portrait" style="--c:${colorHex(FAMILY_COLORS[fam])}">
@@ -683,7 +724,7 @@ export class Hud {
     const ultReady = (local.fl & F_ULTREADY) !== 0 && !(local.fl & F_DEAD);
     this.slotEls.get('r')?.root.classList.toggle('ultready', ultReady);
     if (ultReady && !this.ultWasReady) {
-      this.announce('¡ULTI LISTA!', `${HEROES[this.me.hero].abilities.r.icon} ${HEROES[this.me.hero].abilities.r.name} · apretá ${keyName('r')}`, 'ult', '¡Ulti lista!');
+      this.announce('¡ULTI LISTA!', `${HEROES[this.me.hero].abilities.r.icon} ${HEROES[this.me.hero].abilities.r.name}${this.touch ? '' : ` · apretá ${keyName('r')}`}`, 'ult', '¡Ulti lista!');
       audio.play('ultready', 0.9);
     }
     this.ultWasReady = ultReady;
@@ -961,7 +1002,7 @@ export class Hud {
         : h('div', { class: 'eqslot' }, h('small', null, label));
       const equipped = h('div', { class: 'equipped' },
         h('div', null, h('span', { class: 'eqlabel' }, 'Pasivos'), ...[0, 1, 2].map((i) => slotCell(me.pas[i] ?? null, ''))),
-        h('div', null, h('span', { class: 'eqlabel' }, 'Activos'), ...[0, 1, 2].map((i) => slotCell(me.act[i] ?? null, keyName((['i1', 'i2', 'i3'] as const)[i])))),
+        h('div', null, h('span', { class: 'eqlabel' }, 'Activos'), ...[0, 1, 2].map((i) => slotCell(me.act[i] ?? null, this.touch ? String(i + 1) : keyName((['i1', 'i2', 'i3'] as const)[i])))),
       );
       // Filtro por tipo.
       const filters = h('div', { class: 'ifilters' },
@@ -997,7 +1038,7 @@ export class Hud {
           const list = shown.filter((it) => it.kind === kind);
           if (!list.length) return null;
           return h('div', { class: 'group' },
-            h('h4', null, kind === 'passive' ? `Pasivos (${me.pas.length}/3) · siempre activos` : `Activos (${me.act.filter(Boolean).length}/3) · teclas ${keyName('i1')} ${keyName('i2')} ${keyName('i3')}`),
+            h('h4', null, kind === 'passive' ? `Pasivos (${me.pas.length}/3) · siempre activos` : `Activos (${me.act.filter(Boolean).length}/3)${this.touch ? '' : ` · teclas ${keyName('i1')} ${keyName('i2')} ${keyName('i3')}`}`),
             h('div', { class: 'igrid' }, list.map(card)));
         }),
       );
@@ -1022,9 +1063,9 @@ export class Hud {
         h('div', { class: 'routeinfo' }, (['tank', 'carry', 'support'] as Route[]).map((r) => h('div', null, h('b', { class: 'mut ' + r }, ROUTE_NAMES[r] + ': '), ROUTE_DESC[r]))),
       );
     }
-    const banner = locked ? h('div', { class: 'forge-lock' }, '🔒 La fragua solo funciona en tu base (o mientras esperás para volver). Apretá ', h('kbd', null, keyName('recall')), ` y quedate quieto ${RECALL_TIME} s para volver. Podés mirar y planear tu compra.`) : null;
+    const banner = locked ? h('div', { class: 'forge-lock' }, '🔒 La fragua solo funciona en tu base (o mientras esperás para volver). Apretá ', h('kbd', null, this.touch ? '🏠' : keyName('recall')), ` y quedate quieto ${RECALL_TIME} s para volver. Podés mirar y planear tu compra.`) : null;
     this.forge.append(tabs, ...(banner ? [banner] : []), matsRow, content,
-      h('div', { class: 'forge-foot' }, `V (mantener): reparar tu cuerpo · ${REPAIR_COST} ${MAT_ICON[fam]} → −${REPAIR_AMOUNT} heat. Rompé cobertura del mapa para juntar materiales.`));
+      h('div', { class: 'forge-foot' }, `${this.touch ? '🔧' : keyName('repair')} (mantener): reparar tu cuerpo · ${REPAIR_COST} ${MAT_ICON[fam]} → −${REPAIR_AMOUNT} heat. Rompé cobertura del mapa para juntar materiales.`));
   }
 
   // ───────────── tabla ─────────────
@@ -1146,6 +1187,7 @@ export class Hud {
     box.appendChild(btns);
     this.results = box;
     this.root.appendChild(box);
+    this.root.classList.add('ended');
     if (won || champion) this.confettiRain(champion ? 200 : 120);
     if (records) audio.play('jackpot', 0.7);
     if (reward) this.animateReward(box.querySelector('.reward') as HTMLElement, reward);

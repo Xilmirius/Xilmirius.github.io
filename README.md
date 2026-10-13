@@ -116,6 +116,20 @@ WebRTC arranca con STUN (gratis). En algunas redes (algunas móviles o con CGNAT
 
 Pasá el mouse por cualquier ícono del HUD para ver qué hace.
 
+### En teléfono o tableta
+
+Los controles táctiles aparecen solos en teléfonos y tabletas (en **Ajustes** se pueden forzar o apagar, y cambiar el tamaño de los botones). Se juega con la pantalla acostada.
+
+| Gesto | Acción |
+|---|---|
+| **Mitad izquierda** | Palanca de movimiento: aparece donde apoyás el dedo |
+| **Golpe / disparo y empujón** | Se mantienen. Sin arrastrar, apuntan solos al rival más cercano; arrastrando el dedo apuntás vos |
+| **Habilidades e ítems** | Apoyar = armar (se ve el área) · arrastrar = apuntar · soltar = lanzar. Soltar sobre la **✕** cancela |
+| **Saltar · dash · reparar · volver a la base** | Botones comunes |
+| **Tabla · pausa · forja** | Tienen su botón en pantalla |
+
+Mantené el dedo sobre un ícono para ver qué hace. En un teléfono el juego arranca sin sombras ni brillos. Con "Agregar a la pantalla de inicio" se abre a pantalla completa, sin las barras del navegador.
+
 ## 4. Cómo se juega (resumen)
 
 - **Heat y etapas:** Intacto (0) → Agrietado (40) → Quebrado (90) → Destrozado (150). Cada etapa multiplica cuánto volás (×0.42 / ×0.85 / ×1.25 / ×1.8). El cuerpo se ve roto: la piedra se agrieta, el cristal se fractura, el goo se derrite, el metal se abolla.
@@ -197,6 +211,7 @@ npm run build
 npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente por WebRTC real en 2 pestañas
 node tests/e2e/moba.mjs  # Chromium: Asedio 2v2 y 3v3 (lanzar con clic, cancelar, B, forja en base, fin de partida)
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
+npm run test:touch       # Chromium con táctil emulado: palanca, botones, apuntado y habilidades en los cuatro juegos
 VITEST_TOOLS=1 npx vitest run # herramientas de balance (tabla de knockback, estadísticas de bots)
 ```
 
@@ -222,5 +237,5 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 - Horda: la dificultad y las mejoras están ajustadas con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
-- Juego de teclado y mouse (no hay controles táctiles).
+- Controles táctiles: probados con táctil emulado en el navegador, no en un teléfono real (falta medir cuántos cuadros da y cómo se sienten los pulgares). Por datos móviles la conexión directa suele necesitar TURN (ver 2.6), y conviene que el anfitrión sea una PC.
 - La simulación (`src/core`) es TypeScript puro sin DOM: se puede mover a un server dedicado (Node/Deno/Bun) cambiando solo la capa `net/`.

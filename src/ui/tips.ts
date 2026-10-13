@@ -15,14 +15,18 @@ import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, 
 import { C4, WEAPON_IDS, WEAPONS, type WeaponId } from '../core/weapons';
 import { esc } from './tooltip';
 import { keyName, type ActionId } from '../game/keybinds';
+import { touchMode } from '../config';
 
 export const MAT_ICON: Record<Family, string> = { stone: '🪨', metal: '🔩', crystal: '💎', goo: '🟢' };
 const m = (v: number) => `${+v.toFixed(1)} m`;
 const s = (v: number) => `${+v.toFixed(1)} s`;
 
+/** key: la tecla que lo usa (con controles táctiles no se muestra: ahí cada cosa es un botón). */
 function head(icon: string, title: string, key?: string) {
-  return `<div class="tt-head"><span class="tt-ic">${icon}</span><b>${title}</b>${key ? `<kbd>${key}</kbd>` : ''}</div>`;
+  return `<div class="tt-head"><span class="tt-ic">${icon}</span><b>${title}</b>${key && !touchMode() ? `<kbd>${key}</kbd>` : ''}</div>`;
 }
+/** " (tecla)", o nada con controles táctiles. */
+const paren = (a: ActionId) => (touchMode() ? '' : ` (${keyName(a)})`);
 const tags = (list: (string | false | null | undefined)[]) => {
   const l = list.filter(Boolean);
   return l.length ? `<div class="tt-tags">${l.map((t) => `<span>${t}</span>`).join('')}</div>` : '';
@@ -43,7 +47,7 @@ export function shapeText(shape: AimShape, range: number, area = 1): string {
 }
 
 /** Tecla asignada a cada habilidad (se lee cada vez: si cambia en Ajustes, el tooltip se actualiza). */
-const KEY = new Proxy({} as Record<AbilitySlot, string>, { get: (_t, slot: string) => keyName(slot as ActionId) });
+const KEY = new Proxy({} as Record<AbilitySlot, string>, { get: (_t, slot: string) => (touchMode() ? '' : keyName(slot as ActionId)) });
 
 export function abilityTip(heroId: HeroId, slot: AbilitySlot, rules: Ruleset, o: { mut?: Route; level?: number; ult?: number } = {}) {
   const hero = HEROES[heroId];
@@ -61,9 +65,11 @@ export function abilityTip(heroId: HeroId, slot: AbilitySlot, rules: Ruleset, o:
     + p(a.desc)
     + (o.mut ? p(`🧬 <b>${ROUTE_FLAVOR[hero.family][o.mut]}</b> (${ROUTE_NAMES[o.mut]}): ${ROUTE_DESC[o.mut]}`, 'tt-mut') : '')
     + (ult ? p(`La ulti se llena pegando (≈${Math.round(1 / ULT_PER_HEAT)} de heat), con los trozos que soltás al romper cosas (+${Math.round(ULT_PER_PICKUP * 100)}% cada uno) y de a poco sola.`, 'tt-note') : '')
-    + p(a.shape.k === 'self'
-      ? `<kbd>${KEY[slot]}</kbd>: sale al toque.`
-      : `<kbd>${KEY[slot]}</kbd> apunta (ves el área) · <b>clic izquierdo</b> la lanza · <b>clic derecho</b> cancela.`, 'tt-hint');
+    + p(touchMode()
+      ? (a.shape.k === 'self' ? 'Sale al toque.' : 'Un toque la lanza hacia el rival más cercano. Para apuntar vos: mantené el botón, arrastrá (ves el área) y soltá. Soltar sobre la <b>✕</b> cancela.')
+      : a.shape.k === 'self'
+        ? `<kbd>${KEY[slot]}</kbd>: sale al toque.`
+        : `<kbd>${KEY[slot]}</kbd> apunta (ves el área) · <b>clic izquierdo</b> la lanza · <b>clic derecho</b> cancela.`, 'tt-hint');
 }
 
 export function basicTip(heroId: HeroId) {
@@ -146,7 +152,7 @@ export function heroTip(heroId: HeroId, rules: Ruleset) {
   const h = HEROES[heroId];
   const kit = (['q', 'e', 'f', 'r'] as AbilitySlot[]).map((sl) => `<li><b>${KEY[sl]} ${iconHtml(`icon.ability.${heroId}.${sl}`, h.abilities[sl].icon)} ${h.abilities[sl].name}</b> · ${shapeText(h.abilities[sl].shape, h.abilities[sl].range)}</li>`).join('');
   return head('', `${h.name} <em>${FAMILY_NAMES[h.family]} · ${h.role}</em>`) + p(h.desc) + p(`⚙️ ${h.passive}`, 'tt-note')
-    + `<ul class="tt-list"><li><b>Clic · ${h.basic.name}</b> · ${h.basic.kind === 'melee' ? 'cuerpo a cuerpo' : 'a distancia'}</li>${kit}</ul>`
+    + `<ul class="tt-list"><li><b>${touchMode() ? '' : 'Clic · '}${h.basic.name}</b> · ${h.basic.kind === 'melee' ? 'cuerpo a cuerpo' : 'a distancia'}</li>${kit}</ul>`
     + (rules.progression ? '' : p('Con las reglas Brawler tenés todo desde el principio.', 'tt-hint'));
 }
 
@@ -154,7 +160,7 @@ export function rulesTip(id: RulesetId) {
   const r = RULESETS[id];
   const on = (b: boolean, t: string) => `<li class="${b ? 'on' : 'off'}">${b ? '✔' : '✖'} ${t}</li>`;
   return head(r.icon, r.name) + p(r.desc)
-    + `<ul class="tt-list checks">${r.weapons ? on(true, 'Armas: pistola, uzi, escopeta, lanzacohetes y C4') : ''}${on(r.abilities, 'Poderes del héroe')}${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar (${keyName('repair')})`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash (${keyName('dash')})`)}${r.recall ? on(true, `Volver a la base (${keyName('recall')})`) : ''}</ul>`;
+    + `<ul class="tt-list checks">${r.weapons ? on(true, 'Armas: pistola, uzi, escopeta, lanzacohetes y C4') : ''}${on(r.abilities, 'Poderes del héroe')}${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar${paren('repair')}`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash${paren('dash')}`)}${r.recall ? on(true, `Volver a la base${paren('recall')}`) : ''}</ul>`;
 }
 
 /** Lo que conviene saber de cada modo antes de jugarlo. Funciones porque nombran teclas, que se pueden reasignar. */
@@ -176,23 +182,25 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
     '<b>Oleadas</b> de esbirros cada 24 s: Guijarros (cuerpo a cuerpo), Chispas (a distancia) y un Ariete cada 3 oleadas. Se los puede tirar al vacío.',
     '<b>Economía</b>: rematar un esbirro te da su material al toque, y el esbirro suelta un trozo que junta el que esté cerca.',
     '<b>Torres</b>: la exterior protege a la interior; las dos protegen al núcleo. Sin esbirros cerca reciben menos daño.',
-    `<b>Tu base</b> te enfría rápido y es donde se forja. <kbd>${keyName('recall')}</kbd>: volver (4 s quieto).`,
+    `<b>Tu base</b> te enfría rápido y es donde se forja. <kbd>${touchMode() ? '🏠' : keyName('recall')}</kbd>: volver (4 s quieto).`,
     '<b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.',
   ],
   horde: () => [
     '<b>Cooperativo</b>: no hay equipos rivales. Se pierde cuando a nadie le quedan vidas.',
-    `<b>Armas en vez de poderes</b>: <kbd>Clic</kbd> dispara (mantenelo), <kbd>Clic derecho</kbd> es el empujón, <kbd>${keyName('q')}</kbd> cambia entre la pistola y tu arma, <kbd>${keyName('r')}</kbd> planta C4.`,
+    touchMode()
+      ? '<b>Armas en vez de poderes</b>: el botón grande dispara (mantenelo y arrastrá para apuntar; sin arrastrar apunta solo al zombi más cercano), <kbd>🫸</kbd> es el empujón, <kbd>🔁</kbd> cambia entre la pistola y tu arma y <kbd>🧨</kbd> planta C4.'
+      : `<b>Armas en vez de poderes</b>: <kbd>Clic</kbd> dispara (mantenelo), <kbd>Clic derecho</kbd> es el empujón, <kbd>${keyName('q')}</kbd> cambia entre la pistola y tu arma, <kbd>${keyName('r')}</kbd> planta C4.`,
     'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que enfría. Disparar te frena: hay que elegir entre correr y tirar.',
     'Las oleadas <b>no paran de crecer</b>. Se gana cumpliendo las <b>misiones</b> del mapa, una tras otra, hasta la <b>extracción</b>.',
     'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde enfriarse y punto de reaparición.',
-    `Al cumplir cada misión <b>elegís una mejora</b> entre tres (teclas <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> o clic): más daño, balas que atraviesan, zombis que explotan... Tenés ${PERK.time} s; se acumulan hasta el final.`,
+    `Al cumplir cada misión <b>elegís una mejora</b> entre tres (${touchMode() ? 'tocá la que quieras' : 'teclas <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> o clic'}): más daño, balas que atraviesan, zombis que explotan... Tenés ${PERK.time} s; se acumulan hasta el final.`,
     '<b>Zombis</b> (lentos), <b>Corredores</b> (rápidos y frágiles), <b>Escupidores</b> (a distancia, avisan dónde cae) y <b>Moles</b> (enormes: su golpe se ve venir). A todos se los puede <b>tirar al vacío</b>.',
   ],
   race: () => [
     'Pasá las <b>puertas</b> en orden: si te caés, reaparecés en la última que pasaste.',
     '<b>Rotores</b> y <b>bolas</b>: se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
     'El <b>piso flojo</b> (más claro y agrietado) se cae al pisarlo: no te quedes quieto. El <b>dash rompe</b> la cobertura que te tapa el paso; los barriles explotan.',
-    `Las <b>cajas ❓</b> dan un ítem de un solo uso (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>).`,
+    `Las <b>cajas ❓</b> dan un ítem de un solo uso${touchMode() ? ': aparece en los botones de arriba del golpe' : ` (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>)`}.`,
     'Cuando llega el primero quedan 25 s para terminar.',
     'En <b>copa</b> se corren varias pistas seguidas: cada puesto da puntos y gana quien suma más.',
   ],

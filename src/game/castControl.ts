@@ -46,6 +46,22 @@ export class CastControl {
     else this.armed = k;
   }
 
+  /**
+   * Dedo apoyado en el botón (controles táctiles): lo que se apunta queda armado mientras se arrastra y sale al
+   * soltar (con leftClick); lo que no se apunta sale al toque. Devuelve true si quedó armado.
+   */
+  hold(k: CastKey): boolean {
+    const c = this.check(k);
+    if (c === 'now') { this.fire(k); return false; }
+    if (c !== 'aim') {
+      if (this.armed === k) this.armed = null;
+      this.deny(k, c);
+      return false;
+    }
+    this.armed = k;
+    return true;
+  }
+
   /** Clic izquierdo. Devuelve true si lo usó para lanzar (entonces no es un ataque básico). */
   leftClick(): boolean {
     if (!this.armed) return false;

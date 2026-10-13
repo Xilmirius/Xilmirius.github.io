@@ -1,6 +1,6 @@
 // Orquestador: menú ↔ lobby ↔ partida. Maneja la sesión (host o cliente) y las pantallas.
 import { audio } from './audio/audio';
-import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs } from './config';
+import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs, touchMode } from './config';
 import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
 import { ACTIONS, applyPreset, currentPreset, getBinds, keyLabel, keyName, PRESETS, RESERVED, setBind } from './game/keybinds';
@@ -48,10 +48,13 @@ export class App {
   constructor(root: HTMLElement) {
     this.stage = h('div', { class: 'stage' });
     this.ui = h('div', { class: 'ui' });
-    root.append(this.stage, this.ui);
+    root.append(this.stage, this.ui,
+      // Teléfono parado en plena partida: se pide girarlo (lo muestra el CSS).
+      h('div', { class: 'rotate-hint' }, h('i', null, '📱'), 'Girá el teléfono', h('small', null, 'RUBBLE se juega con la pantalla acostada.')));
+    this.syncTouch();
     const unlock = () => { audio.unlock(); const p = getPrefs(); audio.setVolumes({ master: p.volMaster, music: p.volMusic, sfx: p.volSfx }); };
-    window.addEventListener('pointerdown', unlock);
-    window.addEventListener('keydown', unlock);
+    // En teléfonos el audio solo arranca cuando el dedo se levanta, no cuando se apoya.
+    for (const ev of ['pointerdown', 'pointerup', 'keydown']) window.addEventListener(ev, unlock);
     window.addEventListener('resize', () => this.attract?.resize());
     // Cada botón suena al pasar el mouse: la UI también "se siente".
     let lastHover: Element | null = null;
@@ -61,6 +64,13 @@ export class App {
       lastHover = b;
     });
     window.addEventListener('beforeunload', () => { void this.session?.close(); });
+  }
+
+  /** Controles táctiles: avisa al CSS si van (menús con botones más grandes) y de qué tamaño son los botones. */
+  private syncTouch() {
+    const root = document.documentElement;
+    root.classList.toggle('touch-ui', touchMode());
+    root.style.setProperty('--ts', String(getPrefs().touchSize));
   }
 
   start() {
@@ -76,6 +86,7 @@ export class App {
     this.preview?.dispose();
     this.preview = null;
     this.lobbyEl = null;
+    document.documentElement.classList.remove('in-match');
     this.showcase(this.menuGame);
     audio.setMusic('menu');
     const p = getPrefs();
@@ -161,9 +172,6 @@ export class App {
       ),
     ));
     if (!getPrefs().seenHelp) { savePrefs({ seenHelp: true }); setTimeout(() => this.showHelp(), 600); }
-    if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) {
-      toast('RUBBLE se juega con teclado y mouse 🖱️⌨️', 'info', 6000);
-    }
   }
 
   private stopAttract() {
@@ -488,6 +496,8 @@ export class App {
     clear(this.ui);
     this.match = new MatchRunner(this.stage, s, init, { onEscape: () => this.escapeMenu() });
     this.match.start();
+    document.documentElement.classList.add('in-match');
+    this.syncTouch();
   }
 
   private escapeMenu() {
@@ -513,6 +523,7 @@ export class App {
   private onBack() {
     this.match?.dispose();
     this.match = null;
+    document.documentElement.classList.remove('in-match');
     this.escMenu?.();
     this.escMenu = null;
     const l = this.session?.lobby;
@@ -569,12 +580,26 @@ export class App {
 
   private showHelp() {
     const K = keyName;
+    const touch = touchMode();
     const body = h('div', { class: 'help' });
+    const controls = touch ? `
+          <table>
+            <tr><td><kbd>Palanca</kbd></td><td>Moverte: apoyá el pulgar en cualquier lugar de la mitad izquierda</td></tr>
+            <tr><td><kbd>👊</kbd></td><td>El botón grande es el <b>golpe</b>: mantenelo para pegar. Sin arrastrar apunta solo al rival más cercano; <b>arrastrando apuntás vos</b></td></tr>
+            <tr><td><kbd>🫸</kbd></td><td><b>Empujón</b>: mantené para cargar, soltá para <b>sacar</b></td></tr>
+            <tr><td><kbd>⬆️</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
+            <tr><td><kbd>💨</kbd></td><td><b>Dash</b>: ráfaga corta hacia donde vas</td></tr>
+            <tr><td>Habilidades e ítems</td><td>Un toque: salen hacia el rival más cercano. Para apuntar vos: <b>mantené, arrastrá</b> (ves el área) y <b>soltá</b>. Soltar sobre la <b>✕</b> cancela</td></tr>
+            <tr><td><kbd>☰</kbd> <kbd>📋</kbd></td><td>Pausa y tabla de jugadores (arriba a la izquierda)</td></tr>
+            <tr><td colspan="2" class="muted small">Con reglas <b>Completo</b> o en el <b>Asedio</b>: <kbd>⚒️</kbd> forja · <kbd>🔧</kbd> reparar (mantener) · <kbd>🏠</kbd> volver a la base (Asedio)</td></tr>
+            <tr><td colspan="2" class="muted small">El tamaño de los botones se cambia en <b>⚙️ Ajustes</b>. Jugá con el teléfono acostado y, si podés, en pantalla completa <kbd>⛶</kbd>.</td></tr>
+          </table>
+          <p class="muted small">Mantené apretado cualquier ícono (héroes, reglas, ítems de la forja) para ver qué hace.</p>` : '';
     body.innerHTML = `
       <div class="help-grid">
         <div>
-          <h4>Controles</h4>
-          <table>
+          <h4>Controles</h4>${controls}
+          <table${touch ? ' hidden' : ''}>
             <tr><td><kbd>${K('up')} ${K('left')} ${K('down')} ${K('right')}</kbd></td><td>Moverte (hacia donde mirás es más rápido)</td></tr>
             <tr><td><kbd>Mouse</kbd></td><td>Apuntar: siempre mirás al cursor</td></tr>
             <tr><td><kbd>${K('jump')}</kbd></td><td>Saltar · en el aire: <b>segundo salto</b> (te salva de caer)</td></tr>
@@ -586,19 +611,19 @@ export class App {
             <tr><td colspan="2" class="muted small">Con reglas <b>Completo</b> o en el <b>Asedio</b>: <kbd>${K('i1')} ${K('i2')} ${K('i3')}</kbd> ítems activos · <kbd>${K('forge')}</kbd> forja · <kbd>${K('repair')}</kbd> reparar · <kbd>${K('recall')}</kbd> volver a la base (Asedio)</td></tr>
             <tr><td colspan="2" class="muted small">Todas las teclas se cambian en <b>⚙️ Ajustes → Controles</b>.</td></tr>
           </table>
-          <p class="muted small">Pasá el mouse por cualquier ícono (habilidades, ítems, tu cuerpo, héroes) para ver qué hace.</p>
+          <p class="muted small"${touch ? ' hidden' : ''}>Pasá el mouse por cualquier ícono (habilidades, ítems, tu cuerpo, héroes) para ver qué hace.</p>
         </div>
         <div>
           <h4>Cómo se gana una pelea</h4>
           <p><b>No hay barra de vida.</b> Cada golpe te agrieta: <span class="s1">Intacto</span> → <span class="s2">Agrietado</span> → <span class="s3">Quebrado</span> → <span class="s4">Destrozado</span>. Cuanto más roto estás, <b>más lejos volás</b>.</p>
           <p>Se muere solo por <b>ring-out</b>: saliendo del mapa. El ritmo es: <b>romper</b> (clic), <b>entrar</b> y <b>sacar</b> (empujón cargado).</p>
-          <p>El cuerpo lanzado es un <b>proyectil</b>: rompe cobertura, se estampa contra paredes y voltea a otros. Mientras volás podés corregir con WASD y usar el segundo salto o trepar el borde.</p>
+          <p>El cuerpo lanzado es un <b>proyectil</b>: rompe cobertura, se estampa contra paredes y voltea a otros. Mientras volás podés corregir ${touch ? 'con la palanca' : 'con WASD'} y usar el segundo salto o trepar el borde.</p>
           <h4>Reglas</h4>
           <p><b>⚡ Brawler</b> (la de siempre): todo desbloqueado desde el principio y la <b>ulti se carga pegando</b> y juntando los trozos que sueltan las coberturas. Nada que administrar: a pelear.</p>
           <p><b>🧬 Completo</b>: niveles, materiales, forja de ítems y mutaciones, reparación.</p>
           <h4>🏰 Asedio (MOBA)</h4>
           <p>Dos bases unidas por puentes sobre el vacío: <b>1 línea</b> hasta 2v2, <b>2 líneas</b> en 3v3. Cada 24 s sale una oleada de esbirros; acompañala, rematá esbirros (te dan su material y sueltan un trozo) y rompé las torres rivales cuando tu oleada las tanquea. Gana quien destruye el <b>núcleo</b> rival.</p>
-          <p>No hay barra de vida tampoco acá: te agrietás y tu base te enfría. <kbd>${K('recall')}</kbd> te lleva a casa (4 s quieto) y la forja solo funciona ahí. El <b>Coloso</b> del centro bendice a los esbirros de quien lo derriba.</p>
+          <p>No hay barra de vida tampoco acá: te agrietás y tu base te enfría. <kbd>${touch ? '🏠' : K('recall')}</kbd> te lleva a casa (4 s quieto) y la forja solo funciona ahí. El <b>Coloso</b> del centro bendice a los esbirros de quien lo derriba.</p>
           <p>Ojo: el piso frágil se rompe y deja agujeros.</p>
         </div>
       </div>`;
@@ -719,9 +744,14 @@ export class App {
       check('Brillos y postproceso (bloom, destellos) — desactivar si va lento', p.post, (x) => savePrefs({ post: x })),
       check('Locutor (voz que anuncia combos y rachas)', p.announcer, (x) => { savePrefs({ announcer: x }); audio.announcer = x; }),
       check('Lanzamiento rápido: las habilidades salen al apretar la tecla, sin clic (para expertos)', p.quickCast, (x) => savePrefs({ quickCast: x })),
-      h('p', { class: 'muted small' }, 'Sombras y resolución se aplican en la próxima partida.'),
+      h('div', { class: 'srow' }, h('label', null, 'Controles táctiles'),
+        h('select', { class: 'input', onchange: (e: Event) => { savePrefs({ touch: (e.target as HTMLSelectElement).value as 'auto' | 'on' | 'off' }); this.syncTouch(); } },
+          ...([['auto', 'Automático (teléfonos y tabletas)'], ['on', 'Siempre'], ['off', 'Nunca']] as const).map(([v, t]) => h('option', { value: v, selected: p.touch === v }, t)))),
+      h('div', { class: 'srow' }, h('label', null, 'Tamaño de los botones'),
+        h('input', { type: 'range', min: 0.8, max: 1.3, step: 0.05, value: p.touchSize, oninput: (e: Event) => { savePrefs({ touchSize: +(e.target as HTMLInputElement).value }); this.syncTouch(); } })),
+      h('p', { class: 'muted small' }, 'Sombras, resolución y controles táctiles se aplican en la próxima partida.'),
       fullscreenSupported() ? h('div', { class: 'srow' }, h('label', null, 'Pantalla'), fullscreenButton('btn small')) : null,
-      h('details', { class: 'controls-box', open: true }, h('summary', null, '🎮 Controles'), this.controlsEditor()),
+      h('details', { class: 'controls-box', open: !touchMode() }, h('summary', null, '🎮 Teclado y mouse'), this.controlsEditor()),
       adv,
     );
     modal('Ajustes', body, [{ label: 'Listo', kind: 'primary' }]);

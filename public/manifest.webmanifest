@@ -1,0 +1,16 @@
+{
+  "name": "RUBBLE — muchos juegos, un mundo que se rompe",
+  "short_name": "RUBBLE",
+  "description": "Arena de ring-outs, asedio, carrera de obstáculos y horda de zombis sobre un mismo mundo que se rompe.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#1c1428",
+  "theme_color": "#2a1f3d",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

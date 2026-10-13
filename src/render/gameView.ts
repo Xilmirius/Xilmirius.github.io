@@ -270,6 +270,18 @@ export class GameView {
     this.post = null;
   }
 
+  get pixelRatio() { return this.renderer.getPixelRatio(); }
+  setPixelRatio(pr: number) {
+    this.renderer.setPixelRatio(pr);
+    this.resize();
+  }
+
+  get shadows() { return this.renderer.shadowMap.enabled; }
+  disableShadows() {
+    this.renderer.shadowMap.enabled = false;
+    this.sun.castShadow = false;
+  }
+
   /** dt = tiempo "del mundo" (0 durante hitstop); realDt = tiempo real (cámara, postproceso). */
   render(frame: WorldFrame, dt: number, local: CharFrame | null, cursor: THREE.Vector3 | null, realDt = dt) {
     this.time += dt;

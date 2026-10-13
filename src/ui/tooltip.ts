@@ -1,6 +1,7 @@
 // Tooltips: un solo sistema para todo (habilidades, ítems, materiales, niveles, héroes, logros...).
 // Uso: tip(el, '<b>Título</b>...') o tip(el, () => html) si el contenido cambia (se arma al mostrarse).
 // El contenido es HTML armado por el juego: escapar con esc() cualquier texto que venga de jugadores.
+// Con los dedos no hay "pasar por arriba": el tooltip sale manteniendo apretado (y ese toque no cuenta como clic).
 
 type Content = string | (() => string);
 
@@ -10,6 +11,11 @@ let current: Element | null = null;
 let showT = 0;
 let lastX = 0, lastY = 0;
 const DELAY = 120;
+/** Táctil: cuánto hay que mantener apretado (ms) y cuánto se puede mover el dedo sin que cuente como arrastrar (px). */
+const HOLD = 420, SLOP = 12;
+/** Después de un toque el navegador inventa eventos de mouse: durante este rato (ms) no se les hace caso. */
+const GHOST = 900;
+let touchAt = -1e9, holdT = 0, held = false, sx = 0, sy = 0;
 
 function ensure() {
   if (box) return box;
@@ -20,6 +26,11 @@ function ensure() {
   document.addEventListener('mousemove', onMove, { passive: true });
   document.addEventListener('mousedown', hide, true);
   window.addEventListener('blur', hide);
+  document.addEventListener('pointerdown', onTouchDown, true);
+  document.addEventListener('pointermove', onTouchMove, true);
+  document.addEventListener('pointerup', onTouchEnd, true);
+  document.addEventListener('pointercancel', onTouchEnd, true);
+  document.addEventListener('click', onClick, true);
   return box;
 }
 
@@ -47,7 +58,47 @@ function find(t: EventTarget | null): Element | null {
   return null;
 }
 
+function onTouchDown(e: PointerEvent) {
+  if (e.pointerType !== 'touch') return;
+  touchAt = performance.now();
+  clearTimeout(holdT);
+  hide();
+  held = false;
+  const el = find(e.target);
+  // Los botones de los controles táctiles son para jugar, no para leer.
+  if (!el || el.closest('.tbtn')) return;
+  sx = e.clientX; sy = e.clientY;
+  holdT = window.setTimeout(() => {
+    lastX = sx; lastY = sy - 26;
+    current = el;
+    show(el);
+    held = !!box?.classList.contains('on');
+  }, HOLD);
+}
+
+function onTouchMove(e: PointerEvent) {
+  if (e.pointerType !== 'touch' || Math.hypot(e.clientX - sx, e.clientY - sy) < SLOP) return;
+  clearTimeout(holdT);
+  if (held) hide();
+}
+
+function onTouchEnd(e: PointerEvent) {
+  if (e.pointerType !== 'touch') return;
+  touchAt = performance.now();
+  clearTimeout(holdT);
+  if (held) hide();
+}
+
+/** El toque que mostró un tooltip era para leer: no cuenta como clic en el botón. */
+function onClick(e: MouseEvent) {
+  if (!held) return;
+  held = false;
+  e.stopPropagation();
+  e.preventDefault();
+}
+
 function onOver(e: MouseEvent) {
+  if (performance.now() - touchAt < GHOST) return;
   const el = find(e.target);
   if (el === current) return;
   current = el;
@@ -83,6 +134,7 @@ function render(el: Element) {
 }
 
 function onMove(e: MouseEvent) {
+  if (performance.now() - touchAt < GHOST) return;
   lastX = e.clientX; lastY = e.clientY;
   if (box?.classList.contains('on')) {
     if (current && !current.isConnected) { hide(); return; }
