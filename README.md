@@ -242,7 +242,8 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 - Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
 - Carrera: las pistas nuevas y la copa están probadas con bots, no con gente; lo que falta está en [docs/CARRERA.md](docs/CARRERA.md).
 - Horda: la dificultad y las mejoras están ajustadas con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
-- Terreno y ambientación: revisados con capturas, no en partidas con gente; lo que falta (y por qué no hay grilla irregular) está en [docs/TERRENO.md](docs/TERRENO.md).
+- Terreno y ambientación: revisados con capturas, no en partidas con gente; lo que falta está en [docs/TERRENO.md](docs/TERRENO.md).
+- Plan de pulido en curso (Carrera sin salto, vida y armas de la Horda, malla irregular, mapas nuevos): una tarea por archivo en [docs/tareas](docs/tareas/README.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
 - Controles táctiles: probados con táctil emulado en el navegador, no en un teléfono real (falta medir cuántos cuadros da y cómo se sienten los pulgares). Por datos móviles la conexión directa suele necesitar TURN (ver 2.6), y conviene que el anfitrión sea una PC.

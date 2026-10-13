@@ -90,9 +90,9 @@ Cada juego entra con el tema que le queda (`defaults.theme` en `core/games.ts`, 
 
 - **Probarlo jugando.** Está revisado con capturas, no en partidas con gente. Lo primero a mirar: si el borde
   redondeado se lee bien con el personaje en movimiento y si alguna pieza distrae en plena pelea.
-- **Grilla irregular y Wave Function Collapse** (lo que hace Townscaper completo): quedaron afuera a propósito.
-  Deformar la grilla obliga a que la colisión, los bots, la red y los mapas la sigan, porque acá el borde es el
-  juego. Es un proyecto aparte.
+- **Malla irregular** (lo que hace Townscaper completo): está planificada. El diseño está en [MALLA.md](MALLA.md)
+  y el trabajo, en las tareas 10 a 17 de [docs/tareas](tareas/README.md). Hasta que terminen, el terreno es el
+  que describe este documento.
 - Los mapas de Arena sin muros (El Islote, El Flipper) muestran poco de su ambientación: casi todo lo vistoso
   va sobre los muros.
 - Las piezas son estáticas: banderas y guirnaldas no flamean.
