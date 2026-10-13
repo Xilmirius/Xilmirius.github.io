@@ -1,7 +1,7 @@
 // Orquestador: menú ↔ lobby ↔ partida. Maneja la sesión (host o cliente) y las pantallas.
 import { audio } from './audio/audio';
 import { clearConfig, getConfig, getPrefs, hasSupabase, saveConfig, savePrefs, touchMode } from './config';
-import { GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
+import { DASH_CD, GAME_SUBTITLE, GAME_TITLE, TEAM_COLORS, TEAM_NAMES } from './core/constants';
 import { HEROES } from './core/heroes';
 import { ACTIONS, applyPreset, currentPreset, getBinds, keyLabel, keyName, PRESETS, RESERVED, setBind } from './game/keybinds';
 import { cupMaps } from './core/cup';
@@ -391,9 +391,11 @@ export class App {
       h('ul', null,
         rules.weapons
           ? h('li', null, h('b', null, 'Clic · Disparar: '), 'empezás con la pistola (no se queda sin balas) y una uzi o una escopeta cargada. Más armas y munición caen en cajas.')
-          : h('li', null, h('b', null, `Clic · ${sel.basic.name}: `), sel.basic.desc),
+          : rules.grab
+            ? h('li', null, h('b', null, 'Clic · Agarrar: '), 'mantenido sobre un rival cercano y de frente: los dos van más lento mientras dura. Se corta solo, al soltar, al alejarse, o si el agarrado hace un dash.')
+            : h('li', null, h('b', null, `Clic · ${sel.basic.name}: `), sel.basic.desc),
         h('li', null, h('b', null, 'Clic derecho · Empujón: '), 'mantené para cargar. Es lo que saca rivales del mapa.'),
-        rules.dash ? h('li', null, h('b', null, 'Shift · Dash: '), 'ráfaga corta para entrar, esquivar o recuperarte.') : null,
+        rules.dash ? h('li', null, h('b', null, 'Shift · Dash: '), `ráfaga corta para entrar, esquivar o recuperarte${rules.dashCd !== DASH_CD ? ` (tarda ${rules.dashCd} s en volver)` : ''}.`) : null,
         // Los poderes solo se listan en los juegos que los usan.
         ...(rules.abilities ? (['q', 'e', 'f', 'r'] as const).map((k) => {
           const a = sel.abilities[k];

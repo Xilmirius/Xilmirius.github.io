@@ -11,6 +11,7 @@ import { gameOf, MODE_INFO } from '../core/games';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR, ROUTE_MODS } from '../core/mutations';
 import { PERK, PERKS, type PerkId } from '../core/perks';
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
+import { GRAB } from '../core/sim';
 import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, type ModeId, type Route } from '../core/types';
 import { C4, WEAPON_IDS, WEAPONS, type WeaponId } from '../core/weapons';
 import { esc } from './tooltip';
@@ -95,11 +96,18 @@ export function pushTip() {
     + p('El cono en el piso avisa que lo estás cargando (se pone rojo a carga máxima).', 'tt-hint');
 }
 
-export function dashTip() {
+export function dashTip(cd = DASH_CD) {
   return head(iconHtml('icon.dash', '💨'), 'Dash', keyName('dash'))
-    + tags(['≈ 4 m', `Enfriamiento ${s(DASH_CD)}`])
+    + tags(['≈ 4 m', `Enfriamiento ${s(cd)}`])
     + p('Ráfaga corta hacia donde caminás (o hacia donde mirás si estás quieto). Sirve para entrar, esquivar y recuperarte.')
     + p('En el aire tenés uno. No corta un lanzamiento: primero usá el segundo salto (Espacio) y después el dash.', 'tt-hint');
+}
+
+export function grabTip() {
+  return head('🤝', 'Agarrar', 'Clic')
+    + tags([`Hasta ${m(GRAB.range)}`, `Dura ${s(GRAB.dur)}`, `Enfriamiento ${s(GRAB.cd)}`])
+    + p('Mantené el clic sobre un rival cercano y de frente para agarrarlo: los dos van más lento mientras dura (vos al 50 %, el agarrado al 25 %).')
+    + p('Se corta al soltar el clic, a los pocos segundos, si se alejan, o si el agarrado hace un dash. El que agarra puede volver a hacerlo recién pasado el enfriamiento.', 'tt-hint');
 }
 
 export function itemTip(it: ItemDef, extra = '') {
@@ -160,7 +168,7 @@ export function rulesTip(id: RulesetId) {
   const r = RULESETS[id];
   const on = (b: boolean, t: string) => `<li class="${b ? 'on' : 'off'}">${b ? '✔' : '✖'} ${t}</li>`;
   return head(r.icon, r.name) + p(r.desc)
-    + `<ul class="tt-list checks">${r.weapons ? on(true, 'Armas: pistola, uzi, escopeta, lanzacohetes y C4') : ''}${on(r.abilities, 'Poderes del héroe')}${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar${paren('repair')}`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${on(r.dash, `Dash${paren('dash')}`)}${r.recall ? on(true, `Volver a la base${paren('recall')}`) : ''}</ul>`;
+    + `<ul class="tt-list checks">${r.weapons ? on(true, 'Armas: pistola, uzi, escopeta, lanzacohetes y C4') : ''}${on(r.abilities, 'Poderes del héroe')}${on(r.progression, 'Niveles y XP')}${on(r.crafting, r.forgeAtBase ? 'Forja: ítems y mutaciones (solo en tu base)' : 'Forja: ítems y mutaciones')}${on(r.repair, `Reparar${paren('repair')}`)}${on(r.pickups === 'materials', 'Materiales')}${on(r.ultCharge, 'Ulti por carga')}${!r.jump ? on(false, 'Salto') : ''}${r.grab ? on(true, 'Clic: agarrar en vez de pegar') : ''}${on(r.dash, `Dash · ${s(r.dashCd)}${paren('dash')}`)}${r.recall ? on(true, `Volver a la base${paren('recall')}`) : ''}</ul>`;
 }
 
 /** Lo que conviene saber de cada modo antes de jugarlo. Funciones porque nombran teclas, que se pueden reasignar. */
@@ -198,9 +206,10 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
   ],
   race: () => [
     'Pasá las <b>puertas</b> en orden: si te caés, reaparecés en la última que pasaste.',
-    '<b>Rotores</b> y <b>bolas</b>: se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
-    'El <b>piso flojo</b> (más claro y agrietado) se cae al pisarlo: no te quedes quieto. El <b>dash rompe</b> la cobertura que te tapa el paso; los barriles explotan.',
-    `Las <b>cajas ❓</b> dan un ítem de un solo uso${touchMode() ? ': aparece en los botones de arriba del golpe' : ` (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>)`}.`,
+    `Sin salto: <kbd>${touchMode() ? 'el clic' : 'Clic'}</kbd> agarra al rival que tenés cerca y de frente (frena a los dos un rato) en vez de pegarle, y el dash tarda bastante en volver: usalo para cruzar un hueco, abrir una cobertura o soltarte si te agarran.`,
+    '<b>Rotores</b> y <b>bolas</b>: se esquivan de costado, no se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
+    'El <b>piso flojo</b> (más claro y agrietado) se cae al pisarlo: no te quedes quieto. El <b>dash rompe</b> cualquier cobertura de una sola embestida; los barriles explotan.',
+    `Las <b>cajas ❓</b> dan un ítem de un solo uso${touchMode() ? ': aparece en los botones de arriba del agarre' : ` (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>)`}.`,
     'Cuando llega el primero quedan 25 s para terminar.',
     'En <b>copa</b> se corren varias pistas seguidas: cada puesto da puntos y gana quien suma más.',
   ],

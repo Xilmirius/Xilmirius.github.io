@@ -102,6 +102,7 @@ export class BotBrain {
     this.navigate(sim, ch, dt);
     if (sim.mode.id === 'race') {
       this.dodgeBalls(sim, ch);
+      this.dodgeRotor(sim, ch);
       // Los bots más fáciles corren un poco más lento (salvo en pleno salto sobre un hueco, que necesita toda la carrera).
       if (!this.hop) { this.wishX *= this.d.pace; this.wishZ *= this.d.pace; }
     }
@@ -379,16 +380,11 @@ export class BotBrain {
     for (const g of sim.gadgets) {
       const dx = g.x - ch.pos.x, dz = g.z - ch.pos.z;
       const d = Math.hypot(dx, dz);
-      if (g.kind === 'rotor' && d < ROTOR.len + 1.5 && ch.grounded) {
-        // Saltar cuando la barra está por pasar por donde estoy.
-        const a = rotorAngle(g.idx, sim.tick + 8);
-        const along = -dx * Math.cos(a) - dz * Math.sin(a), perp = dx * Math.sin(a) - dz * Math.cos(a);
-        if (Math.abs(along) < ROTOR.len + 0.6 && Math.abs(perp) < 1.3) this.tap |= BTN.JUMP;
-      }
       // Géiser avisando justo adelante: frenar hasta que dispare.
       if (g.kind === 'geyser' && d < 2.6 && d > 0.9 && dx * gx + dz * gz > 0 && geyserPhase(g.idx, sim.tick) !== 'idle') this.goal = null;
     }
-    // Cobertura en el camino: embestirla con el dash y pegarle hasta que caiga (los barriles ni tocarlos: explotan).
+    // Cobertura en el camino: embestirla con el dash (ahora alcanza con una sola embestida). Si no está listo,
+    // no insistir: el camino la rodea (findPath la marca como bloqueada).
     const way = this.path[0] ?? gate;
     const wu = norm2(way.x - ch.pos.x, way.z - ch.pos.z);
     for (const d of sim.destructibles) {
@@ -396,13 +392,24 @@ export class BotBrain {
       const dx = d.x - ch.pos.x, dz = d.z - ch.pos.z;
       const dist = Math.hypot(dx, dz);
       if (dist > 2.6 || (dx * wu.x + dz * wu.z) / (dist || 1) < 0.6) continue;
-      this.aimAt(ch, d.x, d.z);
-      this.hold |= BTN.BASIC;
-      if (ch.grounded && ch.dashCd <= 0) this.tap |= BTN.DASH;
+      if (ch.grounded && ch.dashCd <= 0) { this.aimAt(ch, d.x, d.z); this.tap |= BTN.DASH; }
       break;
     }
-    // Empujón al rival que esté pegado (más ganas cuanto más difícil el bot).
-    for (const c of sim.chars) {
+    // Agarrar al rival que tengo cerca y de frente (más ganas cuanto más difícil el bot); a nadie que ya llegó.
+    if (sim.rules.grab && ch.grabbing < 0 && ch.grabbedBy < 0 && ch.cds.basic <= 0 && this.rng.chance(this.d.push)) {
+      let best: Character | null = null, bd = Infinity;
+      for (const c of sim.chars) {
+        if (c === ch || !c.alive || c.grabbedBy >= 0 || c.grabbing >= 0 || c.invuln > 0 || m.finished(c.id)) continue;
+        const d = Math.hypot(c.pos.x - ch.pos.x, c.pos.z - ch.pos.z);
+        if (d > 1.5 || Math.abs(c.pos.y - ch.pos.y) > 1.6) continue;
+        if (d < bd) { bd = d; best = c; }
+      }
+      if (best) { this.aimAt(ch, best.pos.x, best.pos.z); this.hold |= BTN.BASIC; this.target = best; }
+    }
+    // Agarrado: soltarse con el dash apenas esté listo.
+    if (ch.grabbedBy >= 0 && sim.rules.dash && ch.grounded && ch.dashCd <= 0) this.tap |= BTN.DASH;
+    // Empujón al rival que esté pegado (más ganas cuanto más difícil el bot); no mientras se está agarrando a alguien.
+    if (!(this.hold & BTN.BASIC)) for (const c of sim.chars) {
       if (c === ch || !c.alive || m.finished(c.id)) continue;
       const d = Math.hypot(c.pos.x - ch.pos.x, c.pos.z - ch.pos.z);
       if (d < 2 && ch.cds.push <= 0 && this.pushT <= 0 && this.rng.chance(this.d.push * 0.25)) {
@@ -429,10 +436,41 @@ export class BotBrain {
   }
 
   /**
+   * Rotores sin salto: en vez de saltar la barra, correrse hacia el costado del barrido por el que ya está (y
+   * solo si ahí hay piso: si no, probar el otro lado, y si ninguno sirve, pararse a bancarse el golpe antes
+   * que tirarse al vacío). Corre después de `navigate` porque pisa `wishX/wishZ`.
+   */
+  private dodgeRotor(sim: Simulation, ch: Character) {
+    if (!ch.grounded) return;
+    const cw = sim.cw;
+    for (const g of sim.gadgets) {
+      if (g.kind !== 'rotor') continue;
+      const dx = g.x - ch.pos.x, dz = g.z - ch.pos.z, d = Math.hypot(dx, dz);
+      if (d > ROTOR.len + 1.8) continue;
+      const a = rotorAngle(g.idx, sim.tick + 6);
+      const along = -dx * Math.cos(a) - dz * Math.sin(a), perp = dx * Math.sin(a) - dz * Math.cos(a);
+      if (Math.abs(along) > ROTOR.len + 0.6 || Math.abs(perp) > 1.3) continue;
+      const dir0 = perp >= 0 ? 1 : -1;
+      for (const side of [dir0, -dir0]) {
+        const sx = Math.sin(a) * side, sz = -Math.cos(a) * side;
+        if (cw.groundAt(ch.pos.x + sx * 2.2, ch.pos.z + sz * 2.2, ch.pos.y + 2) === -Infinity) continue;
+        this.wishX = sx;
+        this.wishZ = sz;
+        return;
+      }
+      // Ningún costado tiene piso (pasillo angosto, el radio del rotor lo cubre entero): ahí no sirve
+      // esquivar, total pararse solo alarga cuánto tiempo se está adentro. Mejor cruzar rápido y de una.
+      return;
+    }
+  }
+
+  /**
    * Bolas: saltar cuando una está por pasarme por encima (mirando un instante hacia adelante). Se decide una vez
-   * por bola: los bots más fáciles a veces no la ven venir.
+   * por bola: los bots más fáciles a veces no la ven venir. Sin salto (Carrera) no hay forma de esquivarlas en el
+   * momento: `findPath` ya evita los carriles, y lo que queda es aguantar el golpe.
    */
   private dodgeBalls(sim: Simulation, ch: Character) {
+    if (!sim.rules.jump) return;
     const look = 0.26;
     const px = ch.pos.x + ch.vel.x * look, pz = ch.pos.z + ch.vel.z * look;
     let near = false;
@@ -693,9 +731,9 @@ export class BotBrain {
         const u = norm2(safe.x - ch.pos.x, safe.z - ch.pos.z);
         this.wishX = u.x;
         this.wishZ = u.z;
-        if (ch.vel.y < 1 && ch.airJumps > 0 && ch.hitstun <= 0) this.tap |= BTN.JUMP;
+        if (sim.rules.jump && ch.vel.y < 1 && ch.airJumps > 0 && ch.hitstun <= 0) this.tap |= BTN.JUMP;
         // Sin saltos: el dash aéreo es la última carta (el tumbo ya lo canceló el segundo salto).
-        else if (sim.rules.dash && ch.airJumps === 0 && ch.airDashes > 0 && ch.dashCd <= 0 && ch.tumble <= 0 && ch.hitstun <= 0) this.tap |= BTN.DASH;
+        else if (sim.rules.dash && (!sim.rules.jump || ch.airJumps === 0) && ch.airDashes > 0 && ch.dashCd <= 0 && ch.tumble <= 0 && ch.hitstun <= 0) this.tap |= BTN.DASH;
         const gi = ch.actives.indexOf('garfio');
         if (gi >= 0 && ch.pos.y < safe.top - 0.5 && ch.cds[(['i1', 'i2', 'i3'] as const)[gi]] <= 0) {
           this.aimAt(ch, safe.x, safe.z);
@@ -707,10 +745,13 @@ export class BotBrain {
 
     if (this.repairing || !this.goal) return;
 
+    // Sin salto, un hueco de una celda se cruza con el dash: solo vale la pena buscar un camino que lo cruce si
+    // el dash ya está listo (si no, findPath lo deja bloqueado y rodea, que es lo que puede terminar).
+    const canHop = sim.rules.jump || (sim.rules.dash && ch.grounded && ch.dashCd <= 0);
     this.pathT -= dt;
     if (this.pathT <= 0 || this.path.length === 0) {
       this.pathT = 0.5;
-      this.path = this.findPath(sim, ch.pos.x, ch.pos.z, this.goal.x, this.goal.z);
+      this.path = this.findPath(sim, ch.pos.x, ch.pos.z, this.goal.x, this.goal.z, canHop);
     }
     let wx: number, wz: number;
     let next = this.path[0];
@@ -718,12 +759,12 @@ export class BotBrain {
       this.path.shift();
       next = this.path[0];
     }
-    // El próximo punto del camino queda del otro lado de un hueco: se llega saltando.
+    // El próximo punto del camino queda del otro lado de un hueco: se llega saltando o, sin salto, con el dash.
     const gap = !!next && next.hop && ch.grounded;
     if (next && (this.path.length > 1 || gap)) {
       wx = next.x - ch.pos.x;
       wz = next.z - ch.pos.z;
-      if (next.top > ch.pos.y + 0.45 && Math.hypot(wx, wz) < 2.2 && ch.grounded) this.tap |= BTN.JUMP;
+      if (sim.rules.jump && next.top > ch.pos.y + 0.45 && Math.hypot(wx, wz) < 2.2 && ch.grounded) this.tap |= BTN.JUMP;
     } else {
       wx = this.goal.x - ch.pos.x;
       wz = this.goal.z - ch.pos.z;
@@ -732,10 +773,18 @@ export class BotBrain {
     const u = norm2(wx, wz);
     wx = u.x; wz = u.z;
 
-    // Nunca caminar hacia el vacío... salvo para saltar un hueco: ahí se toma carrera y se salta en el borde.
+    // Nunca caminar hacia el vacío... salvo para cruzar un hueco: ahí se toma carrera y se salta (o se dashea) en el borde.
     if (gap && cw.groundAt(ch.pos.x + wx * 0.7, ch.pos.z + wz * 0.7, ch.pos.y + 2) === -Infinity) {
-      this.tap |= BTN.JUMP;
-      this.hop = { x: next!.x, z: next!.z, t: HOP_TIME };
+      if (sim.rules.jump) {
+        this.tap |= BTN.JUMP;
+        this.hop = { x: next!.x, z: next!.z, t: HOP_TIME };
+      } else if (sim.rules.dash && ch.dashCd <= 0) {
+        this.tap |= BTN.DASH;
+      } else {
+        // El dash no está listo: no tirarse al vacío. Soltar el camino y dejar que el próximo recálculo rodee.
+        this.path = [];
+        return;
+      }
       this.path.shift();
       this.wishX = wx;
       this.wishZ = wz;
@@ -751,18 +800,22 @@ export class BotBrain {
       }
     }
 
-    // Atascado: saltar y probar de costado.
+    // Atascado: saltar y probar de costado. No cuenta en la cuenta regresiva: ahí nadie se mueve a propósito
+    // (si no, al arrancar la partida dispara la recuperación con el personaje todavía quieto en la salida).
     const moved = Math.hypot(ch.pos.x - this.lastX, ch.pos.z - this.lastZ);
     this.lastX = ch.pos.x;
     this.lastZ = ch.pos.z;
-    if (moved < 0.02 && ch.grounded) this.stuckT += dt; else this.stuckT = Math.max(0, this.stuckT - dt);
+    if (sim.phase !== 'play') this.stuckT = 0;
+    else if (moved < 0.02 && ch.grounded) this.stuckT += dt; else this.stuckT = Math.max(0, this.stuckT - dt);
     if (this.stuckT > 0.35) {
-      this.tap |= BTN.JUMP;
+      if (sim.rules.jump) this.tap |= BTN.JUMP;
       const s = this.rng.chance(0.5) ? 1 : -1;
       const ox = wx;
       wx = -wz * s;
       wz = ox * s;
-      this.hold |= BTN.BASIC; // romper lo que tape
+      // Romper lo que tape: a golpes si hay golpe, con el dash si en cambio se agarra (Carrera).
+      if (sim.rules.grab) { if (sim.rules.dash && ch.grounded && ch.dashCd <= 0) this.tap |= BTN.DASH; }
+      else this.hold |= BTN.BASIC;
       if (this.stuckT > 1.2) { this.stuckT = 0; this.path = []; }
     }
 
@@ -793,7 +846,8 @@ export class BotBrain {
     return best;
   }
 
-  private findPath(sim: Simulation, sx: number, sz: number, gx: number, gz: number) {
+  /** canHop: si un hueco de una celda se puede cruzar (saltando o, sin salto, con el dash ya listo). */
+  private findPath(sim: Simulation, sx: number, sz: number, gx: number, gz: number, canHop = false) {
     const t = sim.terrain;
     const start = t.cellIndexAt(sx, sz), goal = t.cellIndexAt(gx, gz);
     if (start < 0 || goal < 0 || start === goal || !t.isWalkable(goal)) return [];
@@ -804,10 +858,25 @@ export class BotBrain {
     const blockedByDestruct = new Set<number>();
     for (const d of sim.destructibles) if (d.stage < 3) blockedByDestruct.add(t.cellIndexAt(d.x, d.z));
     for (const s of sim.structures) blockedByDestruct.add(t.cellIndexAt(s.x, s.z));
-    // Mejor rodear paragolpes, ejes de rotor y géiseres que pasarles por encima.
-    for (const g of sim.gadgets) if (g.kind !== 'box' && g.kind !== 'boost' && g.kind !== 'roller') blockedByDestruct.add(t.cellIndexAt(g.x, g.z));
-    // Carrera: los carriles de bolas se pisan lo menos posible, y un hueco de una celda se cruza saltando.
-    const hops = sim.mode.id === 'race';
+    // Mejor rodear paragolpes, ejes de rotor y géiseres que pasarles por encima (sin salto no hay forma de
+    // recortar un golpe en el aire). El rotor es el único que evita un radio entero: gira sin parar y barre
+    // un círculo completo, así que estar parado adentro ya es peligroso, no solo cruzar su eje. Los paragolpes
+    // avisan menos pero son puntuales (algunos mapas los ponen a propósito en el medio del camino).
+    for (const g of sim.gadgets) {
+      if (g.kind === 'box' || g.kind === 'boost' || g.kind === 'roller') continue;
+      if (g.kind !== 'rotor') { blockedByDestruct.add(t.cellIndexAt(g.x, g.z)); continue; }
+      const avoid = ROTOR.len;
+      const gi = t.cellIndexAt(g.x, g.z), gcx = gi % t.w, gcz = Math.floor(gi / t.w);
+      const rCells = Math.ceil(avoid / CELL);
+      for (let dz = -rCells; dz <= rCells; dz++) for (let dx = -rCells; dx <= rCells; dx++) {
+        const nx = gcx + dx, nz = gcz + dz;
+        if (nx < 0 || nz < 0 || nx >= t.w || nz >= t.h) continue;
+        const cc = t.cellCenter(nx, nz);
+        if (Math.hypot(cc.x - g.x, cc.z - g.z) <= avoid) blockedByDestruct.add(nz * t.w + nx);
+      }
+    }
+    // Carrera: los carriles de bolas se pisan lo menos posible, y un hueco de una celda se cruza si canHop.
+    const hops = sim.mode.id === 'race' && canHop;
     const lanes = new Set<number>();
     for (const g of sim.gadgets) {
       if (g.kind !== 'roller') continue;

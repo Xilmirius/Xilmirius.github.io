@@ -66,41 +66,33 @@ async function race() {
   console.log('\n── Carrera ──');
   await start('race', { map: 'pista', bots: 0 });
   ok('HUD en modo táctil', await p.evaluate(() => document.querySelector('.hud').classList.contains('touch')));
+  ok('sin salto: no hay botón de saltar', !(await btn('jump')));
   const a = await me();
   // Palanca a la derecha.
   await down(1, 110, 300); await slide(1, 190, 300); await wait(0.8);
   const b = await me();
   ok('palanca → se mueve al este', b.x > a.x + 2, `x ${a.x} → ${b.x} (mx ${b.mx})`);
   ok('mira hacia donde camina', Math.abs(b.f - Math.PI / 2) < 0.2, `facing ${b.f}`);
-  // Dash con otro dedo mientras camina (en el piso).
+  // Dash con otro dedo mientras camina (en el piso): en la Carrera tarda bastante más que en los demás juegos.
   await tap(2, await btn('dash'), 60); await wait(0.1);
   const d1 = await me();
-  ok('dash (segundo dedo)', d1.dashCd > 0, `dashCd ${d1.dashCd}`);
-  await wait(0.4);
-  // Saltar con otro dedo mientras camina.
-  const j = await btn('jump');
-  await tap(2, j, 80); await wait(0.18);
-  const c = await me();
-  ok('saltar (segundo dedo, sin soltar la palanca)', c.y > a.y + 0.3 && c.x > b.x, `y ${c.y}`);
-  const c2 = await me();
-  ok('el salto se suelta al levantar ese dedo', (c2.b & 1) === 0, `b ${c2.b}`);
-  await wait(0.6);
+  ok('dash (segundo dedo), tarda 5 s en volver', d1.dashCd > 4, `dashCd ${d1.dashCd}`);
   await up(1); await wait(0.5);
   const s0 = await me(); await wait(0.3); const s1 = await me();
   ok('soltar la palanca → se frena', Math.abs(s1.x - s0.x) < 0.3 && s1.mx === 0, `x ${s0.x} → ${s1.x}`);
-  // Golpe sin arrastrar: pega hacia donde miraba.
+  // Agarrar (sin rival cerca no agarra a nadie, pero manda el bit y se puede apuntar arrastrando igual).
   const at = await btn('basic');
   await down(3, at.x, at.y); await wait(0.25);
   const g0 = await me();
-  ok('golpe (mantener)', g0.basic > 0 && (g0.b & 2) === 2, `cd ${g0.basic}`);
+  ok('agarrar (mantener)', (g0.b & 2) === 2, `b ${g0.b}`);
   // Arrastrar hacia arriba: mira al norte.
   await slide(3, at.x, at.y - 60); await wait(0.25);
   const g1 = await me();
-  ok('arrastrar el golpe hacia arriba → mira al norte', Math.abs(Math.abs(g1.f) - Math.PI) < 0.2, `facing ${g1.f}`);
-  await shot('race-1-golpe');
+  ok('arrastrar el agarre hacia arriba → mira al norte', Math.abs(Math.abs(g1.f) - Math.PI) < 0.2, `facing ${g1.f}`);
+  await shot('race-1-agarre');
   await up(3); await wait(0.5);
   const g2 = await me();
-  ok('soltar → deja de pegar y sigue mirando ahí', (g2.b & 2) === 0 && Math.abs(Math.abs(g2.f) - Math.PI) < 0.2, `b ${g2.b} facing ${g2.f}`);
+  ok('soltar → deja de agarrar y sigue mirando ahí', (g2.b & 2) === 0 && Math.abs(Math.abs(g2.f) - Math.PI) < 0.2, `b ${g2.b} facing ${g2.f}`);
   // Empujón: mantener carga, soltar empuja; arrastrando a la izquierda.
   const pu = await btn('push');
   await down(3, pu.x, pu.y); await slide(3, pu.x - 60, pu.y); await wait(0.5);

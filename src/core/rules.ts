@@ -4,6 +4,7 @@
 // Un modo nuevo (MOBA, battle royale, carrera de obstáculos) es una combinación de los dos más un
 // tipo de mapa. La simulación nunca pregunta "¿estoy en el modo X?": pregunta "¿está prendido el sistema Y?".
 // Ver docs/PLATAFORMA_Y_MODOS.md.
+import { DASH_CD } from './constants';
 import { rulesetFor } from './games';
 import type { AbilitySlot } from './types';
 
@@ -44,6 +45,12 @@ export interface Ruleset {
   itemBoxes: boolean;
   /** Armas: el clic dispara en vez del golpe básico del héroe (ver core/weapons.ts). */
   weapons: boolean;
+  /** Salto (Espacio), con su segundo salto en el aire. Apagado: Espacio no hace nada. */
+  jump: boolean;
+  /** Segundos que tarda en volver el dash (Shift) después de usarlo. */
+  dashCd: number;
+  /** El clic izquierdo agarra al rival que se tiene adelante en vez de usar el golpe básico del héroe. */
+  grab: boolean;
 }
 
 export const RULESETS: Record<RulesetId, Ruleset> = {
@@ -52,30 +59,35 @@ export const RULESETS: Record<RulesetId, Ruleset> = {
     desc: 'Rápido y directo: todas las habilidades desde el principio, la ulti se carga pegando y Shift es un dash. Sin niveles, forja ni ítems que administrar.',
     progression: false, crafting: false, repair: false, pickups: 'ult', dash: true, ultCharge: true,
     forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
+    jump: true, dashCd: DASH_CD, grab: false,
   },
   full: {
     id: 'full', name: 'Completo', icon: '🧬',
     desc: 'Todos los sistemas: niveles que desbloquean habilidades, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
+    jump: true, dashCd: DASH_CD, grab: false,
   },
   moba: {
     id: 'moba', name: 'Asedio', icon: '🏰',
     desc: 'Las del modo Asedio (MOBA): niveles, materiales que sueltan los esbirros, forja solo en tu base, B para volver y el piso roto se rearma solo.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
     forgeAtBase: true, recall: true, tileRegen: 25, tileStep: false, dashBreak: 0, xpMul: 0.55, abilities: true, itemBoxes: false, weapons: false,
+    jump: true, dashCd: DASH_CD, grab: false,
   },
   race: {
     id: 'race', name: 'Carrera', icon: '🏁',
-    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe. Golpes, empujón, salto y dash, más los ítems de un solo uso que dan las cajas. El dash rompe la cobertura y el piso flojo se cae al pisarlo.',
+    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe ni salto. El clic agarra al rival que tenés adelante (frena a los dos), el empujón sigue igual y el dash tarda bastante en volver: administralo para cruzar, abrir paso o soltarte de un agarre. Más los ítems de un solo uso que dan las cajas.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
-    forgeAtBase: false, recall: false, tileRegen: 4, tileStep: true, dashBreak: 50, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
+    forgeAtBase: false, recall: false, tileRegen: 4, tileStep: true, dashBreak: 80, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
+    jump: false, dashCd: 5, grab: true,
   },
   horde: {
     id: 'horde', name: 'Horda', icon: '🔫',
     desc: 'Las de la Horda: armas en vez de poderes. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 12, tileStep: false, dashBreak: 0, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
+    jump: true, dashCd: DASH_CD, grab: false,
   },
 };
 

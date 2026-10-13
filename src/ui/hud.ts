@@ -18,7 +18,7 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, c4Tip, dashTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, c4Tip, dashTip, grabTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchContext, type MatchReward } from '../game/profile';
@@ -244,7 +244,7 @@ export class Hud {
     // Lo que con teclado no necesita casillero (saltar, reparar, abrir la forja) y con los dedos sí.
     const only = (slot: string, icon: string, what: string) => { const el = mk(slot, document.createTextNode(icon), () => what, 'touch-only'); return el; };
     const extra = [
-      only('jump', '⬆️', '<b>Saltar</b><p>En el aire: segundo salto.</p>'),
+      this.rules.jump ? only('jump', '⬆️', '<b>Saltar</b><p>En el aire: segundo salto.</p>') : null,
       this.rules.repair ? only('repair', '🔧', '<b>Reparar</b><p>Mantené apretado.</p>') : null,
       this.rules.crafting ? only('forge', '⚒️', '<b>Forja</b>') : null,
     ];
@@ -254,7 +254,7 @@ export class Hud {
       this.bar.append(...[
         this.gunEl,
         mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
-        this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
+        this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), () => dashTip(this.rules.dashCd), 'small') : null,
         h('div', { class: 'sep' }),
         mk('q', document.createTextNode('🔁'), () => swapTip(this.lastLocal?.wp === 0 ? this.lastMe?.pri ?? -1 : 0)),
         mk('r', document.createTextNode('🧨'), c4Tip),
@@ -263,9 +263,11 @@ export class Hud {
       return;
     }
     this.bar.append(...[
-      mk('basic', iconNode(`icon.basic.${me.hero}`, hero.basic.kind === 'melee' ? '👊' : '🎯'), () => basicTip(me.hero), 'small'),
+      this.rules.grab
+        ? mk('basic', document.createTextNode('🤝'), grabTip, 'small')
+        : mk('basic', iconNode(`icon.basic.${me.hero}`, hero.basic.kind === 'melee' ? '👊' : '🎯'), () => basicTip(me.hero), 'small'),
       mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
-      this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), dashTip, 'small') : null,
+      this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), () => dashTip(this.rules.dashCd), 'small') : null,
       this.rules.recall ? mk('recall', iconNode('icon.recall', '🏠'), recallTip, 'small') : null,
       this.rules.abilities ? h('div', { class: 'sep' }) : null,
       ...(this.rules.abilities ? (['q', 'e', 'f', 'r'] as AbilitySlot[]).map((s) => mk(s, iconNode(`icon.ability.${me.hero}.${s}`, hero.abilities[s].icon), abilityContent(s), s === 'r' ? 'ult' : '')) : []),
@@ -611,7 +613,7 @@ export class Hud {
     const dash = this.slotEls.get('dash');
     if (dash) {
       const r = me.dcd;
-      dash.cd.style.background = r > 0 ? `conic-gradient(rgba(10,6,20,.72) ${(r / DASH_CD) * 360}deg, transparent 0)` : 'none';
+      dash.cd.style.background = r > 0 ? `conic-gradient(rgba(10,6,20,.72) ${(r / (me.dcdMax || DASH_CD)) * 360}deg, transparent 0)` : 'none';
     }
   }
 
@@ -915,6 +917,9 @@ export class Hud {
         break;
       }
       case 'recall': if (e.id === this.localId && e.s === 0) this.localDeny('Se cortó la vuelta a la base'); break;
+      case 'grab':
+        if (e.s === 1 && e.tg === this.localId) this.showCenter(`¡Te agarraron! ${keyName('dash')} para soltarte`, 1.6, 'bad');
+        break;
       case 'stage': if (e.id === this.localId && e.s >= 2) this.showCenter(e.s >= 3 ? (this.rules.repair ? `¡DESTROZADO! Reparate (${keyName('repair')})` : '¡DESTROZADO! Cuidado con los bordes') : 'Quebrado', 1.2, 'bad'); break;
       case 'craft': if (e.id === this.localId) {
         const it = ITEM_BY_ID[e.w];

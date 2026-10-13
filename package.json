@@ -15,6 +15,7 @@
     "assets:doc": "tsx scripts/assets-doc.ts",
     "tool:kb": "tsx scripts/kbtune.ts",
     "tool:bots": "tsx scripts/botstats.ts",
+    "tool:race": "tsx scripts/botstats.ts race",
     "tool:clearings": "tsx scripts/clearings.ts"
   },
   "dependencies": {

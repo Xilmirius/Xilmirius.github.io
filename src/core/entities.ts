@@ -99,6 +99,12 @@ export class Character implements MoveState {
 
   /** Último tick en que embistió cobertura con el dash (reglas con `dashBreak`). */
   ramTick = -9999;
+  /** Agarrar (reglas con `grab`, ver core/sim.ts): a quién agarro, quién me agarra (-1 = nadie), cuánto dura el
+   *  agarre en curso y, tras soltarme, cuánto me falta para poder ser agarrado de nuevo. */
+  grabbing = -1;
+  grabbedBy = -1;
+  grabT = 0;
+  grabImmuneT = 0;
   lastHits = new Map<number, number>(); // atacante -> tick
   launcher = -1; // quién lanzó este cuerpo (para crédito de billar y paredes)
   bodyHits = new Map<number, number>();

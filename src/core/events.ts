@@ -38,6 +38,9 @@ export type SimEvent =
   | { k: 'gate'; id: number; i: number; n: number; fin: number }
   // Alguien embistió cobertura con el dash (reglas con `dashBreak`).
   | { k: 'ram'; id: number; x: number; y: number; z: number }
+  // Agarrar (reglas con `grab`). id: quién agarra · tg: a quién (o a quién soltó) · s: 1 empieza, 0 se corta.
+  // (campo "tg", no "t": "t" está reservado para el tick en TimedEvent).
+  | { k: 'grab'; id: number; tg: number; s: number }
   | { k: 'gad'; w: string; i: number; id: number; x: number; y: number; z: number; it?: string }
   // ── Armas (core/weapons.ts) ──
   // Disparo de impacto instantáneo. w: índice del arma · p: por cada punto que tocó una bala [x, y, z, qué tocó (0 nada,

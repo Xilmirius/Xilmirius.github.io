@@ -612,6 +612,7 @@ export class AudioEngine {
       case 'blink': this.play('blink', vol, pan); break;
       case 'bounce': this.play('bounce', vol * 0.7, pan); break;
       case 'ram': this.play('bounce', vol * (e.id === localId ? 0.9 : 0.5), pan, 0.8); break;
+      case 'grab': if (e.s === 1) this.play('push', vol, pan, 0.75); break;
       case 'gate':
         if (e.fin) { this.play('crowd', e.fin === 1 ? 0.9 : 0.5); if (e.id === localId) this.play('jackpot', 0.9); }
         else if (e.id === localId) this.play('levelup', 0.7);

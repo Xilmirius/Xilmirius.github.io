@@ -1,6 +1,6 @@
 # Carrera de obstáculos
 
-Todos contra todos hasta la meta, de 1 a 6. Sin poderes de héroe: golpes, empujón, salto, dash y los ítems de un solo uso que dan las cajas. Caerse no elimina: reaparecés en la última puerta que pasaste.
+Todos contra todos hasta la meta, de 1 a 6. Sin poderes de héroe ni salto: agarrar, empujón, un dash que tarda en volver y los ítems de un solo uso que dan las cajas. Caerse no elimina: reaparecés en la última puerta que pasaste.
 
 Este documento dice cómo está hecho el juego y dónde tocar cada cosa. La plataforma en general está en [PLATAFORMA_Y_MODOS.md](PLATAFORMA_Y_MODOS.md).
 
@@ -11,6 +11,8 @@ Este documento dice cómo está hecho el juego y dónde tocar cada cosa. La plat
 - Arriba se ve la pista en una tira con un punto por corredor, y a la izquierda tu **puesto** en grande. El puesto se mide por el camino de la pista, no en línea recta: en una curva cerrada va adelante el que más recorrió.
 - Las **cajas ❓** reparten según cómo vas: al primero le tocan ítems para molestar (frasco, muralla, onda, ancla) y a la mitad de atrás, para alcanzar (parpadeo, garfio).
 
+Controles: **clic** agarra, **clic derecho** empuja (mantené para cargar), **Shift** es el dash y **Espacio** no hace nada. El dash tarda 5 s en volver: es lo que se administra, para cruzar una zanja, abrir una pared o soltarse de un agarre. Los resortes, los géiseres y trepar un borde en el aire siguen funcionando: no son saltos.
+
 Reglas propias de la Carrera (`RULESETS.race` en `src/core/rules.ts`):
 
 | Regla | Qué hace |
@@ -18,7 +20,12 @@ Reglas propias de la Carrera (`RULESETS.race` en `src/core/rules.ts`):
 | `abilities: false` | Las habilidades del héroe no se usan. El héroe se elige por su peso y su velocidad. |
 | `itemBoxes` | Las cajas del mapa dan un ítem. |
 | `tileStep` | El **piso flojo** se cae 0,8 s después de pisarlo y vuelve a los 4 s. Se ve más claro y agrietado. |
-| `dashBreak: 50` | El **dash rompe la cobertura** contra la que choca: goo y cristal caen de una embestida; la roca, de dos. Los barriles explotan. |
+| `jump: false` | Espacio no hace nada (ni segundo salto). |
+| `dashCd: 5` | El dash tarda 5 s en volver (en los demás juegos, 1,3 s). El casillero del HUD llena su reloj con este valor. |
+| `grab` | El clic agarra al rival de enfrente en vez de usar el golpe del héroe (ver abajo). |
+| `dashBreak: 80` | El **dash rompe la cobertura** contra la que choca, toda de una embestida (la roca aguanta 70): el primero que llega paga el dash y los demás pasan por el hueco. Los barriles explotan. |
+
+**Agarrar** (`updateGrab` en `src/core/sim.ts`, números en `GRAB`). Como en Fall Guys: con el clic mantenido y un rival a menos de 1,7 m, dentro de 60° hacia donde mirás y a una altura parecida, lo agarrás. Mientras dura, él va al 25 % de su velocidad y vos al 50 %; los dos pueden girar y empujar, y no suma heat. Se corta al soltar el clic, a los 1,5 s, si se separan más de 2,3 m, si el agarrado hace un dash, si al que agarra lo golpean, lo empujan o lo aturden, o si alguno cae, llega a la meta o queda invulnerable. Después el que agarró espera 3 s (el casillero del golpe) y el agarrado no puede ser agarrado por nadie durante 2,5 s. A los que ya llegaron no se los agarra. El estado viaja en `CharFrame.fl` (`F_GRABBING`, `F_GRABBED`) y `gb`, y el aviso al agarrado en el evento `grab`.
 
 ## 2. Las pistas
 
@@ -29,7 +36,7 @@ Cada pista tiene su tema visual, que entra solo al elegirla (`theme` en el mapa)
 | **La Pista** | Cantera | La clásica, en línea recta: pasillo de rotores, campo de paragolpes, zigzag de géiseres con atajo por resorte, plataforma con rotor y recta final con barriles. |
 | **El Serpentín** | Atardecer | Tres rectas unidas por dos curvas cerradas. Aceleradores, y dos atajos que cortan las curvas: una viga angosta con un géiser y un puente de piso flojo que se cae detrás del primero que pasa. El tramo final cruza un campo entero de piso flojo. |
 | **La Bolera** | Neón | Bolas que ruedan contra vos. Un calentamiento con dos carriles, el callejón (cuatro carriles de bolas y, en los carriles libres, paragolpes que te obligan a cruzarlos), un cruce con bolas que van de lado a lado y los pinos antes de la meta. Es la más corta. |
-| **El Derrumbe** | Noche | Una espiral que termina en el centro. Tres paredes para romper a puro dash (la de roca conviene volarla con los barriles), un campo de piso flojo con barriles, eslalon entre rocas, dos zanjas para saltar y una última pared justo antes de la meta. |
+| **El Derrumbe** | Noche | Una espiral que termina en el centro. Tres paredes para romper a puro dash (la de roca conviene volarla con los barriles), un campo de piso flojo con barriles, eslalon entre rocas, dos zanjas que se cruzan con el dash (o se rodean por la franja de al lado) y una última pared justo antes de la meta. |
 
 Las pistas se escriben en ASCII en `src/core/maps/index.ts` (la leyenda está al principio del archivo). Una pista lleva `kind: 'race'`, una columna de cinco salidas (`*`) que cubre el ancho de la zona de salida, puertas numeradas del `2` al `9` y la meta `F`. Los corredores no aparecen en el centro de esas celdas: `RaceMode.init` los reparte equidistantes sobre el segmento que va del centro de la primera a la de la última, con el orden sorteado en cada carrera (`src/core/race.ts`). Si las `*` de un mapa no están en una sola fila o columna, se usa el reparto por celda de siempre (`Simulation.spawnPoint`).
 
@@ -40,7 +47,7 @@ Además de las que ya tenía la Arena (resortes, paragolpes, rotores, géiseres,
 | Pieza | En el mapa | Qué hace |
 |---|---|---|
 | **Acelerador** | `a` | Pisarlo da 60 % más de velocidad por 1,6 s. |
-| **Lanzabolas** | `N` `S` `E` `W` | Tira una bola cada 2,6 s que rueda hacia ese lado hasta donde se termina el piso llano. Te lleva puesto; se salta o se esquiva. El carril se ve pintado en el piso. |
+| **Lanzabolas** | `N` `S` `E` `W` | Tira una bola cada 2,6 s que rueda hacia ese lado hasta donde se termina el piso llano. Te lleva puesto; sin salto, se esquiva cambiando de carril. El carril se ve pintado en el piso. |
 | **Piso flojo** | `,` | El piso frágil de siempre, que con las reglas de la Carrera se cae al pisarlo. |
 
 Los números están en `src/core/gadgets.ts` (`BOOST`, `ROLLER`). Las bolas, como los rotores y los géiseres, salen del mapa y del tick: no viajan por la red y host y clientes las ven en el mismo lugar.
@@ -58,18 +65,19 @@ En la sala, **Formato** elige entre una carrera suelta y una copa de 3 o de 4 pi
 
 Corren por el camino a pie hacia la próxima puerta (`decideRace` y `navigate` en `src/core/bots.ts`). Además:
 
-- saltan los rotores y las bolas (los fáciles a veces no las ven venir) y esperan a que dispare el géiser que tienen adelante;
-- saltan los huecos de una celda (una zanja o una baldosa caída);
-- embisten con el dash la cobertura que les tapa el camino y le pegan hasta que cae; a los barriles no los tocan;
-- prefieren los carriles sin bolas y empujan al rival que tienen pegado;
+- a los rotores les pasan por el costado del barrido (`dodgeRotor`; el camino evita el radio entero) y esperan a que dispare el géiser que tienen adelante;
+- un hueco de una celda lo cruzan con el dash si está listo y, si no, lo rodean (`findPath` con `canHop`); las subidas son solo por rampa;
+- embisten con el dash la cobertura que les tapa el camino (una embestida alcanza); a los barriles no los tocan;
+- agarran al rival que tienen pegado y de frente (más seguido los difíciles), y agarrados usan el dash apenas lo tienen;
+- prefieren los carriles sin bolas (no tienen cómo esquivarlas en el momento) y empujan al rival que tienen pegado;
 - según la dificultad corren al 86 % (fácil), al 94 % (normal) o a fondo (difícil).
 
-En las partidas de prueba (cinco o seis bots), el primero llega entre los 22 y los 44 s según la pista y la dificultad, el último entre los 30 y los 60, y casi siempre alguno se cae. Llegaron todos en las 204 corridas.
+Sin pantalla, con seis bots (`npm run tool:race`, 10 carreras por pista y dificultad): llegaron todos en 29 de 30 en la Pista y el Serpentín y en 30 de 30 en la Bolera y El Derrumbe. El primero llega entre los 27 y los 39 s según la pista y la dificultad, el último entre los 39 y los 49 s, y hay entre 9 y 19 agarres por carrera.
 
 ## 6. Lo que falta o hay que decidir jugando
 
 - **Probarlo con gente.** Los tiempos y la dificultad salen de partidas de bots. No se sabe todavía si los atajos del Serpentín le dan demasiada ventaja al que va primero ni si El Derrumbe frena lo suficiente al que abre las paredes.
-- Los héroes rompen cobertura a golpes a distinta velocidad (los de cuerpo a cuerpo, más rápido). El dash lo empareja, pero no del todo.
+- Sin golpe básico, la cobertura se abre solo con el dash: no se sabe si 5 s de espera hacen demasiado caro abrir paso o si agarrar frena lo justo. Las pistas se rediseñaron lo mínimo para poder terminarlas sin saltar; el rediseño grande es la tarea 22.
 - Plataformas móviles y más pistas.
 
 ## 7. Dónde está cada cosa

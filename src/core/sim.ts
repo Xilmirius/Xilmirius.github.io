@@ -38,6 +38,26 @@ export interface SimConfig {
 /** Ticks entre una embestida y la siguiente (un dash pega una sola vez). */
 const DASH_RAM_TICKS = 18;
 
+/** Agarrar (reglas con `grab`, Carrera): como en Fall Guys, frena a los dos mientras dura. */
+export const GRAB = {
+  /** Alcance (entre centros) y cono (grados, total) para agarrar. */
+  range: 1.7,
+  angle: 60,
+  /** Diferencia de altura máxima para agarrar (igual que un golpe cuerpo a cuerpo). */
+  heightDiff: 1.6,
+  /** Segundos que dura como mucho un agarre. */
+  dur: 1.5,
+  /** Se corta si se separan más de esto. */
+  breakDist: 2.3,
+  /** Enfriamiento del que agarra después de soltar (usa el casillero del golpe). */
+  cd: 3,
+  /** Segundos de inmunidad del agarrado después de soltarse. */
+  immune: 2.5,
+  /** Multiplicador de velocidad: el que agarra, el agarrado. */
+  speedGrabber: 0.5,
+  speedGrabbed: 0.25,
+};
+
 export type Command =
   | { c: 'craft'; id: string }
   | { c: 'sell'; id: string }
@@ -617,6 +637,8 @@ export class Simulation {
     if (ch.slowT > 0) s *= 1 - ch.slowAmt;
     if (ch.hasteT > 0) s *= 1 + ch.hasteAmt;
     if (ch.action && !ch.action.lock) s *= ch.action.slow;
+    if (ch.grabbing >= 0) s *= GRAB.speedGrabber;
+    else if (ch.grabbedBy >= 0) s *= GRAB.speedGrabbed;
     return s;
   }
 
@@ -640,6 +662,7 @@ export class Simulation {
     if (ch.hasteT > 0) { ch.hasteT -= DT; if (ch.hasteT <= 0) ch.hasteAmt = 0; }
     if (ch.armorT > 0) { ch.armorT -= DT; if (ch.armorT <= 0) ch.armorAmt = 0; }
     if (ch.gunT > 0) ch.gunT -= DT;
+    if (ch.grabImmuneT > 0) ch.grabImmuneT = Math.max(0, ch.grabImmuneT - DT);
     for (const k in ch.cds) { const s = k as Slot; if (ch.cds[s] > 0) ch.cds[s] = Math.max(0, ch.cds[s] - DT); }
     for (const [id, t] of ch.bodyHits) if (this.tick - t > 30) ch.bodyHits.delete(id);
 
@@ -684,7 +707,9 @@ export class Simulation {
       }
       if (ch.charging && released(inp.b, pb, BTN.PUSH)) this.doPush(ch);
 
-      if (held(inp.b, BTN.BASIC) && ch.cds.basic <= 0 && !ch.charging && !ch.action) {
+      if (this.rules.grab) {
+        this.updateGrab(ch, held(inp.b, BTN.BASIC));
+      } else if (held(inp.b, BTN.BASIC) && ch.cds.basic <= 0 && !ch.charging && !ch.action) {
         if (this.rules.weapons) fireWeapon(this, ch);
         else {
           const b = HEROES[ch.hero].basic;
@@ -707,6 +732,8 @@ export class Simulation {
       ch.charging = false;
       ch.pushCharge = 0;
       ch.repairT = 0;
+      // Aturdido o golpeado: si estaba agarrando, se corta (updateGrab con el clic soltado).
+      if (this.rules.grab && ch.grabbing >= 0) this.updateGrab(ch, false);
     }
     if (this.rules.recall) this.updateRecall(ch, act);
 
@@ -724,6 +751,8 @@ export class Simulation {
     mp.maxAirJumps = ch.stats.maxAirJumps;
     mp.jumpMul = ch.stats.jumpMul;
     mp.dash = this.rules.dash && playing;
+    mp.jump = this.rules.jump;
+    mp.dashCd = this.rules.dashCd;
     if (!playing) { ch.vel.x = 0; ch.vel.z = 0; }
     const wasTumble = ch.tumble > 0;
     const wasDash = ch.dashT > 0;
@@ -757,6 +786,51 @@ export class Simulation {
       ch.saves++;
       this.emit({ k: 'save', id: ch.id });
     }
+  }
+
+  // ───────────────────────────── agarrar (reglas con `grab`, Carrera) ─────────────────────────────
+
+  /** wantGrab: el botón de golpe está mantenido (empieza o sostiene un agarre). */
+  private updateGrab(ch: Character, wantGrab: boolean) {
+    if (ch.grabbing >= 0) {
+      const t = this.charById.get(ch.grabbing);
+      const dist = t ? Math.hypot(t.pos.x - ch.pos.x, t.pos.z - ch.pos.z) : Infinity;
+      const broke = !t || !t.alive || !wantGrab || ch.grabT >= GRAB.dur || dist > GRAB.breakDist
+        || t.dashT > 0 || ch.tumble > 0 || t.invuln > 0 || ch.invuln > 0;
+      if (broke) { this.endGrab(ch, t); return; }
+      ch.grabT += DT;
+      return;
+    }
+    if (!wantGrab || ch.cds.basic > 0 || ch.charging || ch.action || ch.invuln > 0 || ch.grabbedBy >= 0 || ch.grabImmuneT > 0) return;
+    // El rival más cercano dentro de alcance, de un cono hacia donde mira y a una altura parecida.
+    const f = dirOf(ch.facing);
+    const half = (GRAB.angle * Math.PI) / 360;
+    let best: Character | null = null, bd = Infinity;
+    for (const c of this.chars) {
+      if (c === ch || !c.alive || c.grabbedBy >= 0 || c.grabbing >= 0 || c.invuln > 0 || c.grabImmuneT > 0) continue;
+      const dx = c.pos.x - ch.pos.x, dz = c.pos.z - ch.pos.z, d = Math.hypot(dx, dz);
+      if (d > GRAB.range || Math.abs(c.pos.y - ch.pos.y) > GRAB.heightDiff) continue;
+      if (d > 0.4) {
+        const ang = Math.acos(Math.max(-1, Math.min(1, (dx * f.x + dz * f.z) / d)));
+        if (ang > half + Math.atan2(CHAR_RADIUS, d)) continue;
+      }
+      if (d < bd) { bd = d; best = c; }
+    }
+    if (!best) return;
+    ch.grabbing = best.id;
+    best.grabbedBy = ch.id;
+    ch.grabT = 0;
+    this.emit({ k: 'grab', id: ch.id, tg: best.id, s: 1 });
+  }
+
+  /** t: a quién soltó (si todavía existe). Deja el casillero del golpe enfriándose GRAB.cd. */
+  private endGrab(ch: Character, t?: Character | null) {
+    if (t) { t.grabbedBy = -1; t.grabImmuneT = GRAB.immune; }
+    const target = ch.grabbing;
+    ch.grabbing = -1;
+    ch.cds.basic = GRAB.cd;
+    ch.cdMax.basic = GRAB.cd;
+    this.emit({ k: 'grab', id: ch.id, tg: target, s: 0 });
   }
 
   // ───────────────────────────── volver a la base (B) ─────────────────────────────
@@ -816,6 +890,7 @@ export class Simulation {
     mp.maxAirJumps = 0;
     mp.jumpMul = 1;
     mp.dash = false;
+    mp.jump = false;
     const wasTumble = u.tumble > 0;
     u.input.b = 0;
     stepMove(u, u.input, mp, this.cw, DT, this.mo);
@@ -932,6 +1007,12 @@ export class Simulation {
     ch.pushCharge = 0;
     ch.tumble = 0;
     ch.vel = { x: 0, y: 0, z: 0 };
+    if (ch.grabbing >= 0) { const t = this.charById.get(ch.grabbing); if (t) t.grabbedBy = -1; ch.grabbing = -1; }
+    if (ch.grabbedBy >= 0) {
+      const g = this.charById.get(ch.grabbedBy);
+      if (g) { g.grabbing = -1; g.cds.basic = GRAB.cd; g.cdMax.basic = GRAB.cd; }
+      ch.grabbedBy = -1;
+    }
     const window = KILL_CREDIT_TIME * TICK_RATE;
     let killer: Character | null = null, bestT = -Infinity;
     const assists: number[] = [];

@@ -13,7 +13,7 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import type { RosterInfo } from '../core/protocol';
 import { stepPickup } from '../core/sim';
-import { F_DASH, F_DEAD, F_HASTE, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
+import { F_DASH, F_DEAD, F_GRABBING, F_HASTE, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
 import { ambienceOf } from './ambience';
@@ -325,6 +325,14 @@ export class GameView {
         // Volviendo a la base: chispas del equipo que suben en espiral.
         const a = this.time * 9 + c.id;
         this.sparks.burst(cf.x + Math.cos(a) * 0.7, cf.y + 0.1, cf.z + Math.sin(a) * 0.7, 1, tc, { speed: 0.2, up: 4 + cf.ch * 3, size: 0.07, life: 0.6, gravity: -1 });
+      }
+      if (cf.fl & F_GRABBING) {
+        // Agarrando: una línea de chispas hacia el agarrado (se dibuja una sola vez por par, del lado del que agarra).
+        const t = frame.chars.find((x) => x.id === cf.gb);
+        if (t) for (let i = 1; i < 4; i++) {
+          const u = i / 4;
+          this.sparks.burst(cf.x + (t.x - cf.x) * u, cf.y + 0.9 + (t.y - cf.y) * u, cf.z + (t.z - cf.z) * u, 1, tc, { speed: 0.1, up: 0.2, size: 0.05, life: 0.2 });
+        }
       }
     }
     // Fin de partida: los que ganaron festejan (con papelitos), los que perdieron lloran; empate: hombros.
@@ -745,6 +753,17 @@ export class GameView {
           S.burst(e.x, 1, e.z, 20, tc, { speed: 2, up: 6, size: 0.07, life: 0.7 });
           const pos = this.charPos(e.id);
           if (pos) { G.beam(pos.x, pos.y, pos.z, tc); G.ring(pos.x, pos.y, pos.z, 2, tc, 0.6); }
+        }
+        break;
+      }
+      case 'grab': {
+        if (e.s !== 1) break;
+        const tc = this.teamColor(this.teamOf(e.id));
+        const pos = this.charPos(e.id), tpos = this.charPos(e.tg);
+        if (pos) G.ring(pos.x, pos.y + 0.1, pos.z, 1.2, tc, 0.4);
+        if (tpos) {
+          G.ring(tpos.x, tpos.y + 0.1, tpos.z, 1.2, tc, 0.4);
+          if (this.worthText(tpos.x, tpos.z, e.tg)) F.add(tpos.x, tpos.y + 2.2, tpos.z, '¡AGARRADO!', 'big bad', { size: 24, life: 1 });
         }
         break;
       }

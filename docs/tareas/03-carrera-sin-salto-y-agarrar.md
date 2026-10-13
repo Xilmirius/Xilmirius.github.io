@@ -76,3 +76,22 @@ que diga cómo soltarse ("¡Te agarraron! Dash para soltarte") y un sonido en ca
 - Arena, Asedio y Horda siguen saltando y con el dash de siempre (`tests/e2e/run.mjs` y `tests/e2e/moba.mjs` pasan).
 - `npm run test:touch` pasa, con el botón de salto ausente en la Carrera.
 - `docs/CARRERA.md` (controles, reglas, bots) y la fila de la Carrera en `docs/PLATAFORMA_Y_MODOS.md` §4 están al día.
+
+## Notas de ejecución
+
+Hecho como lo planteaba la tarea, con estos desvíos y datos:
+
+- **Banderas.** `Ruleset` gana `jump`, `dashCd` y `grab`; `MoveParams` gana `jump` y `dashCd`, y `MeFrame` suma `jmp` y `dcdMax` (el casillero del dash del HUD llena su reloj con `me.dcdMax`). `CharFrame` suma `gb` (el otro del agarre) al final del arreglo posicional, con `?? -1` al decodificar. `PROTOCOL_VERSION` pasó de 11 a 12.
+- **Evento `grab`.** El campo del agarrado se llama `tg`, no `t`: `t` está reservado para el tick en `TimedEvent` y lo pisaba, con lo que el cartel del agarrado nunca habría salido. Hay que tenerlo presente al agregar eventos.
+- **Enfriamiento del agarre.** Reusa `cds.basic` / `cdMax.basic` (3 s al soltar), así el anillo del casillero del golpe en el HUD funciona sin tocar nada más. Los números están en `GRAB` (`src/core/sim.ts`).
+- **Se corta también** si al que agarra lo aturden o lo golpean con hitstun (no solo con tumbo): `updateGrab` corre solo cuando puede actuar, así que en el `else` de ese bloque se lo llama con el clic soltado. Un agarre no empieza si el que agarra tiene invulnerabilidad (si no, se cortaba en el acto y gastaba los 3 s).
+- **Visual simplificada.** En vez de brazos hay una línea de chispas entre los dos (`F_GRABBING`) más el cartel «¡Te agarraron! Shift para soltarte» para el agarrado y un sonido en cada extremo. Falta pulir si el usuario quiere brazos de verdad.
+- **Pistas** (lo mínimo, como pedía la tarea; el rediseño grande es la 22): El Derrumbe gana una franja de piso en la columna 6, filas 6 a 12, que rodea las dos zanjas (siguen sirviendo de atajo con el dash). En la Pista se ensancharon las filas 2 y 6 (columnas 14 a 24) porque el pasillo de tres filas de rotores no dejaba lugar para pasarles por el costado: **este cambio no estaba en la tarea**, se hizo porque sin salto los bots no terminaban esa pista.
+- **Bots.** `decideRace` agarra y se suelta con el dash; `dodgeRotor` pasa por el costado del barrido (solo hacia donde hay piso); `findPath(canHop)` bloquea el radio del rotor y cruza huecos de una celda solo si el dash está listo; el temporizador de atasco no corre en la cuenta regresiva (disparaba un dash al salir). Las bolas ya no se saltan: queda solo la preferencia de carriles de `findPath` (`dodgeBalls` no hace nada sin salto).
+- **Herramientas.** `scripts/botstats.ts` suma el modo `race` (`npm run tool:race`). `tests/e2e/touch.mjs` se adaptó: ya no busca el botón de salto en la Carrera y el personaje del test esquiva el rotor 1.
+
+**Mediciones** (`npm run tool:race`, 10 carreras por pista y dificultad, seis bots): llegaron todos en 29/30 en la Pista, 29/30 en el Serpentín, 30/30 en la Bolera y 30/30 en El Derrumbe (el mínimo pedido era 27/30). El primero llega entre 26,7 s (Bolera, difícil) y 39,3 s (Derrumbe, fácil); el último, entre 38,7 s (Bolera, difícil) y 49,2 s (Derrumbe, fácil). Hay entre 9 y 19 agarres por carrera (el mínimo era 1). En las corridas que no terminaron hay un bot trabado (dificultad 2).
+
+**Pantalla** (host y cliente en dos pestañas, Edge): el cliente agarra al host (velocidad del host 1,48 con base 6), el host ve el cartel, se suelta con el dash, el dash del cliente queda en ~4,7 s tras usarlo con el reloj del HUD lleno, y Espacio no mueve la predicción del cliente (`y` 0,00 → 0,00).
+
+**Pendiente de que el usuario lo juegue:** si 5 s de dash y 1,5 s de agarre se sienten bien (están en `RULESETS.race.dashCd` y `GRAB`), si abrir cobertura con el dash alcanza o cansa, y si hay que hacer más vistosa la línea de agarre.

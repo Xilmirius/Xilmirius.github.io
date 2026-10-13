@@ -151,7 +151,7 @@ function buildPreview(a: AssetDef): THREE.Object3D | null {
   switch (kind) {
     case 'hero': {
       const bean = new BeanView(x as HeroId, 0, TEAM_COLORS[0], '', false);
-      const f: CharFrame = { id: 1, x: 0, y: 0, z: 0, f: 0, vx: 0, vy: 0, vz: 0, fl: F_GROUNDED, heat: 0, st: 0, lv: 1, ac: '', ap: 0, ch: 0, sh: 0, k: 0, d: 0, a: 0, lives: 0, rt: 0, cs: 0, wp: -1 };
+      const f: CharFrame = { id: 1, x: 0, y: 0, z: 0, f: 0, vx: 0, vy: 0, vz: 0, fl: F_GROUNDED, heat: 0, st: 0, lv: 1, ac: '', ap: 0, ch: 0, sh: 0, k: 0, d: 0, a: 0, lives: 0, rt: 0, cs: 0, wp: -1, gb: -1 };
       bean.update(f, 0, -999, 0);
       bean.label.remove();
       return bean.root;

@@ -94,8 +94,8 @@ export const GAMES: Record<GameId, GameDef> = {
   },
   race: {
     id: 'race', name: 'Carrera', icon: '🏁', tagline: 'Pista de obstáculos', color: 0x4fe0a0,
-    desc: 'Todos contra todos hasta la meta. Cuatro pistas con lo suyo: rotores y géiseres, curvas con atajos, bolas que ruedan contra vos y paredes que se rompen a puro dash. Sin poderes: golpes, empujón, dash y los ítems de las cajas.',
-    highlights: ['4 pistas y copa por puntos', 'Sin poderes: pura maña', 'Te caés y volvés a la última puerta'],
+    desc: 'Todos contra todos hasta la meta. Cuatro pistas con lo suyo: rotores y géiseres, curvas con atajos, bolas que ruedan contra vos y paredes que se rompen a puro dash. Sin poderes ni salto: el clic agarra al rival que tenés adelante, el empujón sigue y el dash tarda bastante en volver.',
+    highlights: ['4 pistas y copa por puntos', 'Agarrá al rival en vez de pegarle', 'Te caés y volvés a la última puerta'],
     players: '1 a 6',
     modes: ['race'], rulesets: ['race'], mapKinds: ['race'],
     sides: 'ffa', minPlayers: 1, go: ['¡A CORRER!', '¡A correr!'],

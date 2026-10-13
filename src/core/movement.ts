@@ -40,6 +40,8 @@ export interface MoveParams {
   jumpMul: number;
   noGravity: boolean;
   dash: boolean; // las reglas habilitan el dash (Shift)
+  jump: boolean; // las reglas habilitan el salto (Espacio), con su segundo salto
+  dashCd: number; // segundos que tarda en volver el dash
 }
 
 export interface WallHit {
@@ -63,6 +65,7 @@ export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: fal
 
 export const defaultMoveParams = (): MoveParams => ({
   speed: 6, lock: false, airControl: 1, restitution: 0.3, maxAirJumps: 1, jumpMul: 1, noGravity: false, dash: false,
+  jump: true, dashCd: DASH_CD,
 });
 
 const MAX_SUBSTEP = 0.3;
@@ -118,7 +121,7 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
     s.dashX = dx / l;
     s.dashZ = dz / l;
     s.dashT = DASH_TIME;
-    s.dashCd = DASH_CD;
+    s.dashCd = p.dashCd;
     s.hitSlide = 0;
     if (!s.grounded) s.airDashes--;
     out.dashed = true;
@@ -160,7 +163,7 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
   }
 
   // Salto y salto aéreo (recuperación estilo Smash: saltar cancela el tumble).
-  if (free && pressed(inp.b, s.prevB, BTN.JUMP)) {
+  if (p.jump && free && pressed(inp.b, s.prevB, BTN.JUMP)) {
     if (s.grounded || s.coyote > 0) {
       s.vel.y = JUMP_V * p.jumpMul;
       s.grounded = false;
