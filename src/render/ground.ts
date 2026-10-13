@@ -11,7 +11,7 @@ function hash(ix: number, iz: number, seed: number) {
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 
-function valueNoise(x: number, z: number, seed: number) {
+export function valueNoise(x: number, z: number, seed: number) {
   const ix = Math.floor(x), iz = Math.floor(z);
   const fx = smooth(x - ix), fz = smooth(z - iz);
   const a = hash(ix, iz, seed), b = hash(ix + 1, iz, seed), c = hash(ix, iz + 1, seed), d = hash(ix + 1, iz + 1, seed);
@@ -49,6 +49,16 @@ export class GroundStyle {
     }
     const wobble = (valueNoise(x / 1.7, z / 1.7, this.seed + 3) - 0.5) * 0.8;
     return smooth(Math.min(1, Math.max(0, (CELL * 1.25 - best - wobble) / (CELL * 0.6))));
+  }
+
+  /** 0..1: cuál de los dos tonos del suelo va en ese punto (manchas anchas, sin dibujar la grilla). */
+  tone(x: number, z: number) {
+    return smooth(valueNoise(x / 4.5, z / 4.5, this.seed + 31) * 0.75 + valueNoise(x / 1.4, z / 1.4, this.seed + 37) * 0.25);
+  }
+
+  /** -1..1: rugosidad de la roca en un punto del espacio (para los acantilados). */
+  rock(x: number, y: number, z: number) {
+    return valueNoise(x * 0.95 + y * 0.6, z * 0.95 - y * 0.8, this.seed + 53) * 2 - 1;
   }
 
   /** Variación fija por celda (-1..1), para que no todas las losas tengan el mismo tono. */

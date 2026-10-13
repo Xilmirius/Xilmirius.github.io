@@ -1,12 +1,15 @@
-// Malla del terreno generada desde la grilla: una sola malla estática + una malla por baldosa frágil.
+// Malla del terreno generada desde la grilla. El piso firme, las plataformas y los muros salen de las formas por
+// vecindario (terrainShape.ts): suelo continuo, costa redondeada y acantilados de roca. Las rampas y las losas
+// frágiles siguen siendo losas cuadradas con junta, una malla por losa frágil: así se leen como piezas aparte.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CELL, ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, Terrain, TILE_CRUMBLING, TILE_GONE } from '../core/terrain';
 import { GroundStyle } from './ground';
+import { DEFAULT_LOOK, TerrainShaper, type TerrainLook } from './terrainShape';
 import type { ThemeDef } from './themes';
-import { terrainAtlas, tileCracks, toonGradient } from './textures';
+import { groundTexture, terrainAtlas, tileCracks, toonGradient } from './textures';
 
 /** Relieve de cada losa: el borde se mete BEVEL_IN y baja BEVEL_DROP, así las juntas tienen sombra propia. */
 const BEVEL_IN = 0.09;
@@ -58,23 +61,34 @@ export class TerrainView {
   private tiles: TileView[] = [];
   private crackMats: THREE.MeshBasicMaterial[] = [];
   private crumbleMat: THREE.MeshBasicMaterial;
-  private neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  private neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, side: THREE.DoubleSide });
   private time = 0;
   private version = -1;
 
-  constructor(private t: Terrain, private theme: ThemeDef, private style = new GroundStyle(t)) {
+  constructor(private t: Terrain, private theme: ThemeDef, private style = new GroundStyle(t), look: TerrainLook = DEFAULT_LOOK) {
     const def = t.def;
     const mat = new THREE.MeshToonMaterial({ map: terrainAtlas(def.id.length), vertexColors: true, gradientMap: toonGradient(), color: theme.groundTint });
-    const staticB = new GeoBuilder();
-    for (let i = 0; i < t.cells.length; i++) {
-      const c = t.cells[i];
-      if (c.type === CellType.Void || c.fragile >= 0) continue;
-      this.addCell(staticB, i, true);
-    }
-    const ground = new THREE.Mesh(staticB.build(), mat);
+    const shape = new TerrainShaper(t, style, look).build();
+    const ground = new THREE.Mesh(shape.top, new THREE.MeshToonMaterial({ map: groundTexture(def.id.length), vertexColors: true, gradientMap: toonGradient(), color: theme.groundTint }));
     ground.receiveShadow = true;
     ground.castShadow = true;
     this.group.add(ground);
+    const rock = new THREE.Mesh(shape.rock, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient(), color: theme.groundTint }));
+    rock.receiveShadow = true;
+    rock.castShadow = true;
+    this.group.add(rock);
+    // Rampas: cuñas de losa apoyadas sobre el piso.
+    const rampB = new GeoBuilder();
+    for (let i = 0; i < t.cells.length; i++) {
+      const c = t.cells[i];
+      if (c.type === CellType.Ramp && c.fragile < 0) this.addCell(rampB, i, true);
+    }
+    if (rampB.idx.length) {
+      const ramps = new THREE.Mesh(rampB.build(), mat);
+      ramps.receiveShadow = true;
+      ramps.castShadow = true;
+      this.group.add(ramps);
+    }
 
     for (let s = 0; s < 4; s++) {
       this.crackMats.push(new THREE.MeshBasicMaterial({ map: tileCracks(s), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
@@ -100,8 +114,11 @@ export class TerrainView {
     }
     this.group.add(this.buildUnderside());
     this.crumbleMat = new THREE.MeshBasicMaterial({ map: tileCracks(3), color: new THREE.Color(0xff3020).multiplyScalar(3), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, toneMapped: false });
-    const neon = theme.neon === 'none' ? null : this.buildNeonEdges();
-    if (neon) this.group.add(neon);
+    if (theme.neon !== 'none') {
+      if (shape.neon) this.group.add(new THREE.Mesh(shape.neon, this.neonMat));
+      const ramps = this.buildRampNeon();
+      if (ramps) this.group.add(ramps);
+    }
   }
 
   /** Piso flojo: en las pistas de Carrera el piso frágil ya se ve agrietado, porque se cae con solo pisarlo. */
@@ -185,7 +202,8 @@ export class TerrainView {
     }
     for (const s of sides) {
       const nx = ix + s.dx, nz = iz + s.dz;
-      let n1 = ISLAND_BOTTOM, n2 = ISLAND_BOTTOM;
+      // Una rampa apoya sobre el piso (que ya trae su acantilado); una losa frágil es una columna entera que se cae.
+      let n1 = isStatic ? -BEVEL_DROP : ISLAND_BOTTOM, n2 = n1;
       if (isStatic && nx >= 0 && nz >= 0 && nx < t.w && nz < t.h) {
         const ni = nz * t.w + nx;
         const nc = t.cells[ni];
@@ -246,13 +264,13 @@ export class TerrainView {
     return m;
   }
 
-  /** Tiras de neón sobre los bordes que dan al vacío: marcan dónde se sale del mapa. */
-  private buildNeonEdges(): THREE.Object3D | null {
+  /** Tiras de neón sobre el borde de las rampas que dan al vacío (las del resto del mapa salen con las formas). */
+  private buildRampNeon(): THREE.Object3D | null {
     const t = this.t;
     const geos: THREE.BufferGeometry[] = [];
     for (let i = 0; i < t.cells.length; i++) {
       const c = t.cells[i];
-      if (c.type === CellType.Void || c.fragile >= 0) continue;
+      if (c.type !== CellType.Ramp || c.fragile >= 0) continue;
       const ix = i % t.w, iz = Math.floor(i / t.w);
       const b = t.cellBounds(i);
       const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;

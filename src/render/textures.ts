@@ -36,6 +36,33 @@ export function toonGradient(): THREE.Texture {
   return t;
 }
 
+/** Suelo natural (sin juntas de losa): un moteado que se repite. Va en el piso firme; las losas quedan para lo que se rompe y las rampas. */
+export function groundTexture(seed = 1): THREE.Texture {
+  const k = 'ground' + seed;
+  if (cache.has(k)) return cache.get(k)!;
+  const S = 256;
+  const { c, g } = canvas(S, S);
+  const r = new Rng(seed * 13 + 5);
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, S, S);
+  // Cada mancha se dibuja también corrida un tamaño de textura: así no se nota la costura al repetirla.
+  const blot = (x: number, y: number, rad: number, style: string) => {
+    g.fillStyle = style;
+    for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
+      g.beginPath();
+      g.ellipse(x + ox, y + oy, rad, rad * r.range(0.55, 1), r.range(0, 3), 0, Math.PI * 2);
+      g.fill();
+    }
+  };
+  for (let i = 0; i < 46; i++) { const v = 226 + r.int(-12, 10); blot(r.range(0, S), r.range(0, S), r.range(14, 38), `rgba(${v},${v},${v},0.32)`); }
+  for (let i = 0; i < 900; i++) { const v = 214 + r.int(-34, 30); blot(r.range(0, S), r.range(0, S), r.range(0.8, 2.6), `rgb(${v},${v},${v})`); }
+  for (let i = 0; i < 60; i++) blot(r.range(0, S), r.range(0, S), r.range(1.5, 3.2), 'rgba(90,70,50,0.35)');
+  const t = tex(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  cache.set(k, t);
+  return t;
+}
+
 /** Atlas del terreno: mitad izquierda = baldosa del piso, mitad derecha = estratos de roca. */
 export function terrainAtlas(seed = 1): THREE.Texture {
   const file = assetTexture('terrain.atlas');
