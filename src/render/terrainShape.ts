@@ -47,7 +47,12 @@ export interface TerrainLook {
   /** Costados de muros y plataformas, de arriba hacia abajo. */
   wallSide: number;
   wallFoot: number;
+  /** Franja pintada sobre el borde que da al vacío (los pianos de la Carrera, las rayas de peligro de la Horda). */
+  edge?: EdgePaint;
 }
+
+/** stripe: largo de cada raya (m); width: ancho de la franja hacia adentro (m). */
+export interface EdgePaint { colors: number[]; stripe: number; width: number }
 
 export const DEFAULT_LOOK: TerrainLook = { rockTop: 0xc9b39a, rockBottom: 0x5a4a3e, soil: 0x7a5c44, wallTop: 0x8b7b6c, wallSide: 0xa8957f, wallFoot: 0x6b5a4c };
 
@@ -73,6 +78,8 @@ export interface TerrainShape {
   rock: THREE.BufferGeometry;
   /** Tiras sobre los bordes que dan al vacío. */
   neon: THREE.BufferGeometry | null;
+  /** Pintura sobre el piso: la franja del borde y el cordón de las plataformas. */
+  paint: THREE.BufferGeometry | null;
 }
 
 export class TerrainShaper {
@@ -82,6 +89,8 @@ export class TerrainShaper {
   private rockPos: number[] = [];
   private rockCol: number[] = [];
   private neonPos: number[] = [];
+  private paintPos: number[] = [];
+  private paintCol: number[] = [];
   private ground: THREE.Color;
   private ground2: THREE.Color;
 
@@ -167,7 +176,17 @@ export class TerrainShaper {
       neon.setAttribute('position', new THREE.Float32BufferAttribute(this.neonPos, 3));
       neon.computeBoundingSphere();
     }
-    return { top, rock, neon };
+    let paint: THREE.BufferGeometry | null = null;
+    if (this.paintPos.length) {
+      paint = new THREE.BufferGeometry();
+      paint.setAttribute('position', new THREE.Float32BufferAttribute(this.paintPos, 3));
+      paint.setAttribute('color', new THREE.Float32BufferAttribute(this.paintCol, 3));
+      const pn = new Float32Array(this.paintPos.length);
+      for (let i = 1; i < pn.length; i += 3) pn[i] = 1;
+      paint.setAttribute('normal', new THREE.BufferAttribute(pn, 3));
+      paint.computeBoundingSphere();
+    }
+    return { top, rock, neon, paint };
   }
 
   // ───────────── una capa ─────────────
@@ -216,7 +235,7 @@ export class TerrainShaper {
           rim.push({ x: a[0] + d[0] * (from + u), z: a[1] + d[1] * (from + u), nx: n[0], nz: n[1], amp: outCls === Cls.Fragile ? 0 : amp });
         }
         this.side(h, rim, outCls);
-        if (mine && outCls === Cls.Void) this.neon(h, rim);
+        if (mine) this.trim(h, rim, outCls === Cls.Void);
       }
       for (let k = 0; k < 4; k++) {
         if (!round[k]) continue;
@@ -224,7 +243,7 @@ export class TerrainShaper {
         const a = SIDE[(k + 3) % 4], b = SIDE[k];
         const toVoid = this.cls(ix + a[0], iz + a[1]) === Cls.Void && this.cls(ix + b[0], iz + b[1]) === Cls.Void;
         this.side(h, rim, toVoid ? Cls.Void : Cls.Solid);
-        if (mine && toVoid) this.neon(h, rim);
+        if (mine) this.trim(h, rim, toVoid);
       }
     }
 
@@ -244,7 +263,7 @@ export class TerrainShaper {
       const outCls = this.cls(ox, oz);
       this.side(h, rim, outCls);
       // Brilla si las dos celdas que arman el rincón tienen su cara de arriba en esta capa.
-      if (outCls === Cls.Void && this.topOf(ox - q[0], oz) === h && this.topOf(ox, oz - q[1]) === h) this.neon(h, rim);
+      if (this.topOf(ox - q[0], oz) === h && this.topOf(ox, oz - q[1]) === h) this.trim(h, rim, outCls === Cls.Void);
     }
   }
 
@@ -373,6 +392,35 @@ export class TerrainShaper {
           this.rockPos.push(p[0], p[1], p[2]);
           this.rockCol.push(col.r, col.g, col.b);
         }
+      }
+    }
+  }
+
+  /** Remate de un tramo del borde: el neón y la franja pintada si da al vacío, y el cordón si es el borde de una plataforma. */
+  private trim(h: number, rim: Rim[], toVoid: boolean) {
+    if (toVoid) {
+      this.neon(h, rim);
+      const e = this.look.edge;
+      if (e && h < WALL_TOP - 1e-6) {
+        const n = e.colors.length;
+        this.paint(h, rim, e.width, (x, z) => new THREE.Color(e.colors[((Math.floor((x + z) / e.stripe) % n) + n) % n]));
+        return;
+      }
+    }
+    if (h > 0 && h < WALL_TOP - 1e-6) this.paint(h, rim, 0.2, (x, z) => this.topColor(h, x, z, 1).offsetHSL(0, -0.05, 0.09));
+  }
+
+  /** Franja pintada sobre el piso, del borde hacia adentro. */
+  private paint(h: number, rim: Rim[], width: number, colorOf: (x: number, z: number) => THREE.Color) {
+    const y = h + 0.012;
+    for (let i = 0; i + 1 < rim.length; i++) {
+      const a = rim[i], b = rim[i + 1];
+      const q = [[a.x, a.z], [b.x, b.z], [b.x - b.nx * width, b.z - b.nz * width], [a.x - a.nx * width, a.z - a.nz * width]];
+      const col = colorOf((a.x + b.x) / 2, (a.z + b.z) / 2);
+      const up = (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]) - (q[1][0] - q[0][0]) * (q[2][1] - q[0][1]) > 0;
+      for (const k of up ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]) {
+        this.paintPos.push(q[k][0], y, q[k][1]);
+        this.paintCol.push(col.r, col.g, col.b);
       }
     }
   }

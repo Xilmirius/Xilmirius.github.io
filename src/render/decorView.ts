@@ -1,15 +1,20 @@
-// Decoración sembrada sobre el terreno: pasto, piedritas y flores en el piso; arbustos, rocas y cristales
-// sobre los muros; rocas asomando en los acantilados. Solo visual: no colisiona, no viaja por la red y se
-// siembra con una semilla fija por mapa. En el piso va todo chico y apagado para no confundirse con los
-// trozos ni con las coberturas.
+// Decoración del terreno. Dos partes:
+//   - sembrado: pasto, piedritas y flores en el piso, y rocas asomando en los acantilados;
+//   - contextual: según la forma del mapa (topology.ts), el juego pone sus piezas (ambience.ts): almenas en una
+//     hilera de muros, tablones en un puente, un círculo pintado en un claro, estandartes colgando del borde.
+// Solo visual: no colisiona, no viaja por la red y sale de una semilla fija por mapa. En el piso va todo chico
+// y apagado, o pintado, para no confundirse con los trozos ni con las coberturas.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CELL, WALL_TOP } from '../core/constants';
+import { CELL } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, type Cell, type Terrain } from '../core/terrain';
+import { ambienceOf, type Ambience } from './ambience';
 import { faceted, painted, shade } from './geo';
 import type { GroundStyle } from './ground';
+import { Pieces } from './pieces';
 import type { ThemeDef } from './themes';
+import { analyze, reservedCells, takeClearings } from './topology';
 import { toonGradient } from './textures';
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -67,35 +72,29 @@ function flowerGeo(): THREE.BufferGeometry {
   return mergeGeometries([painted(stem, 0x4f8a3a), painted(head, 0xffffff)]);
 }
 
-function bushGeo(): THREE.BufferGeometry {
-  const parts = [[0, 0.26, 0, 0.4], [0.3, 0.2, 0.12, 0.3], [-0.24, 0.18, -0.16, 0.27], [0.02, 0.2, -0.3, 0.24]].map(([x, y, z, rad]) => {
-    const g = new THREE.IcosahedronGeometry(rad, 0);
-    g.translate(x, y, z);
-    return g;
-  });
-  return mergeGeometries(parts);
-}
-
-function crystalGeo(): THREE.BufferGeometry {
-  const g = new THREE.OctahedronGeometry(0.14, 0);
-  g.scale(1, 2.6, 1);
-  g.translate(0, 0.3, 0);
-  return g;
-}
-
 export class DecorView {
   group = new THREE.Group();
-  private glow = new THREE.MeshBasicMaterial({ toneMapped: false });
+  private glow: THREE.MeshBasicMaterial;
 
-  constructor(private t: Terrain, theme: ThemeDef, style: GroundStyle) {
+  constructor(private t: Terrain, theme: ThemeDef, style: GroundStyle, amb: Ambience = ambienceOf(t.def.kind)) {
     const r = new Rng(t.w * 131 + t.h * 17 + t.def.id.length * 7);
-    const reserved = this.reservedCells();
-    const grass = new Scatter(), pebbles = new Scatter(), flowers = new Scatter();
-    const bushes = new Scatter(), boulders = new Scatter(), crystals = new Scatter();
+    const reserved = reservedCells(t);
+    const grass = new Scatter(), pebbles = new Scatter(), flowers = new Scatter(), boulders = new Scatter();
     const stone = new THREE.Color(t.def.ground).offsetHSL(0, -0.12, -0.2);
-    const cliff = new THREE.Color(0x8a7462);
+    const cliff = new THREE.Color(amb.look.rockTop).offsetHSL(0, 0, -0.14);
     const leaf = theme.grass.map((c) => new THREE.Color(c).offsetHSL(0.02, -0.16, -0.15));
-    const gems = typeof theme.neon === 'number' ? [theme.neon] : [0x4fd1ff, 0xff4f8b, 0xb070ff];
+    const gems = typeof theme.neon === 'number' ? [theme.neon, 0xffffff] : [0x4fd1ff, 0xff4f8b, 0xb070ff];
+
+    // Piezas del juego según la forma del mapa. Usa su propia semilla: cambiar una regla no mueve el pasto.
+    const pieces = new Pieces();
+    const ctx = { t, topo: analyze(t, reserved), p: pieces, r: new Rng(t.w * 977 + t.h * 53 + t.def.id.length * 11), theme, look: amb.look, gems, leaf };
+    for (const w of ctx.topo.walls) amb.wall(ctx, w);
+    for (const b of ctx.topo.bridges) amb.bridge(ctx, b);
+    for (const s of ctx.topo.coasts) amb.coast(ctx, s);
+    for (const k of takeClearings(ctx.topo.clearings, amb.maxClearings)) amb.clearing(ctx, k);
+    const built = pieces.build();
+    this.glow = built.glow;
+    this.group.add(built.group);
 
     for (let i = 0; i < t.cells.length; i++) {
       const c = t.cells[i];
@@ -111,29 +110,8 @@ export class DecorView {
         boulders.add(ctr.x + dx * (CELL / 2 + 0.1) + dz * along, r.range(-2.5, -0.7), ctr.z + dz * (CELL / 2 + 0.1) + dx * along, r.range(0, TAU), [s, s * r.range(0.6, 1), s], shade(cliff, r.range(-0.07, 0.05)));
       }
 
-      if (c.type === CellType.Wall) {
-        // Encima de los muros (nadie pelea ahí) va lo más grande: es lo que rompe la línea plana del mapa.
-        const top = WALL_TOP - 0.05;
-        const roll = r.next();
-        if (roll < 0.28) {
-          for (let k = r.int(1, 2); k > 0; k--) {
-            const [x, z] = spot(0.45);
-            bushes.add(x, top, z, r.range(0, TAU), r.range(0.8, 1.35), shade(r.pick(leaf), r.range(-0.04, 0.05)));
-          }
-        } else if (roll < 0.52) {
-          for (let k = r.int(1, 3); k > 0; k--) {
-            const [x, z] = spot(0.55);
-            const s = r.range(0.22, 0.5);
-            boulders.add(x, top + s * 0.45, z, r.range(0, TAU), [s, s * r.range(0.7, 1.1), s], shade(cliff, r.range(-0.05, 0.08)), r.range(-0.3, 0.3));
-          }
-        } else if (theme.crystals && roll < 0.72) {
-          for (let k = r.int(2, 3); k > 0; k--) {
-            const [x, z] = spot(0.4);
-            crystals.add(x, top, z, r.range(0, TAU), r.range(0.9, 2), new THREE.Color(r.pick(gems)).multiplyScalar(1.25), r.range(-0.35, 0.35));
-          }
-        }
-        continue;
-      }
+      // Lo de arriba de los muros lo pone la ambientación del juego.
+      if (c.type === CellType.Wall) continue;
 
       if (reserved.has(i)) continue;
       const ramp = c.type === CellType.Ramp;
@@ -167,8 +145,7 @@ export class DecorView {
     const toonVC = new THREE.MeshToonMaterial({ gradientMap: toonGradient(), vertexColors: true });
     const rock = faceted(new THREE.DodecahedronGeometry(1, 0));
     for (const m of [
-      grass.build(tuftGeo(), toon), pebbles.build(rock, toon), flowers.build(flowerGeo(), toonVC),
-      bushes.build(bushGeo(), toon, true), boulders.build(rock, toon, true), crystals.build(crystalGeo(), this.glow),
+      grass.build(tuftGeo(), toon), pebbles.build(rock, toon), flowers.build(flowerGeo(), toonVC), boulders.build(rock, toon, true),
     ]) if (m) this.group.add(m);
   }
 
@@ -182,25 +159,6 @@ export class DecorView {
 
   private higher(c: Cell, n: Cell | null) {
     return !!n && (n.type === CellType.Wall || (n.type === CellType.Floor && n.level > c.level));
-  }
-
-  /** Celdas que tienen que quedar despejadas: donde se aparece, se farmea, se disputa o hay estructuras. */
-  private reservedCells(): Set<number> {
-    const t = this.t;
-    const pts: [number, number, number][] = [];
-    for (const s of [...t.spawns.team[0], ...t.spawns.team[1], ...t.spawns.ffa]) pts.push([s.x, s.z, 0.5]);
-    for (const d of t.destructs) pts.push([d.x, d.z, 0.5]);
-    for (const z of t.zonePoints) pts.push([z.x, z.z, 1.3]);
-    for (const p of t.towers) pts.push([p.x, p.z, 1.6]);
-    for (const p of t.cores) pts.push([p.x, p.z, 3]);
-    for (const p of t.camps) pts.push([p.x, p.z, 2.2]);
-    for (const p of t.lairs) pts.push([p.x, p.z, 3]);
-    const out = new Set<number>();
-    for (let i = 0; i < t.cells.length; i++) {
-      const c = t.cellCenter(i % t.w, Math.floor(i / t.w));
-      if (pts.some(([x, z, rad]) => Math.hypot(c.x - x, c.z - z) <= rad)) out.add(i);
-    }
-    return out;
   }
 
   update(time: number) {

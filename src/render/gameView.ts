@@ -16,6 +16,7 @@ import { stepPickup } from '../core/sim';
 import { F_DASH, F_DEAD, F_HASTE, F_RECALL, F_TUMBLE, type CharFrame, type WorldFrame } from '../core/snapshot';
 import { Terrain } from '../core/terrain';
 import { FAMILIES, FAMILY_COLORS, FAMILY_CRACK, type Family } from '../core/types';
+import { ambienceOf } from './ambience';
 import { Backdrop } from './backdrop';
 import { BeanView } from './beanView';
 import { DecorView } from './decorView';
@@ -170,8 +171,10 @@ export class GameView {
     this.scene.add(this.sun, this.sun.target);
 
     const style = new GroundStyle(this.terrain);
-    this.terrainView = new TerrainView(this.terrain, theme, style);
-    this.decor = new DecorView(this.terrain, theme, style);
+    // Cada juego trae su ambientación: los colores de la roca y las piezas que van según la forma del mapa.
+    const amb = ambienceOf(this.terrain.def.kind);
+    this.terrainView = new TerrainView(this.terrain, theme, style, amb.look);
+    this.decor = new DecorView(this.terrain, theme, style, amb);
     this.destructs = new DestructiblesView(this.terrain.destructs);
     this.gadgets = new GadgetsView(this.terrain);
     this.projs = new ProjectilesView(this.sparks, this.teamColor);

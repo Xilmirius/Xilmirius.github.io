@@ -114,6 +114,11 @@ export class TerrainView {
     }
     this.group.add(this.buildUnderside());
     this.crumbleMat = new THREE.MeshBasicMaterial({ map: tileCracks(3), color: new THREE.Color(0xff3020).multiplyScalar(3), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, toneMapped: false });
+    if (shape.paint) {
+      const paint = new THREE.Mesh(shape.paint, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGradient(), color: theme.groundTint, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+      paint.receiveShadow = true;
+      this.group.add(paint);
+    }
     if (theme.neon !== 'none') {
       if (shape.neon) this.group.add(new THREE.Mesh(shape.neon, this.neonMat));
       const ramps = this.buildRampNeon();
