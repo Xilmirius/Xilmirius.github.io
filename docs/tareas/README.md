@@ -52,7 +52,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 |---|---|---|---|
 | [x] | [01](01-copa-cliente-sin-controles.md) | – | En una copa en multijugador, el que no es host no se puede mover desde la segunda pista |
 | [x] | [02](02-carrera-salida-en-linea.md) | – | Los corredores salen en dos filas y los de adelante llevan ventaja |
-| [x] | [03](03-carrera-sin-salto-y-agarrar.md) | 02 | Carrera sin salto ni golpes: agarrar, empujar y un dash que tarda en volver |
+| [x] | [03](03-carrera-sin-salto-y-agarrar.md) | 02 | Carrera con salto flotante y sin golpes: agarrar, empujar y un dash que tarda en volver |
 | [ ] | [04](04-horda-barra-de-vida.md) | – | La Horda pasa del heat a una barra de vida |
 | [ ] | [05](05-horda-armas-chatarra-taller.md) | 04 | Se llevan todas las armas que se juntan y se mejoran con chatarra |
 | [ ] | [06](06-apuntado-con-altura.md) | 05 | Las balas van al punto del mundo que marca el cursor, también en altura |
@@ -66,7 +66,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [ ] | [16](16-dibujo-del-resto.md) | 15 | Decoración, artefactos y minimapa siguen a la malla |
 | [ ] | [17](17-malla-encender-y-pulir.md) | 16 | La malla orgánica queda prendida en los cuatro juegos |
 | [ ] | [20](20-plano-con-alturas.md) | 17 | Mapas con más de dos niveles y rampas largas |
-| [ ] | [21](21-carrera-obstaculos-nuevos.md) | 03, 20 | Obstáculos nuevos de Carrera que se pasan sin saltar |
+| [ ] | [21](21-carrera-obstaculos-nuevos.md) | 03, 20 | Obstáculos nuevos de Carrera que no dependen de saltar |
 | [ ] | [22](22-carrera-pistas-largas.md) | 17, 21 | Pistas más largas, con altura y más obstáculos |
 | [ ] | [23](23-horda-mapa-grande.md) | 07, 17, 20 | Un mapa grande para la Horda, con cosas en el camino, minimapa y flecha al objetivo |
 | [ ] | [24](24-generador-de-pistas.md) | 22 | *Borrador.* Pistas de Carrera armadas con tramos al azar |
@@ -82,7 +82,7 @@ las revisa con el usuario antes de empezar.
 - **Armas:** se llevan todas las que se juntan. Los zombis sueltan chatarra y con ella se sube de nivel cada arma
   en un taller.
 - **Apuntado:** las armas apuntan adonde está el cursor, también en altura, para que disparar desde arriba rinda.
-- **Carrera:** se van el golpe básico del héroe y el salto ("lo hace muy fácil"). El clic izquierdo agarra (frena
+- **Carrera:** se va el golpe básico del héroe y el salto pasa a ser flotante y torpe, como en Fall Guys: un solo salto, más bajo, que cae despacio y sin doble salto (el usuario aclaró después que no quería quitarlo). El clic izquierdo agarra (frena
   al rival mientras se lo sostiene, como en Fall Guys), el derecho sigue empujando y el dash tarda mucho más en
   volver. Las cajas de ítems se quedan. La salida es en una sola línea.
 - **Mapas:** malla irregular de verdad, estilo Townscaper, distinta en cada partida. Los mapas se siguen dibujando
@@ -97,6 +97,7 @@ El usuario no opinó sobre estos números; son el punto de partida de cada tarea
 |---|---|---|
 | Recarga del dash en la Carrera | 5 s (hoy 1,3 s) | 03 |
 | Agarre | hasta 1,5 s; el agarrado va al 25 % y el que agarra al 50 %; 3 s para volver a agarrar | 03 |
+| Salto de la Carrera | fuerza ×0,75 y gravedad ×0,75 (sube ~1,4 m en ~0,7 s), sin doble salto | 03 |
 | Vida de un héroe en la Horda | 100; se recupera sola a 5 por segundo tras 3 s sin recibir daño | 04 |
 | Niveles de un arma | 5, a 15 / 30 / 50 / 80 de chatarra | 05 |
 | Dónde se usa el taller | en una mini base o en el campamento de salida | 05 |

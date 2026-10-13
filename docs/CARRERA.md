@@ -1,6 +1,6 @@
 # Carrera de obstáculos
 
-Todos contra todos hasta la meta, de 1 a 6. Sin poderes de héroe ni salto: agarrar, empujón, un dash que tarda en volver y los ítems de un solo uso que dan las cajas. Caerse no elimina: reaparecés en la última puerta que pasaste.
+Todos contra todos hasta la meta, de 1 a 6. Sin poderes de héroe: agarrar, empujón, un salto flotante, un dash que tarda en volver y los ítems de un solo uso que dan las cajas. Caerse no elimina: reaparecés en la última puerta que pasaste.
 
 Este documento dice cómo está hecho el juego y dónde tocar cada cosa. La plataforma en general está en [PLATAFORMA_Y_MODOS.md](PLATAFORMA_Y_MODOS.md).
 
@@ -11,7 +11,7 @@ Este documento dice cómo está hecho el juego y dónde tocar cada cosa. La plat
 - Arriba se ve la pista en una tira con un punto por corredor, y a la izquierda tu **puesto** en grande. El puesto se mide por el camino de la pista, no en línea recta: en una curva cerrada va adelante el que más recorrió.
 - Las **cajas ❓** reparten según cómo vas: al primero le tocan ítems para molestar (frasco, muralla, onda, ancla) y a la mitad de atrás, para alcanzar (parpadeo, garfio).
 
-Controles: **clic** agarra, **clic derecho** empuja (mantené para cargar), **Shift** es el dash y **Espacio** no hace nada. El dash tarda 5 s en volver: es lo que se administra, para cruzar una zanja, abrir una pared o soltarse de un agarre. Los resortes, los géiseres y trepar un borde en el aire siguen funcionando: no son saltos.
+Controles: **clic** agarra, **clic derecho** empuja (mantené para cargar), **Shift** es el dash y **Espacio** salta, pero a lo Fall Guys: un solo salto, bajo (~1,4 m) y flotante, sin doble salto. El dash tarda 5 s en volver: es lo que se administra, para cruzar una zanja, abrir una pared o soltarse de un agarre. Los resortes, los géiseres y trepar un borde en el aire siguen funcionando: no son saltos.
 
 Reglas propias de la Carrera (`RULESETS.race` en `src/core/rules.ts`):
 
@@ -20,7 +20,7 @@ Reglas propias de la Carrera (`RULESETS.race` en `src/core/rules.ts`):
 | `abilities: false` | Las habilidades del héroe no se usan. El héroe se elige por su peso y su velocidad. |
 | `itemBoxes` | Las cajas del mapa dan un ítem. |
 | `tileStep` | El **piso flojo** se cae 0,8 s después de pisarlo y vuelve a los 4 s. Se ve más claro y agrietado. |
-| `jump: false` | Espacio no hace nada (ni segundo salto). |
+| `jumpMul: 0.75`, `gravityMul: 0.75`, `maxAirJumps: 0` | El salto es flotante y torpe: sube menos (la Arena, ~1,9 m), cae más despacio y no hay doble salto. La bandera `jump` queda disponible para apagarlo del todo. |
 | `dashCd: 5` | El dash tarda 5 s en volver (en los demás juegos, 1,3 s). El casillero del HUD llena su reloj con este valor. |
 | `grab` | El clic agarra al rival de enfrente en vez de usar el golpe del héroe (ver abajo). |
 | `dashBreak: 80` | El **dash rompe la cobertura** contra la que choca, toda de una embestida (la roca aguanta 70): el primero que llega paga el dash y los demás pasan por el hueco. Los barriles explotan. |
@@ -47,7 +47,7 @@ Además de las que ya tenía la Arena (resortes, paragolpes, rotores, géiseres,
 | Pieza | En el mapa | Qué hace |
 |---|---|---|
 | **Acelerador** | `a` | Pisarlo da 60 % más de velocidad por 1,6 s. |
-| **Lanzabolas** | `N` `S` `E` `W` | Tira una bola cada 2,6 s que rueda hacia ese lado hasta donde se termina el piso llano. Te lleva puesto; sin salto, se esquiva cambiando de carril. El carril se ve pintado en el piso. |
+| **Lanzabolas** | `N` `S` `E` `W` | Tira una bola cada 2,6 s que rueda hacia ese lado hasta donde se termina el piso llano. Te lleva puesto; se esquiva cambiando de carril o con un salto bien puesto. El carril se ve pintado en el piso. |
 | **Piso flojo** | `,` | El piso frágil de siempre, que con las reglas de la Carrera se cae al pisarlo. |
 
 Los números están en `src/core/gadgets.ts` (`BOOST`, `ROLLER`). Las bolas, como los rotores y los géiseres, salen del mapa y del tick: no viajan por la red y host y clientes las ven en el mismo lugar.
@@ -65,14 +65,14 @@ En la sala, **Formato** elige entre una carrera suelta y una copa de 3 o de 4 pi
 
 Corren por el camino a pie hacia la próxima puerta (`decideRace` y `navigate` en `src/core/bots.ts`). Además:
 
-- a los rotores les pasan por el costado del barrido (`dodgeRotor`; el camino evita el radio entero) y esperan a que dispare el géiser que tienen adelante;
-- un hueco de una celda lo cruzan con el dash si está listo y, si no, lo rodean (`findPath` con `canHop`); las subidas son solo por rampa;
+- a los rotores les pasan por el costado del barrido (`dodgeRotor`; el camino evita el radio entero), saltan las bolas (los fáciles a veces no las ven venir) y esperan a que dispare el géiser que tienen adelante;
+- saltan los huecos de una celda (una zanja o una baldosa caída); si las reglas no tuvieran salto, los cruzarían con el dash o los rodearían (`findPath` con `canHop`);
 - embisten con el dash la cobertura que les tapa el camino (una embestida alcanza); a los barriles no los tocan;
 - agarran al rival que tienen pegado y de frente (más seguido los difíciles), y agarrados usan el dash apenas lo tienen;
-- prefieren los carriles sin bolas (no tienen cómo esquivarlas en el momento) y empujan al rival que tienen pegado;
+- prefieren los carriles sin bolas y empujan al rival que tienen pegado;
 - según la dificultad corren al 86 % (fácil), al 94 % (normal) o a fondo (difícil).
 
-Sin pantalla, con seis bots (`npm run tool:race`, 10 carreras por pista y dificultad): llegaron todos en 29 de 30 en la Pista y el Serpentín y en 30 de 30 en la Bolera y El Derrumbe. El primero llega entre los 27 y los 39 s según la pista y la dificultad, el último entre los 39 y los 49 s, y hay entre 9 y 19 agarres por carrera.
+Sin pantalla, con seis bots (`npm run tool:race`, 10 carreras por pista y dificultad): llegaron todos en 30 de 30 en la Pista, la Bolera y El Derrumbe y en 27 de 30 en el Serpentín (el que más cuesta). El primero llega entre los 24 y los 36 s según la pista y la dificultad, el último entre los 34 y los 51 s, y hay entre 9 y 19 agarres por carrera.
 
 ## 6. Lo que falta o hay que decidir jugando
 

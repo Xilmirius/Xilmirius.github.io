@@ -748,8 +748,9 @@ export class Simulation {
     mp.noGravity = !!(ch.action && ch.action.noGravity);
     mp.airControl = ch.stats.airControl;
     mp.restitution = ch.stats.restitution;
-    mp.maxAirJumps = ch.stats.maxAirJumps;
-    mp.jumpMul = ch.stats.jumpMul;
+    mp.maxAirJumps = Math.min(ch.stats.maxAirJumps, this.rules.maxAirJumps);
+    mp.jumpMul = ch.stats.jumpMul * this.rules.jumpMul;
+    mp.gravityMul = this.rules.gravityMul;
     mp.dash = this.rules.dash && playing;
     mp.jump = this.rules.jump;
     mp.dashCd = this.rules.dashCd;
@@ -891,6 +892,7 @@ export class Simulation {
     mp.jumpMul = 1;
     mp.dash = false;
     mp.jump = false;
+    mp.gravityMul = 1;
     const wasTumble = u.tumble > 0;
     u.input.b = 0;
     stepMove(u, u.input, mp, this.cw, DT, this.mo);
@@ -1520,7 +1522,7 @@ export class Simulation {
           const g = this.cw.groundAt(ch.pos.x, ch.pos.z, ch.pos.y + 0.3);
           ch.grounded = g > -Infinity && ch.pos.y - g < 0.3;
           ch.vel.x = ch.vel.z = 0;
-          ch.airJumps = ch.stats.maxAirJumps;
+          ch.airJumps = Math.min(ch.stats.maxAirJumps, this.rules.maxAirJumps);
           d.onLand();
           return;
         }

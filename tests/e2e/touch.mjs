@@ -66,7 +66,7 @@ async function race() {
   console.log('\n── Carrera ──');
   await start('race', { map: 'pista', bots: 0 });
   ok('HUD en modo táctil', await p.evaluate(() => document.querySelector('.hud').classList.contains('touch')));
-  ok('sin salto: no hay botón de saltar', !(await btn('jump')));
+  ok('hay botón de saltar (salto flotante)', !!(await btn('jump')));
   const a = await me();
   // Palanca a la derecha.
   await down(1, 110, 300); await slide(1, 190, 300); await wait(0.8);
@@ -77,6 +77,15 @@ async function race() {
   await tap(2, await btn('dash'), 60); await wait(0.1);
   const d1 = await me();
   ok('dash (segundo dedo), tarda 5 s en volver', d1.dashCd > 4, `dashCd ${d1.dashCd}`);
+  await wait(0.4);
+  // Saltar con otro dedo mientras camina: en la Carrera es un salto bajo y flotante.
+  const j = await btn('jump');
+  await tap(2, j, 80); await wait(0.18);
+  const c = await me();
+  ok('saltar (segundo dedo, sin soltar la palanca)', c.y > a.y + 0.3 && c.x > b.x, `y ${c.y}`);
+  const c2 = await me();
+  ok('el salto se suelta al levantar ese dedo', (c2.b & 1) === 0, `b ${c2.b}`);
+  await wait(0.6);
   await up(1); await wait(0.5);
   const s0 = await me(); await wait(0.3); const s1 = await me();
   ok('soltar la palanca → se frena', Math.abs(s1.x - s0.x) < 0.3 && s1.mx === 0, `x ${s0.x} → ${s1.x}`);

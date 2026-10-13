@@ -338,7 +338,7 @@ export class MatchRunner {
     };
     const p: MoveParams = {
       speed: me.spd, lock: !!me.lock, airControl: me.air, restitution: me.rest, maxAirJumps: me.maj, jumpMul: me.jm, noGravity: !!me.ng,
-      dash: !!me.dsh, jump: !!me.jmp, dashCd: me.dcdMax,
+      dash: !!me.dsh, jump: !!me.jmp, gravityMul: me.gm, dashCd: me.dcdMax,
     };
     this.predParams = p;
     if ((c.fl & F_DEAD) || me.direct) {

@@ -1,14 +1,16 @@
-# 03 · Carrera: sin salto, agarrar en vez de pegar y dash que tarda en volver
+# 03 · Carrera: salto flotante, agarrar en vez de pegar y dash que tarda en volver
+
+> **Cambio de rumbo (después de la primera entrega):** el usuario aclaró que no quería quitar el salto sino que fuera "goofy, tipo Fall Guys". Quedó un solo salto, más bajo y flotante, sin doble salto (ver las Notas de ejecución). Donde esta página dice "sin salto", leer "con salto flotante".
 
 ## Qué pidió el usuario
 
-En la Carrera saltar "lo hace muy fácil" y los golpes sobran. Queda así:
+En la Carrera el salto ágil "lo hace muy fácil" y los golpes sobran. Queda así:
 
 | Entrada | Hoy | Queda |
 |---|---|---|
 | Clic izquierdo | Golpe básico del héroe | **Agarrar** al rival que se tiene adelante |
 | Clic derecho | Empujón | Empujón (igual) |
-| Espacio | Salto y segundo salto | Nada |
+| Espacio | Salto y segundo salto | Un solo salto, bajo y flotante (como en Fall Guys) |
 | Shift | Dash, vuelve en 1,3 s | Dash, vuelve en **5 s** |
 | Cajas de ítems | Dan un ítem | Igual |
 
@@ -90,8 +92,19 @@ Hecho como lo planteaba la tarea, con estos desvíos y datos:
 - **Bots.** `decideRace` agarra y se suelta con el dash; `dodgeRotor` pasa por el costado del barrido (solo hacia donde hay piso); `findPath(canHop)` bloquea el radio del rotor y cruza huecos de una celda solo si el dash está listo; el temporizador de atasco no corre en la cuenta regresiva (disparaba un dash al salir). Las bolas ya no se saltan: queda solo la preferencia de carriles de `findPath` (`dodgeBalls` no hace nada sin salto).
 - **Herramientas.** `scripts/botstats.ts` suma el modo `race` (`npm run tool:race`). `tests/e2e/touch.mjs` se adaptó: ya no busca el botón de salto en la Carrera y el personaje del test esquiva el rotor 1.
 
-**Mediciones** (`npm run tool:race`, 10 carreras por pista y dificultad, seis bots): llegaron todos en 29/30 en la Pista, 29/30 en el Serpentín, 30/30 en la Bolera y 30/30 en El Derrumbe (el mínimo pedido era 27/30). El primero llega entre 26,7 s (Bolera, difícil) y 39,3 s (Derrumbe, fácil); el último, entre 38,7 s (Bolera, difícil) y 49,2 s (Derrumbe, fácil). Hay entre 9 y 19 agarres por carrera (el mínimo era 1). En las corridas que no terminaron hay un bot trabado (dificultad 2).
+**Mediciones de la primera entrega, sin salto** (`npm run tool:race`, 10 carreras por pista y dificultad, seis bots): llegaron todos en 29/30 en la Pista, 29/30 en el Serpentín, 30/30 en la Bolera y 30/30 en El Derrumbe (el mínimo pedido era 27/30). El primero llega entre 26,7 s (Bolera, difícil) y 39,3 s (Derrumbe, fácil); el último, entre 38,7 s (Bolera, difícil) y 49,2 s (Derrumbe, fácil). Hay entre 9 y 19 agarres por carrera (el mínimo era 1). En las corridas que no terminaron hay un bot trabado (dificultad 2).
 
-**Pantalla** (host y cliente en dos pestañas, Edge): el cliente agarra al host (velocidad del host 1,48 con base 6), el host ve el cartel, se suelta con el dash, el dash del cliente queda en ~4,7 s tras usarlo con el reloj del HUD lleno, y Espacio no mueve la predicción del cliente (`y` 0,00 → 0,00).
+**Pantalla** (host y cliente en dos pestañas, Edge): el cliente agarra al host (velocidad del host 1,48 con base 6), el host ve el cartel, se suelta con el dash, el dash del cliente queda en ~4,7 s tras usarlo con el reloj del HUD lleno, y (en esa versión) Espacio no movía la predicción del cliente; el salto flotante se midió después, abajo.
 
 **Pendiente de que el usuario lo juegue:** si 5 s de dash y 1,5 s de agarre se sienten bien (están en `RULESETS.race.dashCd` y `GRAB`), si abrir cobertura con el dash alcanza o cansa, y si hay que hacer más vistosa la línea de agarre.
+
+### Cambio de rumbo: el salto vuelve, flotante
+
+El usuario dijo que no quería quitar el salto, sino que fuera "goofy, tipo Fall Guys". Se eligió **Fall Guys clásico**: un solo salto, más bajo y con menos gravedad.
+
+- `Ruleset` gana `jumpMul`, `gravityMul` y `maxAirJumps` (tope de saltos en el aire). Carrera: `jump: true`, `jumpMul: 0.75`, `gravityMul: 0.75`, `maxAirJumps: 0`; los demás juegos: 1, 1 y 99 (sin cambios). La bandera `jump` queda, en `true` en todos, por si algún modo futuro quiere apagarlo.
+- `MoveParams.gravityMul` entra en `stepMove`; `MeFrame` suma `gm` y manda `maj`/`jm` ya combinados con las reglas (`snapshot.ts`), y la predicción los usa (`reconcile`). `PROTOCOL_VERSION` pasó de 12 a 13.
+- Resultado medido en pantalla (host y cliente en dos pestañas): el salto sube 1,39 m (el host y la predicción del cliente dan el mismo valor) y dos Espacios seguidos no dan doble salto. Hoy el salto de la Arena sube unos 1,9 m.
+- Los bots vuelven a saltar huecos y a usar el salto donde antes (las ramas `sim.rules.jump` ya estaban); los rotores se siguen esquivando de costado (`dodgeRotor`) y el camino evita su radio.
+- Se mantienen el dash de 5 s, el agarre, los cambios a las pistas y el resto de lo ya entregado.
+- Bots sin pantalla, con el salto flotante (`npm run tool:race`, 30 por pista): llegaron todos en 30/30 en la Pista y la Bolera, 27/30 en el Serpentín y 30/30 en El Derrumbe. En una muestra más grande (90 carreras por pista) llegan todos en 85, 81, 88 y 90 respectivamente, y termina el 98 % o más de los corredores: los que no llegan son tardíos (la carrera se corta 25 s después del primero), no trabados. El Serpentín queda justo en el mínimo de 27/30.

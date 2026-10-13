@@ -436,7 +436,7 @@ export class BotBrain {
   }
 
   /**
-   * Rotores sin salto: en vez de saltar la barra, correrse hacia el costado del barrido por el que ya está (y
+   * Rotores: en vez de saltar la barra (el salto flotante de la Carrera apenas la libra), correrse hacia el costado del barrido por el que ya está (y
    * solo si ahí hay piso: si no, probar el otro lado, y si ninguno sirve, pararse a bancarse el golpe antes
    * que tirarse al vacío). Corre después de `navigate` porque pisa `wishX/wishZ`.
    */
@@ -466,8 +466,8 @@ export class BotBrain {
 
   /**
    * Bolas: saltar cuando una está por pasarme por encima (mirando un instante hacia adelante). Se decide una vez
-   * por bola: los bots más fáciles a veces no la ven venir. Sin salto (Carrera) no hay forma de esquivarlas en el
-   * momento: `findPath` ya evita los carriles, y lo que queda es aguantar el golpe.
+   * por bola: los bots más fáciles a veces no la ven venir. Sin salto (reglas con `jump` apagado) no hay forma de
+   * esquivarlas en el momento: `findPath` ya evita los carriles, y lo que queda es aguantar el golpe.
    */
   private dodgeBalls(sim: Simulation, ch: Character) {
     if (!sim.rules.jump) return;

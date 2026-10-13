@@ -45,8 +45,12 @@ export interface Ruleset {
   itemBoxes: boolean;
   /** Armas: el clic dispara en vez del golpe básico del héroe (ver core/weapons.ts). */
   weapons: boolean;
-  /** Salto (Espacio), con su segundo salto en el aire. Apagado: Espacio no hace nada. */
+  /** Salto (Espacio). Apagado: Espacio no hace nada. */
   jump: boolean;
+  /** Cómo se siente el salto: multiplicador de la fuerza (se suma al del héroe), de la gravedad (menos de 1 = flota) y tope de saltos en el aire. */
+  jumpMul: number;
+  gravityMul: number;
+  maxAirJumps: number;
   /** Segundos que tarda en volver el dash (Shift) después de usarlo. */
   dashCd: number;
   /** El clic izquierdo agarra al rival que se tiene adelante en vez de usar el golpe básico del héroe. */
@@ -59,35 +63,35 @@ export const RULESETS: Record<RulesetId, Ruleset> = {
     desc: 'Rápido y directo: todas las habilidades desde el principio, la ulti se carga pegando y Shift es un dash. Sin niveles, forja ni ítems que administrar.',
     progression: false, crafting: false, repair: false, pickups: 'ult', dash: true, ultCharge: true,
     forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
-    jump: true, dashCd: DASH_CD, grab: false,
+    jump: true, jumpMul: 1, gravityMul: 1, maxAirJumps: 99, dashCd: DASH_CD, grab: false,
   },
   full: {
     id: 'full', name: 'Completo', icon: '🧬',
     desc: 'Todos los sistemas: niveles que desbloquean habilidades, materiales, forja de ítems y mutaciones, reparación. Es la base del futuro modo MOBA.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 0, tileStep: false, dashBreak: 0, xpMul: 1, abilities: true, itemBoxes: false, weapons: false,
-    jump: true, dashCd: DASH_CD, grab: false,
+    jump: true, jumpMul: 1, gravityMul: 1, maxAirJumps: 99, dashCd: DASH_CD, grab: false,
   },
   moba: {
     id: 'moba', name: 'Asedio', icon: '🏰',
     desc: 'Las del modo Asedio (MOBA): niveles, materiales que sueltan los esbirros, forja solo en tu base, B para volver y el piso roto se rearma solo.',
     progression: true, crafting: true, repair: true, pickups: 'materials', dash: true, ultCharge: false,
     forgeAtBase: true, recall: true, tileRegen: 25, tileStep: false, dashBreak: 0, xpMul: 0.55, abilities: true, itemBoxes: false, weapons: false,
-    jump: true, dashCd: DASH_CD, grab: false,
+    jump: true, jumpMul: 1, gravityMul: 1, maxAirJumps: 99, dashCd: DASH_CD, grab: false,
   },
   race: {
     id: 'race', name: 'Carrera', icon: '🏁',
-    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe ni salto. El clic agarra al rival que tenés adelante (frena a los dos), el empujón sigue igual y el dash tarda bastante en volver: administralo para cruzar, abrir paso o soltarte de un agarre. Más los ítems de un solo uso que dan las cajas.',
+    desc: 'Las de la Carrera de obstáculos: sin habilidades de héroe y con un salto flotante, torpe y sin doble salto. El clic agarra al rival que tenés adelante (frena a los dos), el empujón sigue igual y el dash tarda bastante en volver: administralo para cruzar, abrir paso o soltarte de un agarre. Más los ítems de un solo uso que dan las cajas.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 4, tileStep: true, dashBreak: 80, xpMul: 1, abilities: false, itemBoxes: true, weapons: false,
-    jump: false, dashCd: 5, grab: true,
+    jump: true, jumpMul: 0.75, gravityMul: 0.75, maxAirJumps: 0, dashCd: 5, grab: true,
   },
   horde: {
     id: 'horde', name: 'Horda', icon: '🔫',
     desc: 'Las de la Horda: armas en vez de poderes. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas.',
     progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 12, tileStep: false, dashBreak: 0, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
-    jump: true, dashCd: DASH_CD, grab: false,
+    jump: true, jumpMul: 1, gravityMul: 1, maxAirJumps: 99, dashCd: DASH_CD, grab: false,
   },
 };
 

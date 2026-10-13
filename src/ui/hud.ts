@@ -244,7 +244,7 @@ export class Hud {
     // Lo que con teclado no necesita casillero (saltar, reparar, abrir la forja) y con los dedos sí.
     const only = (slot: string, icon: string, what: string) => { const el = mk(slot, document.createTextNode(icon), () => what, 'touch-only'); return el; };
     const extra = [
-      this.rules.jump ? only('jump', '⬆️', '<b>Saltar</b><p>En el aire: segundo salto.</p>') : null,
+      this.rules.jump ? only('jump', '⬆️', this.rules.maxAirJumps > 0 ? '<b>Saltar</b><p>En el aire: segundo salto.</p>' : '<b>Saltar</b><p>Un solo salto, flotante.</p>') : null,
       this.rules.repair ? only('repair', '🔧', '<b>Reparar</b><p>Mantené apretado.</p>') : null,
       this.rules.crafting ? only('forge', '⚒️', '<b>Forja</b>') : null,
     ];

@@ -40,7 +40,8 @@ export interface MoveParams {
   jumpMul: number;
   noGravity: boolean;
   dash: boolean; // las reglas habilitan el dash (Shift)
-  jump: boolean; // las reglas habilitan el salto (Espacio), con su segundo salto
+  jump: boolean; // las reglas habilitan el salto (Espacio)
+  gravityMul: number; // multiplicador de la gravedad (menos de 1 = flota más)
   dashCd: number; // segundos que tarda en volver el dash
 }
 
@@ -65,7 +66,7 @@ export const newMoveOut = (): MoveOut => ({ wallHits: [], landed: 0, jumped: fal
 
 export const defaultMoveParams = (): MoveParams => ({
   speed: 6, lock: false, airControl: 1, restitution: 0.3, maxAirJumps: 1, jumpMul: 1, noGravity: false, dash: false,
-  jump: true, dashCd: DASH_CD,
+  jump: true, gravityMul: 1, dashCd: DASH_CD,
 });
 
 const MAX_SUBSTEP = 0.3;
@@ -182,7 +183,7 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
   }
   s.prevB = inp.b;
 
-  if (!s.grounded && !p.noGravity && !dashing) s.vel.y = Math.max(-TERMINAL_V, s.vel.y - GRAVITY * dt);
+  if (!s.grounded && !p.noGravity && !dashing) s.vel.y = Math.max(-TERMINAL_V, s.vel.y - GRAVITY * p.gravityMul * dt);
 
   // Si quedó encimado con un obstáculo (un muro o una torreta que apareció encima), sacarlo primero:
   // si no, cada paso seguiría chocando y el personaje quedaría trabado.

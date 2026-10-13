@@ -22,7 +22,7 @@ hoy no la necesitan y no cambian.
 - **Caminos de los bots** (`BotBrain.findPath` en `src/core/bots.ts`). Trata la rampa como "medio nivel" y sube un
   nivel saltando. Con rampas largas y varios niveles esa cuenta no alcanza: los bots pasan a pedirle los caminos al
   grafo de `src/core/nav.ts` (tarea 07), cuyas aristas ya se prueban contra el mundo real. Los saltos son aristas
-  propias de los bots: subir un nivel saltando solo donde las reglas tienen salto, y cruzar un hueco con dash.
+  propias de los bots: subir un nivel saltando solo donde las reglas tienen salto (el de la Carrera es corto y flotante), y cruzar un hueco con dash.
 - **Terreno dibujado** (`terrainShape.ts`): las capas ya son genéricas; comprobar el color y la sombra de contacto
   con tres o más niveles, y que una plataforma alta pegada al vacío cuelgue bien su costado.
 - **Minimapa:** un tono por nivel.
@@ -36,7 +36,7 @@ torre de nivel 3 pegada al vacío y un muro sobre una plataforma.
 ## Listo cuando
 
 - En el plano de prueba, sin pantalla: un bot sube del nivel 0 al 3 por las rampas y baja; con las reglas de la
-  Carrera (sin salto) no intenta subir donde no hay rampa; un zombi llega a un héroe parado en el nivel 3.
+  Carrera (salto corto y flotante) no intenta subir donde no hay rampa; un zombi llega a un héroe parado en el nivel 3.
 - La comprobación de la malla pasa en el plano de prueba con 50 semillas.
 - Capturas del plano de prueba (cuadrado y orgánico): las tres alturas, la rampa larga y el muro sobre plataforma.
 - Los diez mapas de hoy se ven y se juegan igual: `tests/e2e/run.mjs` y `tests/e2e/moba.mjs` pasan, y los bots de

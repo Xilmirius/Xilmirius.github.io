@@ -1,7 +1,7 @@
 # 21 · Obstáculos nuevos para la Carrera
 
-El usuario pidió "más mecánicas de obstáculos". Sin salto (tarea 03), los obstáculos se pasan esquivando, eligiendo
-el momento o gastando el dash.
+El usuario pidió "más mecánicas de obstáculos". Con el salto corto y flotante de la Carrera (tarea 03), los obstáculos se pasan esquivando, eligiendo
+el momento o gastando el dash; saltar ayuda poco.
 
 ## Reglas para cualquier obstáculo nuevo
 
@@ -14,7 +14,7 @@ Son las que ya cumplen los rotores, los géiseres y las bolas (`src/core/gadgets
   Un golpe suelto (como el del rotor) lo puede dar el host.
 - **Lo que es propiedad del piso** (hielo, cinta) se marca en la celda del plano y se consulta por la malla, igual
   que el resorte ([MALLA.md](../MALLA.md) §5).
-- **Se pasa sin saltar**, y se ve venir: aviso antes de pegar.
+- **No depende de saltar** (el salto es corto), y se ve venir: aviso antes de pegar.
 - **Los bots lo entienden** (`BotBrain.decideRace` y sus caminos).
 - **Tiene su pieza** en `src/render/gadgetsView.ts`, su sonido, y su entrada en el catálogo de assets
   (`src/assets/catalog.ts`, y después `npm run assets:doc`).

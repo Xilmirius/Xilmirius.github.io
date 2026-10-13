@@ -206,8 +206,8 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
   ],
   race: () => [
     'Pasá las <b>puertas</b> en orden: si te caés, reaparecés en la última que pasaste.',
-    `Sin salto: <kbd>${touchMode() ? 'el clic' : 'Clic'}</kbd> agarra al rival que tenés cerca y de frente (frena a los dos un rato) en vez de pegarle, y el dash tarda bastante en volver: usalo para cruzar un hueco, abrir una cobertura o soltarte si te agarran.`,
-    '<b>Rotores</b> y <b>bolas</b>: se esquivan de costado, no se saltan. <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
+    `Salto flotante y sin doble salto: <kbd>${touchMode() ? 'el clic' : 'Clic'}</kbd> agarra al rival que tenés cerca y de frente (frena a los dos un rato) en vez de pegarle, y el dash tarda bastante en volver: usalo para cruzar un hueco, abrir una cobertura o soltarte si te agarran.`,
+    '<b>Rotores</b> y <b>bolas</b>: se esquivan de costado, o con un salto bien puesto (es corto). <b>Géiseres</b>: avisan antes de disparar. <b>Paragolpes</b>: te rebotan. <b>Resortes</b>: atajos. <b>Aceleradores ⚡</b>: un envión.',
     'El <b>piso flojo</b> (más claro y agrietado) se cae al pisarlo: no te quedes quieto. El <b>dash rompe</b> cualquier cobertura de una sola embestida; los barriles explotan.',
     `Las <b>cajas ❓</b> dan un ítem de un solo uso${touchMode() ? ': aparece en los botones de arriba del agarre' : ` (<kbd>${keyName('i1')}</kbd> <kbd>${keyName('i2')}</kbd> <kbd>${keyName('i3')}</kbd>)`}.`,
     'Cuando llega el primero quedan 25 s para terminar.',

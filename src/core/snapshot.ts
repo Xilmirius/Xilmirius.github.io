@@ -85,8 +85,8 @@ export interface MeFrame {
   vy: number; gr: number; aj: number; tb: number; hs: number; sn: number; co: number; hsl: number; pb: number;
   spd: number; lock: number; ng: number; direct: number; air: number; rest: number; maj: number; jm: number;
   dt: number; dx: number; dz: number; ad: number; dsh: number;
-  /** jmp: las reglas habilitan el salto · dcdMax: segundos que tarda en volver el dash (ver core/rules.ts). */
-  jmp: number; dcdMax: number;
+  /** jmp: las reglas habilitan el salto · gm: multiplicador de gravedad · dcdMax: segundos que tarda en volver el dash (ver core/rules.ts). */
+  jmp: number; gm: number; dcdMax: number;
   /** Armas: arma principal (-1 = ninguna), balas que le quedan y cargas de C4. */
   pri: number; am: number; c4: number;
   /** Mejoras: nivel de cada una (por índice en PERK_IDS), las que tiene para elegir ahora y los segundos que le quedan. */
@@ -184,9 +184,9 @@ export function buildMeFrame(sim: Simulation, c: Character): MeFrame {
     vy: r2(c.vel.y), gr: c.grounded ? 1 : 0, aj: c.airJumps, tb: r2(c.tumble), hs: r2(c.hitstun), sn: r2(c.stun), co: r2(c.coyote),
     hsl: r2(c.hitSlide), pb: c.prevB,
     spd: r2(sim.charSpeed(c)), lock: a && a.lock ? 1 : 0, ng: a && a.noGravity ? 1 : 0, direct: a && a.direct ? 1 : 0,
-    air: c.stats.airControl, rest: c.stats.restitution, maj: c.stats.maxAirJumps, jm: c.stats.jumpMul,
+    air: c.stats.airControl, rest: c.stats.restitution, maj: Math.min(c.stats.maxAirJumps, sim.rules.maxAirJumps), jm: c.stats.jumpMul * sim.rules.jumpMul,
     dt: r2(c.dashT), dx: r2(c.dashX), dz: r2(c.dashZ), ad: c.airDashes, dsh: sim.rules.dash ? 1 : 0,
-    jmp: sim.rules.jump ? 1 : 0, dcdMax: sim.rules.dashCd,
+    jmp: sim.rules.jump ? 1 : 0, gm: sim.rules.gravityMul, dcdMax: sim.rules.dashCd,
     pri: c.primary, am: c.ammo, c4: c.c4,
     pk: [...c.perks], of: [...c.offer], ot: Math.max(0, Math.ceil(c.offerT)),
   };

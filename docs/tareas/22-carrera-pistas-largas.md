@@ -5,7 +5,7 @@
 "Los mapas deberían ser más largos, con altura y más mecánicas de obstáculos."
 
 Hoy un buen corredor termina una pista en 22 a 44 segundos, todas son planas salvo una plataforma, y se hicieron
-pensando en saltar. Ya están las piezas para rehacerlas: sin salto y con agarre (tarea 03), varios niveles y rampas
+pensando en saltar. Ya están las piezas para rehacerlas: con salto flotante y agarre (tarea 03), varios niveles y rampas
 largas (20), obstáculos nuevos (21) y terreno orgánico (17).
 
 ## Qué hacer
