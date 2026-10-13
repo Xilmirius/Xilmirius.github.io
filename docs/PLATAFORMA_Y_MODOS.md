@@ -126,5 +126,5 @@ La idea: un editor **en el mismo juego** (web), para que armar un mapa sea tan f
 3. **Mapa:** agregar el mapa (ASCII hoy, editor mañana) y, si el modo necesita piezas de mapa nuevas, sumarlas a la leyenda. Si el juego trae una clase de mapa nueva (`kind`), darle su ambientación en `src/render/ambience.ts`: qué piezas van en una hilera de muros, un puente, un claro o un borde, y qué hay en el fondo ([TERRENO.md](TERRENO.md)).
 4. **HUD:** `Hud` ya se adapta a las reglas; el marcador sale de `GameMode.hud()`.
 5. **Bots:** `BotBrain` consulta `sim.rules` y `mode.hud()` (por ejemplo, va a la zona si hay zona).
-6. **Tests:** una partida headless de bots con el modo nuevo en `tests/sim.test.ts`.
+6. **Probar:** una partida headless de bots con el modo nuevo, con un script descartable (no se commitea).
 7. **Assets:** si hay piezas visuales nuevas, sumarlas a `src/assets/catalog.ts` y regenerar la checklist (`npm run assets:doc`).

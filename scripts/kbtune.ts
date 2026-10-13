@@ -1,10 +1,9 @@
-import { writeFileSync } from 'node:fs';
-import { it } from 'vitest';
-import { STAGE_AT } from '../../src/core/constants';
-import { Simulation } from '../../src/core/sim';
-import { DEFAULT_SETTINGS } from '../../src/core/types';
+// Herramienta de balance: distancia y duración del knockback por etapa de calor (`npm run tool:kb`).
+import { STAGE_AT } from '../src/core/constants';
+import { Simulation } from '../src/core/sim';
+import { DEFAULT_SETTINGS } from '../src/core/types';
 
-it('tabla de knockback (informativa)', () => {
+function main() {
   const rows: string[] = [];
   for (const kb of [5, 8, 13, 16, 22]) {
     const line: string[] = [];
@@ -23,5 +22,7 @@ it('tabla de knockback (informativa)', () => {
     }
     rows.push(`kb ${String(kb).padStart(2)}: ${line.join(' | ')}`);
   }
-  writeFileSync(process.env.KB_OUT ?? 'kb.txt', rows.join('\n'));
-});
+  console.log(rows.join('\n'));
+}
+
+main();

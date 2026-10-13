@@ -191,22 +191,25 @@ src/
   game/          Bucle de partida (hitstop visual cortito), input, teclas asignables (keybinds.ts) y lanzamiento (castControl.ts), ticker en Worker, menú animado, perfil y logros
   db/            Persistencia en Postgres (historial)
 supabase/migrations/   SQL del esquema
-tests/                 Unit tests + partidas headless de bots + E2E con Playwright
+tests/e2e/             Scripts E2E con Playwright (capturas y partidas reales en Chromium)
+scripts/               Herramientas: generador del catálogo de assets y de balance (knockback, bots, claros)
 ```
 
 ## 7. Agregar contenido (escala sin tocar sistemas)
 
 - **Juego o modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (entrada en `games.ts` + victoria en `modes.ts` + reglas en `rules.ts` + mapa).
 - **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
-- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. El test `mapas` valida que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; el test verifica que las líneas sean transitables y que el mapa esté espejado.
+- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. Hay que revisar que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; revisá que las líneas sean transitables y que el mapa esté espejado.
 - **Ambientación:** cómo se dibuja el terreno y qué piezas pone cada juego según la forma del mapa está en [docs/TERRENO.md](docs/TERRENO.md). Un mapa nuevo se decora solo.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
 - **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
 
-## 8. Tests
+## 8. Verificación y herramientas
+
+El proyecto **no tiene unit tests**: los valores y mecánicas se prueban con un script descartable mientras se desarrolla y no quedan en el repo.
 
 ```bash
-npm test                 # unit tests + partidas completas de bots en headless (≈5 s)
+npm run typecheck
 npm run assets:doc       # regenera docs/ASSETS_CATALOGO.md desde el catálogo
 npm run build
 npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente por WebRTC real en 2 pestañas
@@ -214,7 +217,9 @@ node tests/e2e/moba.mjs  # Chromium: Asedio 2v2 y 3v3 (lanzar con clic, cancelar
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
 npm run test:touch       # Chromium con táctil emulado: palanca, botones, apuntado y habilidades en los cuatro juegos
 node tests/e2e/maps.mjs  # capturas de cada mapa (entero, costa, muros) para revisar terreno y ambientación
-VITEST_TOOLS=1 npx vitest run # herramientas de balance (tabla de knockback, estadísticas de bots)
+npm run tool:kb         # herramienta de balance: tabla de knockback
+npm run tool:bots       # herramienta de balance: estadísticas de partidas de bots
+npm run tool:clearings  # claros que se decoran en cada mapa
 ```
 
 Para Playwright se usa `playwright-core` con el Chromium del sistema (`CHROMIUM=/ruta/a/chrome` si no está en `/opt/pw-browsers`).

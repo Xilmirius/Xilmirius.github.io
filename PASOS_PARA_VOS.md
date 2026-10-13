@@ -76,7 +76,7 @@ Si todo eso anduvo, ya está: pasale el link a tus amigos. **Crear sala → 🔗
 | "No se pudo abrir la conexión P2P" | NAT estricto de alguno (CGNAT, algunas redes móviles o corporativas) | Paso 6 (TURN) |
 | El workflow *Deploy* falla con "Get Pages site failed" | Pages no está activado | Paso 3, segunda casilla |
 | El workflow falla con "Branch main is not allowed to deploy to github-pages" | `main` no es la rama por defecto | Paso 3, primera casilla. O en **Settings → Environments → github-pages** agregá `main` a las ramas permitidas |
-| El workflow falla en `npm test` | Rompiste algo en el código | Corré `npm test` local para ver qué |
+| El workflow falla en `npm run build` | Rompiste algo en el código | Corré `npm run build` local para ver qué |
 | "🏆 Historial" vacío | No corriste el SQL | Paso 2 |
 | Va lento o a tirones | PC con poca GPU | En **⚙️ Ajustes** apagá *Brillos y postproceso* y *Sombras*. El juego ya los apaga solo si detecta pocos FPS |
 | Lag para todos | El host tiene mala conexión o PC | Que hostee el que tenga mejor internet y PC |

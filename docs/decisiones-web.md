@@ -20,7 +20,7 @@ Donde el GDD dejaba una pregunta abierta, acá está la respuesta **provisoria**
 
 **DW-06 · Etapas por heat: 0 / 40 / 90 / 150** (Intacto / Agrietado / Quebrado / Destrozado), tope 260.
 
-**DW-07 · Knockback escalonado por etapa: ×0.42 / ×0.85 / ×1.25 / ×1.8** (D-0024) con un pequeño extra continuo dentro de cada etapa. Medido con el empujón cargado al máximo (herramienta `tests/tools/kbtune.test.ts`):
+**DW-07 · Knockback escalonado por etapa: ×0.42 / ×0.85 / ×1.25 / ×1.8** (D-0024) con un pequeño extra continuo dentro de cada etapa. Medido con el empujón cargado al máximo (herramienta `npm run tool:kb`):
 
 | Etapa | Distancia |
 |---|---|

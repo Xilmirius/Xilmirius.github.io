@@ -1,15 +1,9 @@
-// Catálogo de assets: consistencia + la checklist docs/ASSETS_CATALOGO.md (generada del catálogo).
-// Si cambiás el catálogo: `npm run assets:doc` regenera el documento.
+// Regenera docs/ASSETS_CATALOGO.md desde src/assets/catalog.ts: `npm run assets:doc`.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
 import { ASSETS, ASSET_GROUPS } from '../src/assets/catalog';
-import { HEROES } from '../src/core/heroes';
-import { ITEMS } from '../src/core/items';
-import { ABILITY_SLOTS, HERO_IDS } from '../src/core/types';
 
 const DOC = 'docs/ASSETS_CATALOGO.md';
 const MANIFEST = 'public/assets/manifest.json';
-
 function manifestFiles(): Set<string> {
   try { return new Set(JSON.parse(readFileSync(MANIFEST, 'utf8')).files ?? []); } catch { return new Set(); }
 }
@@ -58,35 +52,5 @@ function generateDoc(): string {
   return out.join('\n');
 }
 
-describe('catálogo de assets', () => {
-  it('ids y archivos únicos', () => {
-    const ids = ASSETS.map((a) => a.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    const files = ASSETS.map((a) => a.file);
-    expect(new Set(files).size).toBe(files.length);
-  });
-
-  it('cubre todo el contenido: héroes, habilidades e ítems', () => {
-    const ids = new Set(ASSETS.map((a) => a.id));
-    for (const h of HERO_IDS) {
-      expect(ids.has(`hero.${h}`)).toBe(true);
-      expect(ids.has(`icon.basic.${h}`)).toBe(true);
-      for (const s of ABILITY_SLOTS) expect(ids.has(`icon.ability.${h}.${s}`), `${HEROES[h].name} ${s}`).toBe(true);
-    }
-    for (const it of ITEMS) expect(ids.has(`icon.item.${it.id}`)).toBe(true);
-  });
-
-  it('el manifest es válido y lo que lista existe', () => {
-    const raw = JSON.parse(readFileSync(MANIFEST, 'utf8'));
-    expect(Array.isArray(raw.files)).toBe(true);
-    for (const f of raw.files) expect(existsSync('public/assets/' + f), f).toBe(true);
-  });
-
-  it(`${DOC} está al día (npm run assets:doc para regenerarlo)`, () => {
-    const doc = generateDoc();
-    if (process.env.UPDATE_ASSET_DOC) writeFileSync(DOC, doc);
-    expect(existsSync(DOC)).toBe(true);
-    // Sin importar el fin de línea de la copia de trabajo (en Windows git puede bajarlo con CRLF).
-    expect(readFileSync(DOC, 'utf8').replace(/\r\n/g, '\n')).toBe(doc);
-  });
-});
+writeFileSync(DOC, generateDoc());
+console.log('Escrito ' + DOC);

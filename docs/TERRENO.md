@@ -38,8 +38,8 @@ como piezas aparte.
 - Al lado de una losa frágil o de una rampa **no se redondea nada**, para que las piezas sueltas calcen justas.
   Por eso no hay que recalcular nada cuando una losa se cae: el hueco es el de la celda.
 
-El test `tests/terrainShape.test.ts` comprueba en todos los mapas que ningún vértice del piso dibujado quede
-sobre el vacío más allá de ese relleno.
+Ningún vértice del piso dibujado debe quedar sobre el vacío más allá de ese relleno (se verificó en todos los mapas
+con un script descartable; ya no hay test que lo vuelva a comprobar).
 
 ## 3. Decoración contextual
 
@@ -84,7 +84,7 @@ Cada juego entra con el tema que le queda (`defaults.theme` en `core/games.ts`, 
   lectura todavía no distingue, se suma a `topology.ts`.
 - **Revisar cómo quedó:** `npm run build && node tests/e2e/maps.mjs [mapa,mapa|all] [tema]` saca capturas de
   cada mapa (entero, en juego, costa y muros) en `tests/e2e/out`.
-- **Qué detecta en cada mapa:** `VITEST_TOOLS=1 npx vitest run tests/tools/clearings.test.ts --reporter=verbose --silent=false`.
+- **Qué detecta en cada mapa:** `npm run tool:clearings`.
 
 ## 6. Lo que falta
 

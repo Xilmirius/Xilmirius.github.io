@@ -30,7 +30,7 @@ Infraestructura propia: **ninguna**. Ni VPS, ni Node server, ni WebSockets propi
 | UI | `src/ui`, `src/app.ts` | todo | Menú, lobby, HUD, forja |
 | Datos | `src/db` | Supabase SDK | Persistencia de resultados (nunca del estado de juego) |
 
-La regla importante: **`core` no importa nada de navegador**. Por eso se testea en Node (`npm test` corre partidas completas de bots sin pantalla) y por eso el día de mañana se puede correr en un servidor dedicado sin reescribir el juego.
+La regla importante: **`core` no importa nada de navegador**. Por eso se puede correr en Node (los scripts de `scripts/` simulan partidas completas de bots sin pantalla) y por eso el día de mañana se puede correr en un servidor dedicado sin reescribir el juego.
 
 ## 2. Modelo de red
 

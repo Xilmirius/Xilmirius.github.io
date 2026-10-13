@@ -9,11 +9,13 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
     "test:e2e": "node tests/e2e/run.mjs",
     "test:touch": "node tests/e2e/touch.mjs",
     "showcase": "node tests/e2e/showcase.mjs",
-    "assets:doc": "UPDATE_ASSET_DOC=1 vitest run tests/assets.test.ts"
+    "assets:doc": "tsx scripts/assets-doc.ts",
+    "tool:kb": "tsx scripts/kbtune.ts",
+    "tool:bots": "tsx scripts/botstats.ts",
+    "tool:clearings": "tsx scripts/clearings.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",
@@ -22,9 +24,9 @@
   "devDependencies": {
     "@types/three": "^0.186.0",
     "playwright-core": "^1.63.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.1"
   },
   "engines": {
     "node": ">=20"

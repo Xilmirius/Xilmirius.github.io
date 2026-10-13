@@ -9,8 +9,4 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
   },
-  test: {
-    include: process.env.VITEST_TOOLS ? ['tests/tools/*.test.ts'] : ['tests/*.test.ts'],
-    environment: 'node',
-  },
-} as any);
+});

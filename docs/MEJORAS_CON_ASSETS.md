@@ -183,5 +183,5 @@ Hoy los efectos son geometrías con colores HDR y bloom (`src/render/juice.ts`, 
 - [ ] Assets en `public/...` con los nombres exactos de este documento, más sus `manifest.json` donde corresponde.
 - [ ] `CREDITS.md` con licencias.
 - [ ] Cargadores con fallback: si se borra la carpeta `public/models`, el juego tiene que seguir funcionando igual que hoy.
-- [ ] `npm test`, `npm run build`, `npm run test:e2e` y `node tests/e2e/showcase.mjs` en verde, revisando las screenshots.
+- [ ] `npm run typecheck`, `npm run build`, `npm run test:e2e` y `node tests/e2e/showcase.mjs` en verde, revisando las screenshots.
 - [ ] Peso total del build (`dist/`) ≤ 30 MB.

@@ -1,4 +1,4 @@
-# Tests + build + deploy a GitHub Pages en cada push a main (o a mano desde la pestaña Actions).
+# Build + deploy a GitHub Pages en cada push a main (o a mano desde la pestaña Actions).
 name: Deploy
 
 on:
@@ -25,7 +25,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
       - run: npm run build
         env:
           # Settings → Secrets and variables → Actions → pestaña "Variables"

@@ -1,11 +1,10 @@
-import { writeFileSync } from 'node:fs';
-import { it } from 'vitest';
-import { BotBrain } from '../../src/core/bots';
-import { DT } from '../../src/core/constants';
-import { Simulation } from '../../src/core/sim';
-import { DEFAULT_SETTINGS, HERO_IDS } from '../../src/core/types';
+// Herramienta de balance: estadísticas de partidas de bots por nivel (`npm run tool:bots`).
+import { BotBrain } from '../src/core/bots';
+import { DT } from '../src/core/constants';
+import { Simulation } from '../src/core/sim';
+import { DEFAULT_SETTINGS, HERO_IDS } from '../src/core/types';
 
-it('estadísticas de bots (informativo)', () => {
+function main() {
   const out: string[] = [];
   for (const level of [1, 2, 3] as const) {
     const sim = new Simulation({ settings: { ...DEFAULT_SETTINGS, mode: 'kills', killTarget: 999, timeLimit: 240 }, roster:
@@ -28,5 +27,7 @@ it('estadísticas de bots (informativo)', () => {
     const lv = sim.chars.map((c) => c.level + "(" + Math.round(c.heatDealt) + "h," + Math.round(c.xp) + "xp)").join(",");
     out.push(`L${level}: credited=${credited} self=${self} casts=${casts} ${JSON.stringify(causes)} slams=${slams} body=${bodies} tilesGone=${tiles} crafts=${items} levels=${lv} mats=${JSON.stringify(sim.chars[0].mats)}`);
   }
-  writeFileSync(process.env.KB_OUT ?? 'bots.txt', out.join('\n'));
-});
+  console.log(out.join('\n'));
+}
+
+main();
