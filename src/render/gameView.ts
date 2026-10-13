@@ -171,8 +171,9 @@ export class GameView {
     this.scene.add(this.sun, this.sun.target);
 
     const style = new GroundStyle(this.terrain);
-    // Cada juego trae su ambientación: los colores de la roca y las piezas que van según la forma del mapa.
+    // Cada juego trae su ambientación: los colores de la roca, las piezas que van según la forma del mapa y el fondo.
     const amb = ambienceOf(this.terrain.def.kind);
+    if (amb.fog) { this.scene.fog.near = amb.fog.near; this.scene.fog.far = amb.fog.far; }
     this.terrainView = new TerrainView(this.terrain, theme, style, amb.look);
     this.decor = new DecorView(this.terrain, theme, style, amb);
     this.destructs = new DestructiblesView(this.terrain.destructs);
@@ -185,7 +186,7 @@ export class GameView {
       this.units.group, this.fixed.group, this.horde.group,
     );
     if (!sky) {
-      this.backdrop = new Backdrop(this.terrain, theme);
+      this.backdrop = new Backdrop(this.terrain, theme, amb);
       this.scene.add(this.backdrop.group);
     }
 

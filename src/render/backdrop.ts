@@ -2,11 +2,15 @@
 // "fondo" es sobre todo el abismo: capas de nubes que pasan, islas flotantes a lo lejos y, según el tema,
 // una grilla de neón o el reflejo del sol o de la luna. Todo va más oscuro y apagado que la arena para
 // que nunca compita con el juego. Solo visual.
+// El tema pone el cielo, las nubes y la luz; el juego (ambience.ts) pone qué hay sobre las islas y qué flota
+// alrededor: atalayas en el Asedio, globos y carteleras en la Carrera, ruinas y bruma en la Horda.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../core/rng';
 import type { Terrain } from '../core/terrain';
+import { ambienceOf, type Ambience } from './ambience';
 import { faceted, painted, shade } from './geo';
+import { Pieces } from './pieces';
 import type { ThemeDef } from './themes';
 import { cloudTexture, gridTexture, softDisc, toonGradient } from './textures';
 
@@ -90,7 +94,7 @@ export class Backdrop {
   private floating: { o: THREE.Object3D; y: number; phase: number; amp: number; spin: number }[] = [];
   private glowMat = new THREE.MeshBasicMaterial({ toneMapped: false, vertexColors: true });
 
-  constructor(t: Terrain, theme: ThemeDef) {
+  constructor(t: Terrain, theme: ThemeDef, private amb: Ambience = ambienceOf(t.def.kind)) {
     const def = t.def;
     const look = lookFor(theme, theme.sky ?? def.sky, theme.fog ?? def.fog, def.ground);
     const r = new Rng(t.w * 53 + t.h * 11 + theme.id.length);
@@ -130,8 +134,19 @@ export class Backdrop {
       this.group.add(m);
     }
 
+    if (amb.mist) {
+      const tex = cloudTexture().clone();
+      tex.needsUpdate = true;
+      tex.repeat.set(PLANE / 70, PLANE / 70);
+      const m = this.plane(PLANE, amb.mist.y, new THREE.MeshBasicMaterial({ map: tex, color: amb.mist.color, transparent: true, opacity: amb.mist.opacity, depthWrite: false }));
+      m.renderOrder = -3;
+      this.group.add(m);
+      this.layers.push({ tex, speed: 1.6, tile: 70 });
+    }
+
     this.buildIslands(t, look, r);
     this.buildDebris(t, look, r);
+    this.buildFloaters(t, look, r);
     if (look.stars) this.group.add(this.buildStars(r));
   }
 
@@ -182,6 +197,38 @@ export class Backdrop {
     }
   }
 
+  /** Lo que flota alrededor del mapa según el juego (los globos de la Carrera). */
+  private buildFloaters(t: Terrain, look: Look, r: Rng) {
+    const fl = this.amb.floaters;
+    if (!fl) return;
+    const b = t.bounds();
+    const halfW = (b.maxX - b.minX) / 2, halfD = (b.maxZ - b.minZ) / 2;
+    for (let i = 0; i < fl.count; i++) {
+      const p = new Pieces();
+      fl.build(p, r);
+      const o = this.dimmed(p, look);
+      const a = (i / fl.count) * Math.PI * 2 + r.range(-0.4, 0.4);
+      const out = r.range(12, 38), y = r.range(fl.y[0], fl.y[1]);
+      o.position.set(Math.cos(a) * (halfW + out), y, Math.sin(a) * (halfD + out));
+      this.group.add(o);
+      this.floating.push({ o, y, phase: r.range(0, 6.28), amp: r.range(0.6, 1.3), spin: r.range(-0.05, 0.05) });
+    }
+  }
+
+  /** Arma las piezas de la ambientación y las apaga como al resto del fondo (las luces quedan encendidas). */
+  private dimmed(p: Pieces, look: Look): THREE.Object3D {
+    const { group } = p.build();
+    group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.castShadow = false;
+      m.receiveShadow = false;
+      const mat = m.material as THREE.MeshToonMaterial;
+      if (mat.isMeshToonMaterial) mat.color.setScalar(look.dim);
+    });
+    return group;
+  }
+
   private buildIsland(look: Look, r: Rng, size: number, mat: THREE.Material): THREE.Object3D {
     const g = new THREE.Group();
     const parts: THREE.BufferGeometry[] = [];
@@ -198,7 +245,7 @@ export class Backdrop {
       const a = r.range(0, 6.28), d = r.range(0, size * 0.62);
       return [Math.cos(a) * d, Math.sin(a) * d];
     };
-    for (let k = look.trees.length ? r.int(1, 1 + Math.round(size / 2)) : 0; k > 0; k--) {
+    for (let k = look.trees.length && this.amb.trees !== false ? r.int(1, 1 + Math.round(size / 2)) : 0; k > 0; k--) {
       const [x, z] = spot();
       const s = r.range(0.8, 1.5);
       const trunk = new THREE.CylinderGeometry(0.12 * s, 0.17 * s, 0.7 * s, 5);
@@ -217,6 +264,11 @@ export class Backdrop {
     }
     const body = new THREE.Mesh(mergeGeometries(parts), mat);
     g.add(body);
+    if (this.amb.island) {
+      const p = new Pieces();
+      this.amb.island(p, r, size, top);
+      if (p.count) g.add(this.dimmed(p, look));
+    }
     if (look.crystals.length) {
       const gems: THREE.BufferGeometry[] = [];
       for (let k = r.int(1, 3); k > 0; k--) {

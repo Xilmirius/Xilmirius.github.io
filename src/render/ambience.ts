@@ -39,6 +39,18 @@ export interface Ambience {
   bridge(c: DecorCtx, b: BridgeSpot): void;
   coast(c: DecorCtx, s: CoastSpot): void;
   clearing(c: DecorCtx, k: Clearing): void;
+
+  // ── Fondo (backdrop.ts): lo que rodea al mapa también es del juego ──
+  /** Qué hay sobre una isla lejana. Coordenadas de la isla: el centro en el origen, y = top es su cara de arriba. */
+  island?(p: Pieces, r: Rng, size: number, top: number): void;
+  /** Cosas que flotan alrededor del mapa, entre las alturas y[0] e y[1]. Cada una se arma centrada en el origen. */
+  floaters?: { count: number; y: [number, number]; build(p: Pieces, r: Rng): void };
+  /** false: las islas del fondo no llevan árboles. */
+  trees?: boolean;
+  /** Niebla propia: a qué distancia de la cámara empieza y a cuál lo tapa todo (si no, la de siempre). */
+  fog?: { near: number; far: number };
+  /** Bruma baja que pasa por debajo del mapa. */
+  mist?: { color: number; opacity: number; y: number };
 }
 
 const W = WALL_TOP;
@@ -128,6 +140,17 @@ const ARENA: Ambience = {
         const k = r.range(-0.4, 0.4), len = r.range(0.35, 0.95);
         p.cone(0.07, len, x - s.nz * k + s.nx * 0.07, s.y - len - 0.02, z + s.nx * k + s.nz * 0.07, shade(r.pick(c.leaf), r.range(-0.03, 0.06)), 3, r.range(0, TAU));
       }
+    }
+  },
+  island(p, r, size, top) {
+    // Ruinas de un coliseo: columnas en ronda, algunas partidas.
+    if (size < 3.2) return;
+    const n = r.int(3, 5), rad = size * 0.5, a0 = r.range(0, TAU);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i / n) * TAU * 0.72, h = r.range(1.1, 3.1);
+      const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+      p.cyl(0.27, 0.34, h, x, top, z, shade(0x8f8478, r.range(-0.04, 0.04)), 6);
+      if (h > 2.2) p.box(0.8, 0.22, 0.8, x, top + h, z, 0x9a8f82, a);
     }
   },
   clearing(c, k) {
@@ -234,6 +257,21 @@ const SIEGE: Ambience = {
         p.rock(r.range(0.09, 0.16), s.x - s.nz * k + s.nx * 0.12, s.y - d - 0.1, s.z + s.nx * k + s.nz * 0.12, shade(r.pick(c.leaf), r.range(-0.04, 0.06)), r.range(0, TAU), 0.6);
       }
     }
+  },
+  island(p, r, size, top) {
+    // Atalayas lejanas: una torre con techo en las islas grandes, un estandarte en las chicas.
+    const roof = r.pick([0x8a3b34, 0x3b5a8a, 0x7a6a3a]);
+    if (size < 3.4) {
+      p.cyl(0.07, 0.09, 2.6, 0, top, 0, 0x4a3c34, 5);
+      p.banner(0.9, 1.5, 0.1, top + 2.5, 0.06, roof, r.range(0, TAU), NEUTRAL);
+      return;
+    }
+    const h = r.range(2.4, 4.2), rad = r.range(0.8, 1.1);
+    p.cyl(rad, rad * 1.12, h, 0, top, 0, 0x8d8474, 8);
+    p.cyl(rad * 1.18, rad * 1.18, 0.2, 0, top + h, 0, 0x9a917f, 8);
+    p.cone(rad * 1.1, rad * 1.7, 0, top + h + 0.2, 0, roof, 8);
+    p.box(0.22, 0.34, 0.05, 0, top + h * 0.6, rad * 1.04, 0xffc46a, 0, 'glow');
+    if (r.chance(0.6)) p.box(r.range(1.4, 2.4), 0.9, 0.5, rad + 0.9, top, 0, 0x8d8474, r.range(0, TAU));
   },
   clearing(c, k) {
     // Plaza empedrada con un borde más claro.
@@ -359,6 +397,31 @@ const RACE: Ambience = {
     p.box(1.5, 0.55, 0.06, s.x + s.nx * 0.24, s.y - 0.95, s.z + s.nz * 0.24, col, alongRot(s.side));
     p.box(1.1, 0.14, 0.07, s.x + s.nx * 0.25, s.y - 0.75, s.z + s.nz * 0.25, 0xf2ece0, alongRot(s.side));
   },
+  island(p, r, size, top) {
+    // Cartelera sobre dos postes, mirando para cualquier lado.
+    if (size < 2.8) return;
+    const rot = r.range(0, TAU), w = Math.min(size * 0.9, 3.6), col = r.pick(PARTY);
+    const dx = Math.cos(rot) * w * 0.42, dz = -Math.sin(rot) * w * 0.42;
+    for (const sgn of [-1, 1]) p.cyl(0.07, 0.09, 2.6, dx * sgn, top, dz * sgn, 0xd8d4cc, 5);
+    p.box(w, 1.3, 0.1, 0, top + 1.5, 0, col, rot);
+    p.box(w * 0.7, 0.26, 0.13, 0, top + 2.2, 0, 0xf2ece0, rot);
+    p.tyres(r.int(1, 3), size * 0.4, top, size * 0.2);
+  },
+  floaters: {
+    count: 6,
+    y: [-9, 1],
+    // Globos aerostáticos.
+    build(p, r) {
+      const col = r.pick(PARTY), col2 = r.pick(PARTY.filter((c) => c !== col));
+      const g = new THREE.IcosahedronGeometry(2.3, 1);
+      g.scale(1, 1.18, 1);
+      p.add('solid', g, 0, 0, 0, col);
+      p.cyl(2.34, 2.34, 0.7, 0, -0.35, 0, col2, 12);
+      p.cyl(1.5, 0.45, 1.6, 0, -4.1, 0, col, 8);
+      for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) p.box(0.03, 0.9, 0.03, ox * 0.3, -5.0, oz * 0.3, 0x3a3340);
+      p.box(0.75, 0.6, 0.75, 0, -5.6, 0, 0x8a6542);
+    },
+  },
   clearing(c, k) {
     // Flechas pintadas que marcan para dónde sigue la pista.
     const dir = trackDir(c.t, k.ix, k.iz);
@@ -446,6 +509,34 @@ const HORDE: Ambience = {
       // Cartel de peligro atornillado a la roca.
       p.box(0.5, 0.5, 0.04, s.x + s.nx * 0.2, s.y - 1.0, s.z + s.nz * 0.2, 0xe0b53a, alongRot(s.side));
       p.box(0.07, 0.26, 0.05, s.x + s.nx * 0.21, s.y - 0.82, s.z + s.nz * 0.21, 0x2a2a2e, alongRot(s.side));
+    }
+  },
+  trees: false,
+  fog: { near: 31, far: 86 },
+  mist: { color: 0x9db0d6, opacity: 0.85, y: -5.5 },
+  island(p, r, size, top) {
+    // Lo que quedó de la ciudad: un edificio a medio caer con alguna ventana prendida, o una antena con su luz roja.
+    if (size < 2.8) {
+      // Árbol seco.
+      p.cyl(0.07, 0.14, 1.6, 0, top, 0, 0x3a3230, 5);
+      for (const a of [0.6, 2.4, 4.3]) p.box(0.9, 0.06, 0.06, Math.cos(a) * 0.35, top + 1.2 + a * 0.1, -Math.sin(a) * 0.35, 0x3a3230, a, 'solid', 0.5);
+      return;
+    }
+    if (r.chance(0.35)) {
+      const h = r.range(5, 8);
+      p.box(0.12, h, 0.12, 0, top, 0, 0x5a5e62);
+      for (let y = 1; y < h; y += 1.2) p.box(0.7 - (y / h) * 0.4, 0.05, 0.05, 0, top + y, 0, 0x5a5e62, y);
+      p.box(0.2, 0.2, 0.2, 0, top + h, 0, 0xff4a3a, 0, 'glow');
+      return;
+    }
+    const w = r.range(1.6, 2.6), d = r.range(1.6, 2.4), h = r.range(2.6, 5.5), rot = r.range(0, TAU);
+    p.box(w, h, d, 0, top, 0, shade(0x4a4d55, r.range(-0.04, 0.04)), rot);
+    p.box(w * 0.75, 0.16, d * 1.05, w * 0.1, top + h, 0, 0x3a3c42, rot, 'solid', 0.22);
+    const floors = Math.floor((h - 0.6) / 0.95);
+    for (let f = 0; f < floors; f++) for (const u of [-0.3, 0.3]) {
+      if (!r.chance(0.28)) continue;
+      const lx = u * w, lz = d / 2 + 0.02;
+      p.box(0.3, 0.38, 0.04, lx * Math.cos(rot) + lz * Math.sin(rot), top + 0.6 + f * 0.95, -lx * Math.sin(rot) + lz * Math.cos(rot), 0xffd27a, rot, 'glow');
     }
   },
   clearing(c, k) {

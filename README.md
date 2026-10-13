@@ -184,7 +184,7 @@ src/
     snapshot.ts    Frames de mundo, codificación de red e interpolación
     maps/          Mapas en ASCII
   net/           Signaling (Supabase / local), WebRTC, sesiones host y cliente
-  render/        Three.js: terreno, beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), Asedio (mobaView.ts), temas
+  render/        Three.js: terreno por vecindario (terrainShape.ts), decoración contextual y ambientación de cada juego (topology.ts, ambience.ts), beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), Asedio (mobaView.ts), temas
   assets/        Catálogo de piezas reemplazables (catalog.ts) y cargador con fallback a lo procedural (registry.ts)
   audio/         Síntesis de sonido y música generativa (WebAudio)
   ui/            Menú, lobby, HUD, forja, minimapa, tooltips (tooltip.ts, tips.ts), galería de assets, estilos
@@ -199,6 +199,7 @@ tests/                 Unit tests + partidas headless de bots + E2E con Playwrig
 - **Juego o modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (entrada en `games.ts` + victoria en `modes.ts` + reglas en `rules.ts` + mapa).
 - **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
 - **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. El test `mapas` valida que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; el test verifica que las líneas sean transitables y que el mapa esté espejado.
+- **Ambientación:** cómo se dibuja el terreno y qué piezas pone cada juego según la forma del mapa está en [docs/TERRENO.md](docs/TERRENO.md). Un mapa nuevo se decora solo.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
 - **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
 
@@ -212,6 +213,7 @@ npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente po
 node tests/e2e/moba.mjs  # Chromium: Asedio 2v2 y 3v3 (lanzar con clic, cancelar, B, forja en base, fin de partida)
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
 npm run test:touch       # Chromium con táctil emulado: palanca, botones, apuntado y habilidades en los cuatro juegos
+node tests/e2e/maps.mjs  # capturas de cada mapa (entero, costa, muros) para revisar terreno y ambientación
 VITEST_TOOLS=1 npx vitest run # herramientas de balance (tabla de knockback, estadísticas de bots)
 ```
 
@@ -235,6 +237,7 @@ El plan de arte completo (rig y animaciones, VFX, splash art) está en [docs/MEJ
 - Hoja de ruta de modos (MOBA, battle royale, obstáculos) y editor de mapas: [docs/PLATAFORMA_Y_MODOS.md](docs/PLATAFORMA_Y_MODOS.md).
 - Carrera: las pistas nuevas y la copa están probadas con bots, no con gente; lo que falta está en [docs/CARRERA.md](docs/CARRERA.md).
 - Horda: la dificultad y las mejoras están ajustadas con partidas de bots, no con gente; lo que falta (más mapas, más misiones) está en [docs/ZOMBIS.md](docs/ZOMBIS.md).
+- Terreno y ambientación: revisados con capturas, no en partidas con gente; lo que falta (y por qué no hay grilla irregular) está en [docs/TERRENO.md](docs/TERRENO.md).
 - Máximo 6 personajes por partida (3v3). 5v5 queda para Fase 2 con servidor dedicado.
 - El host tiene que quedarse en la partida (si se va, termina para todos). Si un cliente se cae, un bot lo reemplaza y puede volver a entrar con el mismo link.
 - Controles táctiles: probados con táctil emulado en el navegador, no en un teléfono real (falta medir cuántos cuadros da y cómo se sienten los pulgares). Por datos móviles la conexión directa suele necesitar TURN (ver 2.6), y conviene que el anfitrión sea una PC.

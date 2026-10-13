@@ -123,7 +123,7 @@ La idea: un editor **en el mismo juego** (web), para que armar un mapa sea tan f
 0. **Juego:** si es un juego nuevo (no una forma más de ganar dentro de uno que ya existe), sumar su entrada a `GAMES` en `src/core/games.ts`. Con eso aparece en la vitrina del menú, la sala muestra solo sus opciones y el host valida cuántos hacen falta.
 1. **Victoria:** implementar `GameMode` en `src/core/modes.ts` (init, onDeath, canRespawn, tick, result, hud) y sumarlo a `ModeId` y a `MODE_INFO` (en `games.ts`, diciendo de qué juego es y qué opciones tiene).
 2. **Sistemas:** elegir un `Ruleset` existente o agregar uno en `src/core/rules.ts`. Si hace falta un sistema nuevo, agregarlo como **flag** en `Ruleset` y preguntar por el flag en la simulación (nunca por el modo).
-3. **Mapa:** agregar el mapa (ASCII hoy, editor mañana) y, si el modo necesita piezas de mapa nuevas, sumarlas a la leyenda.
+3. **Mapa:** agregar el mapa (ASCII hoy, editor mañana) y, si el modo necesita piezas de mapa nuevas, sumarlas a la leyenda. Si el juego trae una clase de mapa nueva (`kind`), darle su ambientación en `src/render/ambience.ts`: qué piezas van en una hilera de muros, un puente, un claro o un borde, y qué hay en el fondo ([TERRENO.md](TERRENO.md)).
 4. **HUD:** `Hud` ya se adapta a las reglas; el marcador sale de `GameMode.hud()`.
 5. **Bots:** `BotBrain` consulta `sim.rules` y `mode.hud()` (por ejemplo, va a la zona si hay zona).
 6. **Tests:** una partida headless de bots con el modo nuevo en `tests/sim.test.ts`.
