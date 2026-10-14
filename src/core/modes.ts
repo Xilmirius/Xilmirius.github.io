@@ -74,6 +74,8 @@ export interface GameMode {
   standings?(sim: Simulation): Standing[];
   /** Un héroe eligió una de las mejoras que tenía ofrecidas (i: cuál). */
   onPerk?(sim: Simulation, ch: Character, i: number): void;
+  /** ¿Está este héroe en un taller (donde se mejoran las armas con chatarra)? */
+  workshop?(sim: Simulation, ch: Character): boolean;
   /** El modo no usa el tiempo límite (no se avisan los últimos minutos). */
   untimed?: boolean;
 }

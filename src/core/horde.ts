@@ -15,7 +15,7 @@ import { PERK, PERK_IDS, PERKS, perkLv } from './perks';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { Family } from './types';
-import { C4, c4Max, crateAmmo, giveWeapon, WEAPON_IDS, WEAPONS, type WeaponId } from './weapons';
+import { C4, c4Max, giveWeapon, refillWeapons, type WeaponId } from './weapons';
 
 export const ZOMBIE_TEAM = 1;
 export type ZombieKind = 'zombie' | 'runner' | 'brute' | 'spitter' | 'titan';
@@ -72,9 +72,9 @@ export const HORDE = {
    * La horda también crece: por cada misión cumplida (que es cuando los héroes eligen una mejora) los zombis
    * aguantan más, pegan más y salen más. Sin esto, con las mejoras el final sería un paseo.
    */
-  threatHp: 0.15,
-  threatDmg: 0.07,
-  threatCount: 0.15,
+  threatHp: 0.3,
+  threatDmg: 0.08,
+  threatCount: 0.2,
   /** Sin recibir golpes durante `healAfter` segundos, un héroe se cura solo a `healRate` por segundo: despegarse sirve. */
   healAfter: 3,
   healRate: 5,
@@ -88,6 +88,8 @@ export const HORDE = {
   nestEvery: 12,
   nestEveryPerHero: 1.5,
   nestEveryMin: 4,
+  /** Chatarra que suelta un nido al caer. */
+  nestScrap: 10,
   /** Bidones de combustible a juntar. */
   fuel: 3,
   /** El jefe: vida base y por cada héroe, y cuántas moles lo escoltan. */
@@ -133,6 +135,8 @@ interface ZombieDef {
   kbTaken: number;
   /** Daño por golpe (se resta de la vida del héroe). */
   dmg: number;
+  /** Trozos de chatarra que suelta al morir. */
+  scrap: number;
   kb: number;
   /** Distancia (entre bordes de los cuerpos) desde la que ataca. */
   range: number;
@@ -144,12 +148,12 @@ interface ZombieDef {
 }
 
 export const ZOMBIES: Record<ZombieKind, ZombieDef> = {
-  zombie: { name: 'Zombi', family: 'goo', hp: 55, speed: 3.4, kbTaken: 1, dmg: 8, kb: 7, range: 0.5, cd: 1.1, windup: 0.3 },
-  runner: { name: 'Corredor', family: 'crystal', hp: 30, speed: 6.3, kbTaken: 1.25, dmg: 5, kb: 5, range: 0.5, cd: 0.8, windup: 0.2 },
-  brute: { name: 'Mole', family: 'stone', hp: 320, speed: 2.6, kbTaken: 0.4, dmg: 14, kb: 13, range: 0.9, cd: 2.2, windup: 0.75, slam: 2.4 },
-  spitter: { name: 'Escupidor', family: 'goo', hp: 40, speed: 3, kbTaken: 1.1, dmg: 7, kb: 6, range: 9, cd: 2.3, windup: 0.45 },
+  zombie: { name: 'Zombi', family: 'goo', hp: 55, speed: 3.4, kbTaken: 1, dmg: 8, scrap: 1, kb: 7, range: 0.5, cd: 1.1, windup: 0.3 },
+  runner: { name: 'Corredor', family: 'crystal', hp: 30, speed: 6.3, kbTaken: 1.25, dmg: 5, scrap: 1, kb: 5, range: 0.5, cd: 0.8, windup: 0.2 },
+  brute: { name: 'Mole', family: 'stone', hp: 320, speed: 2.6, kbTaken: 0.4, dmg: 14, scrap: 6, kb: 13, range: 0.9, cd: 2.2, windup: 0.75, slam: 2.4 },
+  spitter: { name: 'Escupidor', family: 'goo', hp: 40, speed: 3, kbTaken: 1.1, dmg: 7, scrap: 2, kb: 6, range: 9, cd: 2.3, windup: 0.45 },
   // El jefe de la misión "Derribar a la Mole Madre": su vida sale de HORDE.bossHp.
-  titan: { name: 'Mole Madre', family: 'stone', hp: 1, speed: 3.1, kbTaken: 0.12, dmg: 19, kb: 17, range: 1.3, cd: 2.5, windup: 0.85, slam: 3.6 },
+  titan: { name: 'Mole Madre', family: 'stone', hp: 1, speed: 3.1, kbTaken: 0.12, dmg: 19, scrap: 30, kb: 17, range: 1.3, cd: 2.5, windup: 0.85, slam: 3.6 },
 };
 
 const SPIT_RADIUS = 1.7;
@@ -164,6 +168,8 @@ interface ZombieAI {
   /** Dónde va a caer el escupitajo que está preparando. */
   aim: { x: number; z: number } | null;
   stuck: number;
+  /** Último lugar firme que pisó (ahí suelta la chatarra si cae al vacío). */
+  gx: number; gy: number; gz: number;
 }
 
 type P2 = { x: number; z: number };
@@ -246,6 +252,13 @@ export class HordeMode implements GameMode {
 
   canRespawn(_sim: Simulation, ch: Character) { return ch.lives > 0; }
 
+  /** El taller de armas: una mini base o el campamento de salida (el centro de los puntos de aparición). */
+  workshop(sim: Simulation, ch: Character) {
+    if (this.bases.some((b) => d2(ch.pos, b) <= HORDE.baseR && Math.abs(ch.pos.y - b.y) < 2.2)) return true;
+    const camp = sim.baseCenter(ch.team);
+    return d2(ch.pos, camp) <= HORDE.baseR && Math.abs(ch.pos.y - sim.groundY(camp.x, camp.z, ch.pos.y)) < 2.2;
+  }
+
   /** Con una mini base en pie, se reaparece en la última. */
   respawnAt(sim: Simulation, _ch: Character) {
     const b = this.bases[this.bases.length - 1];
@@ -307,7 +320,7 @@ export class HordeMode implements GameMode {
     // Cada oleada llegan un poco más duros, y cada misión cumplida, bastante más.
     const hp = (fixedHp || def.hp * (1 + 0.06 * Math.max(0, this.wave - 1))) * (1 + HORDE.threatHp * this.step);
     const u = sim.addUnit(kind as UnitKind, ZOMBIE_TEAM, x, z, { name: def.name, family: def.family, hp, speed: def.speed, kbTaken: def.kbTaken });
-    u.ai = { kind, target: null, think: sim.rng.range(0, 0.3), windup: 0, aim: null, stuck: 0 } satisfies ZombieAI;
+    u.ai = { kind, target: null, think: sim.rng.range(0, 0.3), windup: 0, aim: null, stuck: 0, gx: x, gy: u.pos.y, gz: z } satisfies ZombieAI;
     u.invuln = 0.5;
     u.cds.basic = 0.6;
     sim.emit({ k: 'gad', w: 'rise', i: -1, id: u.id, x: u.pos.x, y: u.pos.y, z: u.pos.z });
@@ -397,7 +410,7 @@ export class HordeMode implements GameMode {
     while (ch.perks.length < PERK_IDS.length) ch.perks.push(0);
     ch.perks[idx]++;
     // Las que hacen algo en el momento.
-    if (id === 'ammo' && ch.primary >= 0) ch.ammo = Math.max(ch.ammo, crateAmmo(ch, WEAPONS[WEAPON_IDS[ch.primary]]));
+    if (id === 'ammo') refillWeapons(ch);
     else if (id === 'demo') ch.c4 = Math.min(c4Max(ch), ch.c4 + PERK.c4);
     else if (id === 'turret') this.owed.set(ch, (this.owed.get(ch) ?? 0) + 1);
     else if (id === 'life') {
@@ -634,6 +647,7 @@ export class HordeMode implements GameMode {
     if (st.kind !== 'nest') return;
     this.nests = this.nests.filter((n) => n !== st);
     if (by && by.unit === 'hero') by.destroyed++;
+    sim.dropMaterials('stone', st.x, st.y + 0.8, st.z, HORDE.nestScrap);
     sim.emit({ k: 'alert', w: 'horde_nest', tm: this.nests.length, x: st.x, z: st.z });
   }
 
@@ -789,6 +803,7 @@ export class HordeMode implements GameMode {
     const inp = u.input;
     inp.mx = 0; inp.mz = 0;
     if (!ai) return;
+    if (u.grounded) { ai.gx = u.pos.x; ai.gy = u.pos.y; ai.gz = u.pos.z; }
     if (u.stun > 0 || u.hitstun > 0 || u.tumble > 0) { ai.windup = 0; ai.aim = null; return; }
     const def = ZOMBIES[ai.kind];
 
@@ -883,6 +898,13 @@ export class HordeMode implements GameMode {
 
   onUnitDeath(sim: Simulation, u: Character, killer: Character | null, fell: boolean) {
     this.kills++;
+    // Chatarra: queda donde cayó (o en el último lugar firme que pisó, si se fue al vacío).
+    const ai = u.ai as ZombieAI | null;
+    if (ai) {
+      const n = ZOMBIES[ai.kind].scrap;
+      if (fell) sim.dropMaterials(u.family, ai.gx, ai.gy + 0.8, ai.gz, n);
+      else sim.dropMaterials(u.family, u.pos.x, u.pos.y + 0.8, u.pos.z, n);
+    }
     if (!killer || killer.unit !== 'hero') return;
     killer.cs++;
     const cold = perkLv(killer, 'cold');

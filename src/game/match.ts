@@ -10,7 +10,7 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import { CORE, TOWER } from '../core/moba/defs';
 import { ROUTE_MODS } from '../core/mutations';
-import { WEAPON_IDS, WEAPONS } from '../core/weapons';
+import { nextWeapon, WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { TEAM_COLORS } from '../core/constants';
 import type { AbilitySlot, HeroId, MatchSettings } from '../core/types';
@@ -131,6 +131,7 @@ export class MatchRunner {
     this.ticker = new Ticker(() => this.step());
     window.addEventListener('resize', this.onResize);
     window.addEventListener('keyup', this.onKeyUp);
+    if (this.rules.weapons) window.addEventListener('wheel', this.onWheel, { passive: true });
     audio.setMusic('match');
     audio.intensity = 0.3;
   }
@@ -159,14 +160,17 @@ export class MatchRunner {
     const t = new TouchInput();
     this.input.touch = t;
     this.hud.setTouch(true);
-    this.touchUi = new TouchControls(this.hud, t, this.input.cast, { forge: () => { if (this.rules.crafting) this.hud.toggleForge(); } });
+    this.touchUi = new TouchControls(this.hud, t, this.input.cast, { forge: () => { if (this.rules.crafting || this.rules.weapons) this.hud.toggleForge(); } });
   }
 
   private onKey(code: string): boolean | void {
     // Con una mejora para elegir en pantalla, 1, 2 y 3 son para eso.
     if (this.hud.perkKey(code)) return true;
+    // Armas (Horda): las teclas 1 a 4 sacan cada una.
+    const dg = this.rules.weapons ? /^(?:Digit|Numpad)([1-4])$/.exec(code) : null;
+    if (dg) { this.session.command({ c: 'weapon', i: Number(dg[1]) - 1 }); return true; }
     const a = actionOf(code);
-    if (a === 'forge' && this.rules.crafting) this.hud.toggleForge();
+    if (a === 'forge' && (this.rules.crafting || this.rules.weapons)) this.hud.toggleForge();
     else if (a === 'board') { this.boardHeld = true; this.hud.showBoard(true); }
     else if (code === 'Escape') {
       if (this.input.cast.cancel()) return;
@@ -174,6 +178,16 @@ export class MatchRunner {
       else this.hooks.onEscape();
     }
   }
+
+  /** Rueda del mouse: cambia de arma (con el cursor sobre el juego, no sobre un panel). */
+  private wheelT = 0;
+  private onWheel = (e: WheelEvent) => {
+    if ((e.target as HTMLElement | null)?.closest?.('.forge, .board, .modal-wrap, .results')) return;
+    const now = performance.now();
+    if (now - this.wheelT < 140 || Math.abs(e.deltaY) < 1) return;
+    this.wheelT = now;
+    this.hud.cycleWeapon(e.deltaY > 0 ? 1 : -1);
+  };
 
   private onKeyUp = (e: KeyboardEvent) => {
     if (actionOf(e.code) === 'board' && this.boardHeld) { this.boardHeld = false; this.hud.showBoard(false); }
@@ -370,7 +384,7 @@ export class MatchRunner {
       const slot = k as AbilitySlot;
       if (this.rules.weapons) {
         // Armas: salen al toque, sin apuntar.
-        if (slot === 'q') return me.pri >= 0 ? 'now' : 'Todavía no tenés otra arma: agarrá una caja de suministros';
+        if (slot === 'q') return nextWeapon(me.wl, me.wa, local.wp, 1) >= 0 ? 'now' : 'Todavía no tenés otra arma con balas: agarrá una caja de suministros';
         if (slot === 'r') return me.c4 > 0 ? 'now' : 'Sin cargas de C4: vienen en las cajas 🧨';
         return `Acá no hay poderes: clic dispara, ${keyName('q')} cambia de arma y ${keyName('r')} planta C4`;
       }
@@ -568,5 +582,6 @@ export class MatchRunner {
     this.view.dispose();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('wheel', this.onWheel);
   }
 }

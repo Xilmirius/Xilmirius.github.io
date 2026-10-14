@@ -21,10 +21,10 @@ import { Backdrop } from './backdrop';
 import { BeanView } from './beanView';
 import { DecorView } from './decorView';
 import { AreasView, KothView, Particles, PROJ_COLORS, ProjectilesView } from './fx';
-import { buildGunMesh, CRATE_COLORS, HordeView, TRACER_COLORS } from './hordeView';
+import { buildGunMesh, CRATE_COLORS, HordeView, LV5_COLOR, TRACER_COLORS } from './hordeView';
 import { CRATE_INFO, CRATE_KINDS } from '../core/horde';
 import { PERK_IDS, PERKS } from '../core/perks';
-import { SHOT_CRIT } from '../core/weapons';
+import { SHOT_CRIT, WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { GADGET_COLORS, GadgetsView } from './gadgetsView';
 import { AimIndicator, type AimView } from './indicator';
 import { FixedView, NEUTRAL_COLOR, UnitsView, ZOMBIE_COLOR } from './mobaView';
@@ -55,7 +55,7 @@ export interface ViewOptions {
   post: boolean;
   theme?: string;
   /** Qué dan los trozos al juntarlos (según las reglas): cambia el texto flotante. */
-  pickups?: 'materials' | 'ult' | 'none';
+  pickups?: 'materials' | 'ult' | 'none' | 'scrap';
   /** Reglas con vida (Horda): los nombres llevan una barra de vida en vez de las etapas del heat. */
   health?: boolean;
 }
@@ -120,7 +120,7 @@ export class GameView {
   private danger = 0;
   private sun: THREE.DirectionalLight;
   private theme: ThemeDef;
-  private pickupKind: 'materials' | 'ult' | 'none';
+  private pickupKind: 'materials' | 'ult' | 'none' | 'scrap';
   localId = -1;
   myTeam = 0;
   private critT = -9;
@@ -308,7 +308,7 @@ export class GameView {
       const cf = c.id === this.localId && local ? local : c;
       const dead = (cf.fl & F_DEAD) !== 0;
       const gy = dead ? -999 : this.groundBelow(cf.x, cf.y, cf.z);
-      b.setWeapon(cf.wp, buildGunMesh);
+      b.setWeapon(cf.wp, buildGunMesh, cf.wlv);
       b.update(cf, dt, gy, this.time);
       if (dead) continue;
       if (cf.st >= 3 && Math.random() < dt * 10) {
@@ -623,7 +623,10 @@ export class GameView {
       case 'shot': {
         const b = this.beans.get(e.id), f = b?.lastFrame;
         if (!b || !f) break;
-        const col = TRACER_COLORS[e.w] ?? TRACER_COLORS[0];
+        const lvl = e.lv ?? 1;
+        // El nivel se ve: la traza más gruesa y larga, y en el 5 de otro color.
+        const col = lvl >= 5 ? LV5_COLOR : TRACER_COLORS[e.w] ?? TRACER_COLORS[0];
+        const thick = 1 + 0.22 * (lvl - 1), long = 1 + 0.12 * (lvl - 1);
         const shotgun = e.p.length > 4;
         const mx = f.x + Math.sin(f.f) * 0.85, my = f.y + 0.8, mz = f.z + Math.cos(f.f) * 0.85;
         b.kick(shotgun ? 1.3 : e.w === 1 ? 0.35 : 0.8);
@@ -634,7 +637,7 @@ export class GameView {
         for (let i = 0; i + 3 < e.p.length; i += 4) {
           const x = e.p[i], y = e.p[i + 1], z = e.p[i + 2], what = e.p[i + 3];
           const crit = what === SHOT_CRIT;
-          this.horde.tracer(mx, my, mz, x, y, z, crit ? CRIT_COLOR : col, (shotgun ? 0.035 : e.w === 1 ? 0.04 : 0.055) * (crit ? 1.9 : 1), shotgun ? 0.11 : crit ? 0.13 : 0.08);
+          this.horde.tracer(mx, my, mz, x, y, z, crit ? CRIT_COLOR : col, (shotgun ? 0.035 : e.w === 1 ? 0.04 : 0.055) * (crit ? 1.9 : 1) * thick, (shotgun ? 0.11 : crit ? 0.13 : 0.08) * long);
           if (crit) {
             // Crítico: chispazo dorado y aviso (los tuyos, con texto).
             P.burst(x, y, z, 6, ZOMBIE_COLOR, { speed: 4.5, up: 3.5, size: 0.11, life: 0.5 });
@@ -655,6 +658,24 @@ export class GameView {
           }
         }
         if (e.id === me && shotgun) this.onImpact(HITSTOP.light);
+        break;
+      }
+      case 'wup': {
+        // Subió un arma de nivel en el taller: columna de luz, anillo y el nivel sobre la cabeza.
+        const p = this.charPos(e.id);
+        if (!p) break;
+        const col = e.lv >= 5 ? LV5_COLOR : CRIT_COLOR;
+        G.ring(p.x, p.y + 0.08, p.z, 2 + e.lv * 0.3, col, 0.5);
+        G.beam(p.x, p.y, p.z, col);
+        S.burst(p.x, p.y + 0.6, p.z, 14 + e.lv * 6, col, { speed: 2.2, up: 7, size: 0.07, life: 0.9, gravity: 4 });
+        L.flash(p.x, p.y + 1, p.z, col, 40, 10, 0.35);
+        if (this.worthText(p.x, p.z, e.id)) F.add(p.x, p.y + 2.4, p.z, `${WEAPONS[WEAPON_IDS[e.w]].icon} NV ${e.lv}`, 'big lvl', { size: e.id === me ? 30 : 22, life: 1.3, rise: 1.4 });
+        break;
+      }
+      case 'burn': {
+        // Un zombi prendido fuego: llamitas.
+        const p = this.charPos(e.id);
+        if (p) S.burst(p.x, p.y + 0.9, p.z, 5, 0xff7a1c, { speed: 1.2, up: 3.2, size: 0.09, life: 0.5, gravity: -2 });
         break;
       }
       case 'perk': {
@@ -973,7 +994,7 @@ export class GameView {
       case 'pspawn': {
         for (const a of e.l) {
           const [id, mat, x, y, z, vx, vy, vz] = a;
-          const mesh = pickupMesh(mat);
+          const mesh = pickupMesh(mat, this.pickupKind === 'scrap');
           mesh.position.set(x, y, z);
           this.scene.add(mesh);
           this.pickups.set(id, { id, mat, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(vx, vy, vz), grounded: false, mesh, t: 0, collectBy: -1, collectT: 0 });
@@ -986,7 +1007,7 @@ export class GameView {
         if (e.id === me) {
           const pos = p ? p.pos : this.charPos(e.id);
           if (pos) {
-            F.add(pos.x, pos.y + 0.8, pos.z, this.pickupKind === 'ult' ? '+⚡' : `+1 ${MAT_ICON[e.m]}`, 'mat', { size: 18, life: 0.7, rise: 1.2 });
+            F.add(pos.x, pos.y + 0.8, pos.z, this.pickupKind === 'ult' ? '+⚡' : this.pickupKind === 'scrap' ? '+1 🔩' : `+1 ${MAT_ICON[e.m]}`, 'mat', { size: 18, life: 0.7, rise: 1.2 });
             const s = this.toScreen(pos.x, pos.y + 0.5, pos.z);
             this.onLocalPickup(s.x, s.y, e.m);
           }

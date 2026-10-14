@@ -285,7 +285,18 @@ export function buildStructureMesh(kind: string, rot: number, color: number, haz
 
 export interface PickupVis { id: number; mat: number; pos: THREE.Vector3; vel: THREE.Vector3; grounded: boolean; mesh: THREE.Object3D; t: number; collectBy: number; collectT: number }
 
-export function pickupMesh(mat: number): THREE.Object3D {
+/** Chatarra (Horda): una tuerca gris que brilla un poco para que se vea en el piso. */
+function scrapMesh(): THREE.Object3D {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.1, 6), new THREE.MeshToonMaterial({
+    color: 0xb8c0cc, gradientMap: tg(), emissive: 0x6c7a8c, emissiveIntensity: 0.55,
+  }));
+  m.rotation.x = 0.5;
+  m.castShadow = true;
+  return m;
+}
+
+export function pickupMesh(mat: number, scrap = false): THREE.Object3D {
+  if (scrap) return scrapMesh();
   const fam = FAMILIES[mat] as Family;
   const file = assetModel(`pickup.${fam}`);
   if (file) return file;

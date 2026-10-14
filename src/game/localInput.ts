@@ -14,7 +14,7 @@ const CAST_ACTIONS = new Set<ActionId>(['q', 'e', 'f', 'r', 'i1', 'i2', 'i3']);
 const ARROWS: Record<string, ActionId> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
 /** Clics sobre estos elementos son de la interfaz, no del juego. */
-const UI_TARGET = 'button, input, select, textarea, a, .forge, .results, .modal-wrap, .board, .gallery, .tbtn, .touch-zone';
+const UI_TARGET = 'button, input, select, textarea, a, .forge, .gunrow, .results, .modal-wrap, .board, .gallery, .tbtn, .touch-zone';
 /** Después de un toque, el navegador inventa un clic de mouse: durante este rato (ms) no se le hace caso. */
 const GHOST_MS = 900;
 

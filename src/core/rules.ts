@@ -21,8 +21,8 @@ export interface Ruleset {
   crafting: boolean;
   /** Reparar el cuerpo gastando material (V). */
   repair: boolean;
-  /** Qué hacen los trozos que sueltan los destructibles: nada, materiales para la forja o carga de ulti. */
-  pickups: 'none' | 'materials' | 'ult';
+  /** Qué hacen los trozos que sueltan los destructibles o los zombis: nada, materiales para la forja, carga de ulti o chatarra del equipo (taller de armas). */
+  pickups: 'none' | 'materials' | 'ult' | 'scrap';
   /** Dash universal (Shift). */
   dash: boolean;
   /** La ulti se carga pegando y juntando trozos (en vez de desbloquearse por nivel y tener enfriamiento). */
@@ -90,8 +90,8 @@ export const RULESETS: Record<RulesetId, Ruleset> = {
   },
   horde: {
     id: 'horde', name: 'Horda', icon: '🔫',
-    desc: 'Las de la Horda: armas en vez de poderes y barra de vida en vez de heat. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas.',
-    progression: false, crafting: false, repair: false, pickups: 'none', dash: true, ultCharge: false,
+    desc: 'Las de la Horda: armas en vez de poderes y barra de vida en vez de heat. Clic dispara, el empujón te saca zombis de encima y hay C4. Las armas y la munición caen en cajas; los zombis sueltan chatarra para mejorarlas en el taller.',
+    progression: false, crafting: false, repair: false, pickups: 'scrap', dash: true, ultCharge: false,
     forgeAtBase: false, recall: false, tileRegen: 12, tileStep: false, dashBreak: 0, xpMul: 1, abilities: false, itemBoxes: false, weapons: true,
     jump: true, jumpMul: 1, gravityMul: 1, maxAirJumps: 99, dashCd: DASH_CD, grab: false, health: true,
   },

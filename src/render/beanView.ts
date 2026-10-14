@@ -177,6 +177,7 @@ export class BeanView {
   private nextHand = 1;
   private gun: THREE.Group | null = null;
   private gunIdx = -1;
+  private gunLv = 0;
   private gunKick = 0;
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
@@ -414,12 +415,24 @@ export class BeanView {
   }
 
   /** Arma en la mano (índice en WEAPON_IDS; -1 = ninguna). `build` arma la malla (render/hordeView). */
-  setWeapon(idx: number, build: (idx: number) => THREE.Group) {
-    if (idx === this.gunIdx) return;
+  setWeapon(idx: number, build: (idx: number) => THREE.Group, lv = 1) {
+    if (idx === this.gunIdx && lv === this.gunLv) return;
     this.gunIdx = idx;
+    this.gunLv = lv;
     this.gun?.removeFromParent();
     this.gun = idx >= 0 ? build(idx) : null;
-    if (this.gun) this.tilt.add(this.gun);
+    if (this.gun) {
+      this.tilt.add(this.gun);
+      // El nivel se ve en el arma: un brillo que sube con él (y rosa en el máximo).
+      if (lv >= 2) {
+        const c = new THREE.Color(lv >= 5 ? 0xff6be0 : lv >= 3 ? 0xffd23f : 0x9bd7ff), k = 0.12 * lv;
+        this.gun.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.MeshToonMaterial | undefined;
+          if (m && m.emissive) { m.emissive.copy(c); m.emissiveIntensity = k; }
+        });
+        if (lv >= 4) this.gun.scale.setScalar(1.12);
+      }
+    }
   }
 
   /** Retroceso del arma al disparar. */

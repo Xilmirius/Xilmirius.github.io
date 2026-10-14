@@ -54,7 +54,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [02](02-carrera-salida-en-linea.md) | – | Los corredores salen en dos filas y los de adelante llevan ventaja |
 | [x] | [03](03-carrera-sin-salto-y-agarrar.md) | 02 | Carrera con salto flotante y sin golpes: agarrar, empujar y un dash que tarda en volver |
 | [x] | [04](04-horda-barra-de-vida.md) | – | La Horda pasa del heat a una barra de vida |
-| [ ] | [05](05-horda-armas-chatarra-taller.md) | 04 | Se llevan todas las armas que se juntan y se mejoran con chatarra |
+| [x] | [05](05-horda-armas-chatarra-taller.md) | 04 | Se llevan todas las armas que se juntan y se mejoran con chatarra |
 | [ ] | [06](06-apuntado-con-altura.md) | 05 | Las balas van al punto del mundo que marca el cursor, también en altura |
 | [ ] | [07](07-navegacion-de-zombis.md) | 04 | Los zombis se traban: caminos que respetan rampas y obstáculos |
 | [ ] | [10](10-malla-generador.md) | – | Generador de la malla irregular (archivo nuevo, sin tocar el juego) |

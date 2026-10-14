@@ -36,7 +36,8 @@ Pilares:
 |---|---|
 | Clic izquierdo (mantener) | **Disparar** el arma que tenés en la mano |
 | Clic derecho | Empujón (saca zombis de encima sin gastar balas) |
-| Tecla de la primera habilidad (`Q`) | **Cambiar** entre la pistola y tu arma |
+| Tecla de la primera habilidad (`Q`), rueda del mouse, teclas `1` a `4` | **Cambiar** de arma: `Q` y la rueda pasan a la siguiente que tenga balas, `1` a `4` eligen directo (pistola, uzi, escopeta, lanzacohetes; con una mejora para elegir en pantalla, esas teclas son de la mejora) |
+| Tecla de la forja (`C`) o el botón ⚒️ | Abrir el **taller** de armas |
 | Tecla de la ulti (`E`) | **Plantar C4** |
 | Shift / Espacio | Dash / salto |
 
@@ -44,7 +45,7 @@ Los héroes se diferencian por su peso y su velocidad, no por poderes. Las otras
 
 ## 4. Armas
 
-Se empieza con la pistola, un arma cargada (uzi o escopeta, alternadas entre los héroes) y una carga de C4. Se lleva la pistola más **un** arma: una caja de la misma suma balas (hasta el doble); una de otra la reemplaza. Sin balas, vuelve la pistola.
+Se empieza con la pistola, un arma cargada (uzi o escopeta, alternadas entre los héroes) y una carga de C4. Se llevan **todas** las armas que se juntan: una caja de un arma que no tenías la suma en nivel 1 y la saca; una de un arma que ya tenías le suma balas (hasta el triple de una caja) y, si estaba vacía, la saca. Un arma sin balas **no se pierde** (ni su nivel): se pasa sola a la pistola y queda vacía hasta la próxima caja.
 
 | Arma | Cadencia | Daño | Empuje | Alcance | Balas por caja | Paso al disparar |
 |---|---|---|---|---|---|---|
@@ -55,6 +56,29 @@ Se empieza con la pistola, un arma cargada (uzi o escopeta, alternadas entre los
 | **C4** | — | 65 en área (4,6 m) | 22 | a tus pies | 2 cargas (hasta 4) | — |
 
 El daño a zombis se multiplica por `HORDE.heroVsUnit` (1,6). **Disparar frena**: mientras tirás te movés a una fracción de tu velocidad, así que hay que elegir entre correr y tirar. Los zombis comunes son más lentos que un héroe, los Corredores no.
+
+### Chatarra, niveles y taller
+
+Los zombis sueltan **chatarra** (🔩): trozos que se juntan pasando cerca, con el imán de siempre (`rules.pickups === 'scrap'`, `Simulation.dropMaterials` / `updatePickups`). Zombi y corredor 1, escupidor 2, Mole 6, Mole Madre 30 y nido 10 (`ZOMBIES[...].scrap`, `HORDE.nestScrap`); los que caen al vacío la sueltan en el último lugar firme que pisaron. **Es del equipo**: la que junta uno se suma al contador de todos los que siguen en juego, y cada uno gasta el suyo.
+
+Cada arma tiene **cinco niveles**; subir de nivel cuesta 15, 30, 50 y 80 de chatarra (`UPGRADE_COST`):
+
+| Nivel | Qué da |
+|---|---|
+| 2 y 4 | +35 % de daño cada uno |
+| 3 | Lo propio del arma y 50 % más balas por caja |
+| 5 | El remate del arma |
+
+| Arma | Nivel 3 | Nivel 5 |
+|---|---|---|
+| Pistola | La bala atraviesa un zombi más | Cada bala explota en chico al dar |
+| Uzi | 30 % más de cadencia | Balas incendiarias: el zombi arde 3 s |
+| Escopeta | 3 perdigones más | Derriba: el doble de empuje y 25 % más de alcance |
+| Lanzacohetes | Explosión 30 % más grande | Racimo: tres explosiones chicas alrededor un instante después |
+
+Las cuentas están en `weaponStats` (`weapons.ts`); las mejoras de misión se aplican encima. El nivel se ve (traza más gruesa y larga, y rosa en el 5; el arma de la mano brilla) y se oye (más grave y fuerte).
+
+El **taller** es una mini base o el campamento de salida (el centro de los puntos de aparición, con el mismo radio `HORDE.baseR`). Se abre con la tecla de la forja o el botón ⚒️, no frena la partida y lo valida la simulación (`upgradeWeapon`): comprar fuera de un taller, sin chatarra o sin el arma no cambia nada. La fila de arriba de la barra muestra las cuatro armas (nivel, balas, cuál está en la mano) y la chatarra; tocar una ficha saca esa arma.
 
 ### Cómo se resuelven los disparos
 
@@ -104,7 +128,7 @@ Al cumplir cada misión (menos la extracción), **cada héroe elige una mejora e
 | 🦅 **Ojo de halcón** | 15 % de golpes críticos: daño ×2,5 y más empuje | 3 |
 | 🎯 **Balas perforantes** | Cada bala atraviesa un zombi más | 2 |
 | 💣 **Reacción en cadena** | El zombi que bajás explota y lastima a los de al lado; los que caen por esa explosión explotan también | 2 |
-| 🎒 **Bandolera** | Las cajas traen 50 % más balas, y te recarga el arma al elegirla | 2 |
+| 🎒 **Bandolera** | Las cajas traen 50 % más balas, y te recarga todas las armas al elegirla | 2 |
 | ❄️ **Sangre fría** | Cada zombi que bajás te cura 2,5 de vida | 2 |
 | 🛡️ **Piel curtida** | Recibís 20 % menos de daño y te empujan menos | 2 |
 | 🧨 **Demoledor** | +2 cargas de C4 ahora, llevás 2 más y explotan más grande | 2 |
@@ -115,7 +139,7 @@ Al cumplir cada misión (menos la extracción), **cada héroe elige una mejora e
 
 La lista y los números están en `src/core/perks.ts`; quién las ofrece y lo que hacen al elegirlas, en `horde.ts` (`tickPerks`, `onPerk`); lo que cambian de las armas, en `weapons.ts`. La elección viaja como un comando (`perk`) y el estado, en el frame propio de cada jugador (`MeFrame.pk`, `of`, `ot`).
 
-**La horda también crece.** Con las mejoras solas el final era un paseo (en las pruebas, los bots ganaban siempre sin caerse), así que por cada misión cumplida los zombis aguantan 15 % más, pegan 7 % más y salen 15 % más (`HORDE.threatHp`, `threatDmg`, `threatCount`). Vale también para los nidos que escupen, la escolta y el jefe.
+**La horda también crece.** Con las mejoras solas el final era un paseo (en las pruebas, los bots ganaban siempre sin caerse), así que por cada misión cumplida los zombis aguantan 30 % más, pegan 8 % más y salen 20 % más (`HORDE.threatHp`, `threatDmg`, `threatCount`; con armas que suben de nivel los números anteriores, 15 / 7 / 15, quedaban cortos). Vale también para los nidos que escupen, la escolta y el jefe.
 
 ### Que disparar se sienta
 
@@ -137,7 +161,7 @@ Se guardan **récords personales** en el perfil local: extracción más rápida 
 - **Vida**: acá los héroes tienen **barra de vida** (150) en vez de heat; es la regla `health` de `Ruleset`, que solo prende la Horda. Cada golpe de zombi resta su daño (`ZOMBIES[...].dmg`: 8 zombi, 5 corredor, 7 escupidor, 14 mole, 19 Mole Madre, por la dificultad y por la misión en curso). En cero el héroe **se rompe en el lugar**, pierde una vida y reaparece en la última mini base con la vida llena; caer al vacío también cuesta una vida. Los golpes **empujan siempre igual y poco** (`HEALTH_KB` = 0,45, sin etapas): un zombi común apenas corre al héroe, la Mole Madre y los barriles sí lo lanzan. La barra se cura sola (5 por segundo tras 3 s sin recibir golpes), en una mini base (+7 por segundo), con un botiquín (+60 a él y a los que tenga cerca) y al cumplir una misión (+30 a todos). Cada misión cumplida también **sube la vida máxima de todos en 15** (`HORDE.missionMaxHp`) y cura esa cantidad: con las seis llegan a 240. El cuerpo se agrieta al perder vida (la etapa sale de la fracción: 66 %, 33 %, 15 %), así que el latido y el borde rojo de peligro siguen andando. Lo que lo implementa: `Simulation.applyHeat` (daño), `coolHeat` (cura), `hit` (empuje) y `die(ch, true)` (evento `broke`). Arena, Asedio y Carrera siguen con heat.
 - **Dificultad** (la elige el host): Fácil, Normal y Difícil cambian cuántos zombis salen y cuánto pegan (`HORDE_LEVELS`).
 
-Con la vida en 150 y tres bots en El Refugio (20 partidas por dificultad, `npm run tool:horde`), ganan 18 a 19 de 20 en Fácil, 12 en Normal y 3 a 5 en Difícil (sin la vida máxima por misión; con ella, 19 a 20, 14 a 15 y 9 a 11); el equipo pierde de 1 a 8 vidas por partida y una partida dura unos 220 a 270 s. Con 100 de vida ganaban 14, 3 y 2, y con heat (antes de la tarea 04) ganaban casi todas. El resultado cambia mucho de una partida a otra, más que entre dificultades.
+Con la vida en 150 y tres bots en El Refugio (20 partidas por dificultad, `npm run tool:horde`), ganan 16 a 18 de 20 en Fácil, 13 en Normal y 6 a 9 en Difícil (con armas que suben de nivel y la vida máxima por misión); el equipo pierde de 1 a 8 vidas por partida y una partida dura unos 220 a 270 s. Con 100 de vida ganaban 14, 3 y 2, y con heat (antes de la tarea 04) ganaban casi todas. El resultado cambia mucho de una partida a otra, más que entre dificultades.
 
 ## 9. Lo que falta o hay que decidir jugando
 

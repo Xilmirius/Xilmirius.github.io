@@ -26,7 +26,7 @@ import { PERK, perkLv } from './perks';
 import { Rng } from './rng';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from './rules';
 import { Terrain, TILE_CRUMBLING, TILE_GONE, TILE_INTACT } from './terrain';
-import { C4, fireWeapon, plantC4, swapWeapon } from './weapons';
+import { C4, fireWeapon, plantC4, selectWeapon, swapWeapon, upgradeWeapon, WEAPON_IDS, WLV } from './weapons';
 import { ABILITY_SLOTS, FAMILIES, type AbilitySlot, type Family, type HeroId, type MatchSettings, type Route, type RosterEntry } from './types';
 
 export interface SimConfig {
@@ -63,7 +63,11 @@ export type Command =
   | { c: 'sell'; id: string }
   | { c: 'mutate'; slot: AbilitySlot; route: Route }
   /** Elegir una de las mejoras ofrecidas (i: cuál de las que tiene en pantalla). */
-  | { c: 'perk'; i: number };
+  | { c: 'perk'; i: number }
+  /** Sacar el arma i (índice en WEAPON_IDS): rueda del mouse y teclas 1 a 4. */
+  | { c: 'weapon'; i: number }
+  /** Subir de nivel el arma i en un taller. */
+  | { c: 'upgrade'; i: number };
 
 /** Valida un comando que llegó por la red (dato no confiable). Devuelve null si no es un comando bien formado. */
 export function parseCommand(raw: unknown): Command | null {
@@ -71,6 +75,9 @@ export function parseCommand(raw: unknown): Command | null {
   const m = raw as Record<string, unknown>;
   if (m.c === 'perk') {
     return typeof m.i === 'number' && Number.isInteger(m.i) && m.i >= 0 && m.i < PERK.options ? { c: 'perk', i: m.i } : null;
+  }
+  if (m.c === 'weapon' || m.c === 'upgrade') {
+    return typeof m.i === 'number' && Number.isInteger(m.i) && m.i >= 0 && m.i < WEAPON_IDS.length ? { c: m.c, i: m.i } : null;
   }
   if (m.c === 'craft' || m.c === 'sell') {
     return typeof m.id === 'string' && Object.hasOwn(ITEM_BY_ID, m.id) ? { c: m.c, id: m.id } : null;
@@ -470,6 +477,7 @@ export class Simulation {
     if (this.unitsDirty) this.cleanupUnits();
     for (const c of this.chars) this.updateChar(c);
     for (const u of this.units) this.updateUnit(u);
+    this.updateBurns();
     this.bodyCollisions();
     if (this.phase !== 'end') {
       // Terminada la partida no se pelea más: solo física (que caigan al piso) y festejos en el cliente.
@@ -521,6 +529,8 @@ export class Simulation {
       const ch = this.charByPid.get(pid);
       if (!ch) continue;
       if (cmd.c === 'perk') { this.mode.onPerk?.(this, ch, cmd.i); continue; }
+      if (cmd.c === 'weapon') { if (this.rules.weapons && ch.alive) selectWeapon(this, ch, cmd.i); continue; }
+      if (cmd.c === 'upgrade') { upgradeWeapon(this, ch, cmd.i); continue; }
       if (!this.rules.crafting) continue;
       if (this.rules.forgeAtBase && ch.alive && !this.atBase(ch) && cmd.c !== 'sell') {
         this.deny(ch, this.rules.recall ? 'La fragua está en tu base (B para volver)' : 'La fragua está en tu base');
@@ -579,7 +589,7 @@ export class Simulation {
     return true;
   }
 
-  private deny(ch: Character, why: string): false {
+  deny(ch: Character, why: string): false {
     this.emit({ k: 'deny', id: ch.id, w: why });
     return false;
   }
@@ -886,6 +896,26 @@ export class Simulation {
   // ───────────────────────────── unidades (esbirros, neutrales) ─────────────────────────────
 
   /** Física y estados de una unidad. Su input (hacia dónde caminar) lo pone la IA del modo en preTick. */
+  /** Prende fuego a una unidad (uzi nivel 5): recibe un golpecito de daño cada medio segundo durante unos segundos. */
+  ignite(u: Character, by: Character) {
+    if (!u.alive || u.unit === 'hero') return;
+    if (u.burnT <= 0) u.burnTick = WLV.burnEvery;
+    u.burnT = WLV.burnTime;
+    u.burnBy = by.id;
+  }
+
+  private updateBurns() {
+    for (const u of this.units) {
+      if (u.burnT <= 0 || !u.alive) continue;
+      u.burnT -= DT;
+      u.burnTick -= DT;
+      if (u.burnTick > 0) continue;
+      u.burnTick += WLV.burnEvery;
+      this.emit({ k: 'burn', id: u.id });
+      this.damageUnit(u, this.charById.get(u.burnBy) ?? null, WLV.burnDmg);
+    }
+  }
+
   private updateUnit(u: Character) {
     if (!u.alive) return;
     u.invuln = Math.max(0, u.invuln - DT);
@@ -1680,7 +1710,10 @@ export class Simulation {
   private endProjectile(p: Projectile, owner: Character | null) {
     if (p.dead) return;
     p.dead = true;
-    if (p.explode) this.blast(owner, p.team, p.pos.x, p.pos.y, p.pos.z, p.explode, p.mods);
+    if (p.explode) {
+      this.blast(owner, p.team, p.pos.x, p.pos.y, p.pos.z, p.explode, p.mods);
+      p.explode.then?.(p.pos.x, p.pos.y, p.pos.z);
+    }
   }
 
   // ───────────────────────────── zonas, estructuras, telegrafías ─────────────────────────────
@@ -2091,9 +2124,10 @@ export class Simulation {
       if (target) {
         if (bd < PICKUP_COLLECT) {
           if (this.rules.pickups === 'ult') this.addUlt(target, ULT_PER_PICKUP);
+          else if (this.rules.pickups === 'scrap') { for (const c of this.chars) if (!c.eliminated) c.scrap++; }
           else target.mats[FAMILIES[p.mat]]++;
           target.pickups++;
-          this.addXp(target, XP_PICKUP);
+          if (this.rules.pickups !== 'scrap') this.addXp(target, XP_PICKUP);
           this.emit({ k: 'pick', i: p.id, id: target.id, m: p.mat });
           p.t = Infinity;
           continue;

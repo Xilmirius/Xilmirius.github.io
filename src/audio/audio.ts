@@ -635,7 +635,9 @@ export class AudioEngine {
         const mine = e.id === localId;
         // Las ráfagas ajenas, salteadas: seis uzis a la vez taparían todo lo demás.
         if (!mine && e.w === 1 && this.shotSkip++ % 2) break;
-        this.play(['pistol', 'uzi', 'shotgun'][e.w] ?? 'pistol', vol * (mine ? 0.85 : 0.5), pan, 0.94 + Math.random() * 0.12);
+        // El nivel se oye: más pesado (más grave y un poco más fuerte).
+        const lvl = e.lv ?? 1;
+        this.play(['pistol', 'uzi', 'shotgun'][e.w] ?? 'pistol', vol * (mine ? 0.85 : 0.5) * (1 + 0.07 * (lvl - 1)), pan, (0.94 + Math.random() * 0.12) * (1 - 0.045 * (lvl - 1)));
         if (mine) {
           // Tus balas dieron: un tic (y otro más fuerte si fue crítico), sin tapar la ráfaga.
           let hit = 0;
@@ -672,6 +674,7 @@ export class AudioEngine {
         }
         break;
       case 'perk': if (e.id === localId) this.play('perk', 0.85); else this.play('pickup', vol * 0.5, pan); break;
+      case 'wup': if (e.id === localId) this.play('perk', 0.9); else this.play('pickup', vol * 0.6, pan); break;
       case 'tshot': this.play('bolt', vol * 0.8, pan, 0.7); break;
       case 'shit': if (e.by === localId) this.play(e.h > 0 ? 'metal' : 'shield', 0.45, pan); break;
       case 'sdown': this.play('quake', 1); this.play('boom', 1); this.play('crowd', 0.8); break;

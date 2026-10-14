@@ -116,9 +116,16 @@ export class Character implements MoveState {
   // Armas (reglas con `weapons`, ver core/weapons.ts): índices en WEAPON_IDS.
   /** Arma en la mano. 0 = pistola. */
   weapon = 0;
-  /** Arma principal que lleva además de la pistola (-1 = ninguna) y las balas que le quedan. */
-  primary = -1;
-  ammo = 0;
+  /** Nivel de cada arma que lleva (por índice en WEAPON_IDS; 0 = no la tiene). La pistola siempre tiene 1. */
+  wLv: number[] = [1, 0, 0, 0];
+  /** Balas que le quedan a cada arma (la pistola no gasta). */
+  wAmmo: number[] = [0, 0, 0, 0];
+  /** Chatarra juntada (suma para todo el equipo; se gasta en el taller). */
+  scrap = 0;
+  /** > 0: está prendido fuego (balas incendiarias del uzi): segundos que le quedan, quién lo prendió y cuándo toca el próximo daño. */
+  burnT = 0;
+  burnBy = -1;
+  burnTick = 0;
   /** Cargas de C4. */
   c4 = 0;
   /** > 0: acaba de disparar (se mueve más lento, ver WeaponDef.move). */
@@ -241,6 +248,8 @@ export interface BlastSpec {
   tileRadius?: number;
   fx: string;
   slow?: [number, number];
+  /** Después de la explosión (racimo del lanzacohetes). */
+  then?: (x: number, y: number, z: number) => void;
 }
 
 export interface Zone {

@@ -10,7 +10,7 @@ import type { CupInfo } from '../core/cup';
 import { MAPS } from '../core/maps';
 import { lapTime } from '../core/race';
 import { PERK_IDS, PERKS } from '../core/perks';
-import { SHOT_CRIT, WEAPON_IDS, WEAPONS } from '../core/weapons';
+import { nextWeapon, SHOT_CRIT, upgradeCost, WEAPON_IDS, WEAPON_LEVEL_TEXT, WEAPON_MAX_LV, WEAPONS } from '../core/weapons';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR } from '../core/mutations';
 import type { MatchResultInfo, PlayerResult, RosterInfo } from '../core/protocol';
 import type { Command } from '../core/sim';
@@ -18,7 +18,7 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, c4Tip, dashTip, grabTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, healthTip, stageTip, swapTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, c4Tip, dashTip, grabTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, healthTip, scrapTip, stageTip, swapTip, ultBarTip, weaponChipTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchContext, type MatchReward } from '../game/profile';
@@ -57,6 +57,12 @@ export class Hud {
   private board: HTMLDivElement;
   private results: HTMLDivElement | null = null;
   private gunEl: HTMLElement | null = null;
+  // Armas (Horda): la fila con las cuatro armas y la chatarra, y el taller (que usa el panel de la forja).
+  private gunRow = h('div', { class: 'gunrow' });
+  private chips: { root: HTMLElement; lv: HTMLElement; ammo: HTMLElement }[] = [];
+  private scrapEl: HTMLElement | null = null;
+  private scrapNum: HTMLElement | null = null;
+  private prevScrap = -1;
   // Mejoras de la Horda: las tres cartas para elegir, la fila de las que ya tenés y la marca de impacto en el cursor.
   private perkEl = h('div', { class: 'hud-perks' });
   private perkRow = h('div', { class: 'perkrow' });
@@ -123,7 +129,7 @@ export class Hud {
   ) {
     for (const r of roster) this.byId.set(r.id, r);
     this.root = h('div', { class: 'hud' });
-    const bottom = h('div', { class: 'hud-bottom' }, this.body, h('div', { class: 'hud-mid' }, this.perkEl, this.deny, this.perkRow, this.bar, this.hint), h('div', { class: 'hud-right' }, this.mats));
+    const bottom = h('div', { class: 'hud-bottom' }, this.body, h('div', { class: 'hud-mid' }, this.perkEl, this.deny, this.gunRow, this.perkRow, this.bar, this.hint), h('div', { class: 'hud-right' }, this.mats));
     this.forge = h('div', { class: 'forge hidden' });
     this.board = h('div', { class: 'board hidden' });
     // Botón chico de pantalla completa arriba a la derecha (el menú de pausa también lo tiene).
@@ -194,7 +200,7 @@ export class Hud {
   private renderHints() {
     const r = this.rules;
     const k = (a: ActionId) => `<b>${keyName(a)}</b>`;
-    const hints = [r.weapons ? `<b>clic izq</b> disparar (mantené) · <b>clic der</b> empujón · ${k('q')} cambiar arma · ${k('r')} C4` : r.abilities ? `${k('q')} ${k('e')} ${k('f')} ${k('r')} apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela` : '<b>clic izq</b> golpe · <b>clic der</b> empujón', r.itemBoxes && `${k('i1')} ${k('i2')} ${k('i3')} ítems de las cajas`, r.dash && `${k('dash')} dash`, r.recall && `${k('recall')} volver a la base`, r.crafting && `${k('forge')} forja${r.forgeAtBase ? ' (en tu base)' : ''}`, r.repair && `${k('repair')} reparar`, `${k('board')} tabla`, '<b>Esc</b> menú'];
+    const hints = [r.weapons ? `<b>clic izq</b> disparar (mantené) · <b>clic der</b> empujón · ${k('q')} o rueda: cambiar arma · ${k('forge')} taller · ${k('r')} C4` : r.abilities ? `${k('q')} ${k('e')} ${k('f')} ${k('r')} apuntan · <b>clic izq</b> lanza · <b>clic der</b> cancela` : '<b>clic izq</b> golpe · <b>clic der</b> empujón', r.itemBoxes && `${k('i1')} ${k('i2')} ${k('i3')} ítems de las cajas`, r.dash && `${k('dash')} dash`, r.recall && `${k('recall')} volver a la base`, r.crafting && `${k('forge')} forja${r.forgeAtBase ? ' (en tu base)' : ''}`, r.repair && `${k('repair')} reparar`, `${k('board')} tabla`, '<b>Esc</b> menú'];
     this.hint.innerHTML = hints.filter(Boolean).join(' · ');
   }
 
@@ -246,17 +252,18 @@ export class Hud {
     const extra = [
       this.rules.jump ? only('jump', '⬆️', this.rules.maxAirJumps > 0 ? '<b>Saltar</b><p>En el aire: segundo salto.</p>' : '<b>Saltar</b><p>Un solo salto, flotante.</p>') : null,
       this.rules.repair ? only('repair', '🔧', '<b>Reparar</b><p>Mantené apretado.</p>') : null,
-      this.rules.crafting ? only('forge', '⚒️', '<b>Forja</b>') : null,
+      this.rules.crafting ? only('forge', '⚒️', '<b>Forja</b>') : this.rules.weapons ? only('forge', '⚒️', '<b>Taller</b><p>Mejorá tus armas con chatarra (en una mini base o el campamento).</p>') : null,
     ];
     if (this.rules.weapons) {
       // Armas: el arma en la mano con sus balas y las dos teclas que quedan (cambiar de arma y C4).
-      this.gunEl = tip(h('div', { class: 'gunbox', 'data-slot': 'basic' }), () => gunTip(this.lastLocal?.wp ?? 0));
+      this.gunEl = tip(h('div', { class: 'gunbox', 'data-slot': 'basic' }), () => gunTip(this.lastLocal?.wp ?? 0, this.lastMe?.wl[this.lastLocal?.wp ?? 0] ?? 1));
+      this.buildGunRow();
       this.bar.append(...[
         this.gunEl,
         mk('push', iconNode('icon.push', '🫸'), pushTip, 'small'),
         this.rules.dash ? mk('dash', iconNode('icon.dash', '💨'), () => dashTip(this.rules.dashCd), 'small') : null,
         h('div', { class: 'sep' }),
-        mk('q', document.createTextNode('🔁'), () => swapTip(this.lastLocal?.wp === 0 ? this.lastMe?.pri ?? -1 : 0)),
+        mk('q', document.createTextNode('🔁'), () => swapTip(this.lastMe && this.lastLocal ? nextWeapon(this.lastMe.wl, this.lastMe.wa, this.lastLocal.wp, 1) : -1)),
         mk('r', document.createTextNode('🧨'), c4Tip),
         ...extra,
       ].filter((x): x is HTMLDivElement => !!x));
@@ -451,28 +458,110 @@ export class Hud {
   /** Armas: el arma en la mano con sus balas, a cuál cambia la tecla y cuántas cargas de C4 quedan. */
   private renderGuns(c: CharFrame, me: MeFrame) {
     const cur = WEAPONS[WEAPON_IDS[c.wp] ?? 'pistol'];
-    const ammo = cur.ammo > 0 ? String(me.am) : '∞';
-    const key = `${cur.id}|${ammo}`;
+    const curAmmo = me.wa[c.wp] ?? 0, curLv = me.wl[c.wp] ?? 1;
+    const ammo = cur.ammo > 0 ? String(curAmmo) : '∞';
+    const key = `${cur.id}|${ammo}|${curLv}`;
     if (this.gunEl && this.gunEl.dataset.k !== key) {
-      const low = cur.ammo > 0 && me.am <= cur.ammo * 0.2;
+      const low = cur.ammo > 0 && curAmmo <= cur.ammo * 0.2;
       this.gunEl.dataset.k = key;
-      this.gunEl.innerHTML = `<span class="gun-ic">${cur.icon}</span><div class="gun-info"><b>${cur.name}</b><span class="gun-ammo${low ? ' low' : ''}">${ammo}</span></div><div class="key">Clic</div>`;
+      this.gunEl.innerHTML = `<span class="gun-ic">${cur.icon}</span><div class="gun-info"><b>${cur.name} <i class="glv l${curLv}">Nv ${curLv}</i></b><span class="gun-ammo${low ? ' low' : ''}">${ammo}</span></div><div class="key">Clic</div>`;
     }
+    const nx = nextWeapon(me.wl, me.wa, c.wp, 1);
     const q = this.slotEls.get('q');
     if (q) {
-      const other = c.wp === 0 ? (me.pri >= 0 ? WEAPONS[WEAPON_IDS[me.pri]] : null) : WEAPONS.pistol;
+      const other = nx >= 0 ? WEAPONS[WEAPON_IDS[nx]] : null;
       if (q.icon.dataset.item !== (other?.id ?? '')) { q.icon.dataset.item = other?.id ?? ''; q.icon.textContent = other ? other.icon : '🔁'; }
       q.root.classList.toggle('off', !other);
-      // Las balas del arma que tenés guardada.
-      q.mut.textContent = other && other.ammo > 0 ? String(me.am) : '';
+      // Las balas del arma a la que se pasa.
+      q.mut.textContent = other && other.ammo > 0 ? String(me.wa[nx]) : '';
       q.mut.className = 'mut ammo';
     }
+    this.renderGunRow(c, me);
     const r = this.slotEls.get('r');
     if (r) {
       r.mut.textContent = `×${me.c4}`;
       r.mut.className = 'mut ammo';
       r.root.classList.toggle('off', me.c4 <= 0);
     }
+  }
+
+  /** La fila de armas (una ficha por arma, con su nivel y sus balas) y el contador de chatarra: se arma una vez y después solo se actualiza. */
+  private buildGunRow() {
+    this.chips = WEAPON_IDS.map((id, i) => {
+      const lv = h('b', { class: 'gl' });
+      const ammo = h('span', { class: 'ga' });
+      const root = tip(h('div', { class: 'gchip none', onclick: () => this.send({ c: 'weapon', i }) }, h('span', { class: 'gk' }, String(i + 1)), h('span', { class: 'gi' }, WEAPONS[id].icon), lv, ammo),
+        () => weaponChipTip(i, this.lastMe?.wl[i] ?? 0, this.lastMe?.wa[i] ?? 0));
+      return { root, lv, ammo };
+    });
+    this.scrapNum = h('b', null, '0');
+    this.scrapEl = tip(h('div', { class: 'gscrap' }, '🔩 ', this.scrapNum, h('i', null, '')), () => scrapTip(!!this.lastMe?.ws));
+    this.gunRow.append(...this.chips.map((c) => c.root), this.scrapEl);
+  }
+
+  private renderGunRow(c: CharFrame, me: MeFrame) {
+    this.chips.forEach((chip, i) => {
+      const lv = me.wl[i] ?? 0, id = WEAPON_IDS[i];
+      const a = me.wa[i] ?? 0, empty = i > 0 && lv > 0 && a <= 0;
+      chip.root.classList.toggle('none', lv < 1);
+      chip.root.classList.toggle('on', i === c.wp);
+      chip.root.classList.toggle('empty', empty);
+      const t = lv > 0 ? `Nv${lv}` : '';
+      if (chip.lv.textContent !== t) chip.lv.textContent = t;
+      const at = lv < 1 ? '—' : WEAPONS[id].ammo > 0 ? String(a) : '∞';
+      if (chip.ammo.textContent !== at) chip.ammo.textContent = at;
+    });
+    if (this.scrapEl && this.scrapNum) {
+      if (this.scrapNum.textContent !== String(me.sc)) this.scrapNum.textContent = String(me.sc);
+      this.scrapEl.classList.toggle('ws', me.ws > 0);
+      const hint = this.scrapEl.querySelector('i')!;
+      const ht = me.ws > 0 ? ` taller ${this.touch ? '⚒️' : keyName('forge')}` : '';
+      if (hint.textContent !== ht) hint.textContent = ht;
+      if (this.prevScrap >= 0 && me.sc > this.prevScrap) bump(this.scrapEl);
+      this.prevScrap = me.sc;
+    }
+  }
+
+  /** Subir de nivel un arma: cuánto da cada nivel, cuánto cuesta y el botón para comprarlo (solo en un taller). */
+  private renderWorkshop() {
+    const me = this.lastMe, c = this.lastLocal;
+    if (!me || !c) return;
+    const key = JSON.stringify([me.wl, me.sc, me.ws, c.fl & F_DEAD]);
+    if (key === this.forgeKey) return;
+    this.forgeKey = key;
+    clear(this.forge);
+    const banner = me.ws > 0
+      ? h('div', { class: 'ws-ok' }, '✔ Estás en un taller: mejorá lo que quieras.')
+      : h('div', { class: 'forge-lock' }, '🔒 Los talleres están en cada mini base y en el campamento de salida. Podés mirar y planear tu compra.');
+    const rows = WEAPON_IDS.map((id, i) => {
+      const w = WEAPONS[id], lv = me.wl[i] ?? 0, cost = upgradeCost(lv);
+      const pips = h('span', { class: 'wpips' }, [1, 2, 3, 4, 5].map((n) => h('i', { class: n <= lv ? 'on' : '' })));
+      let body: (HTMLElement | string)[];
+      if (lv < 1) body = [h('span', { class: 'wtext' }, 'Todavía no la tenés: agarrá una caja de suministros.')];
+      else if (lv >= WEAPON_MAX_LV) body = [h('span', { class: 'wtext' }, `Al máximo · ${WEAPON_LEVEL_TEXT[id][3]}`)];
+      else {
+        const can = me.ws > 0 && me.sc >= cost && !(c.fl & F_DEAD);
+        body = [
+          h('span', { class: 'wtext' }, h('b', null, `Nivel ${lv + 1}: `), WEAPON_LEVEL_TEXT[id][lv - 1]),
+          h('button', { class: 'btn small' + (can ? '' : ' off'), disabled: !can, onclick: () => this.send({ c: 'upgrade', i }) }, `Mejorar · ${cost} 🔩`),
+        ];
+      }
+      return h('div', { class: 'wrow' + (lv < 1 ? ' none' : '') }, h('div', { class: 'wr-head' }, h('span', { class: 'wr-ic' }, w.icon), h('b', null, w.name), pips), ...body);
+    });
+    this.forge.append(
+      h('div', { class: 'tabs' }, h('span', { class: 'ws-title' }, '🔧 Taller de armas'), h('button', { class: 'x', onclick: () => this.toggleForge(false) }, '✕')),
+      banner,
+      h('div', { class: 'forge-mats' }, h('span', { class: 'cost' }, `🔩 ${me.sc} de chatarra`)),
+      h('div', { class: 'wlist' }, rows),
+      h('div', { class: 'forge-foot' }, 'La chatarra la sueltan los zombis y es de todo el equipo: la que junta uno suma para todos. Cada uno gasta la suya en sus armas.'));
+  }
+
+  /** Rueda del mouse: pasa a la siguiente arma (o a la anterior). */
+  cycleWeapon(dir: 1 | -1) {
+    const me = this.lastMe, c = this.lastLocal;
+    if (!this.rules.weapons || !me || !c || (c.fl & F_DEAD)) return;
+    const n = nextWeapon(me.wl, me.wa, c.wp, dir);
+    if (n >= 0) this.send({ c: 'weapon', i: n });
   }
 
   /** Mejoras: las cartas para elegir (si hay una oferta) y la fila de las que ya tenés. */
@@ -659,10 +748,11 @@ export class Hud {
   /** Un trozo de material vuela desde el mundo hasta el contador (efecto moneda de casino). */
   flyMat(sx: number, sy: number, mat: number) {
     // Con materiales: vuela al contador. Con carga de ulti: vuela a la tecla R.
-    const target = this.rules.pickups === 'materials' ? this.matEls[mat] : this.slotEls.get('r')?.root;
+    const scrap = this.rules.pickups === 'scrap';
+    const target = scrap ? this.scrapEl : this.rules.pickups === 'materials' ? this.matEls[mat] : this.slotEls.get('r')?.root;
     if (!target) return;
     const r = target.getBoundingClientRect();
-    const el = h('div', { class: 'flycoin' }, MAT_ICON[FAMILIES[mat]]);
+    const el = h('div', { class: 'flycoin' }, scrap ? '🔩' : MAT_ICON[FAMILIES[mat]]);
     el.style.left = `${sx}px`;
     el.style.top = `${sy}px`;
     document.body.appendChild(el);
@@ -886,6 +976,7 @@ export class Hud {
       } break;
       case 'deny': if (e.id === this.localId) { this.deny.textContent = DENY_TEXT[e.w] ?? e.w; this.denyT = 1.6; } break;
       case 'wpn': if (e.id === this.localId && e.e) this.localDeny('Sin balas: volvés a la pistola'); break;
+      case 'wup': if (e.id === this.localId) this.showCenter(`${WEAPONS[WEAPON_IDS[e.w]].name} · nivel ${e.lv}`, 1.5, 'good'); break;
       case 'shot': {
         if (e.id !== me || me < 0) break;
         let rank = -1;
@@ -988,6 +1079,7 @@ export class Hud {
   }
 
   private renderForge() {
+    if (this.rules.weapons) { this.renderWorkshop(); return; }
     const me = this.lastMe, c = this.lastLocal;
     if (!me || !c || !this.me) return;
     const locked = this.rules.forgeAtBase && !this.atBase && !(c.fl & F_DEAD);

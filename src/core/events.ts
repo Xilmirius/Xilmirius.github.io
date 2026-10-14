@@ -47,7 +47,9 @@ export type SimEvent =
   // ── Armas (core/weapons.ts) ──
   // Disparo de impacto instantáneo. w: índice del arma · p: por cada punto que tocó una bala [x, y, z, qué tocó (0 nada,
   // 1 cuerpo, 2 sólido, 3 cuerpo con crítico)], todo seguido. Una bala perforante deja un punto por cuerpo atravesado.
-  | { k: 'shot'; id: number; w: number; p: number[] }
+  | { k: 'shot'; id: number; w: number; /** nivel del arma */ lv: number; p: number[] }
+  | { k: 'wup'; id: number; w: number; lv: number } // subió un arma de nivel en el taller
+  | { k: 'burn'; id: number } // un zombi prendido fuego recibe daño
   | { k: 'perk'; id: number; p: number } // eligió una mejora (p: índice en PERK_IDS)
   | { k: 'wpn'; id: number; w: number; e: number } // cambió de arma (e: 1 = se quedó sin balas)
   | { k: 'c4'; id: number; x: number; y: number; z: number; f: number } // plantó una carga (f: segundos de mecha)

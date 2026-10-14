@@ -89,3 +89,23 @@ un sonido más pesado. Subir de nivel se festeja en pantalla.
   rueda y con las teclas, abre el taller en la mini base, sube un arma y la traza cambia. Capturas del HUD de armas
   y del taller.
 - `npm run test:touch` pasa y el taller se puede abrir y usar con los dedos.
+
+## Notas de ejecución
+
+Hecho como lo planteaba la tarea, con estos desvíos y datos:
+
+- **Inventario.** `Character.primary` y `ammo` se reemplazaron por `wLv[4]` (nivel de cada arma, 0 = no la tiene), `wAmmo[4]` y `scrap`. `giveWeapon` suma el arma en nivel 1 o suma balas (tope: tres cajas); un arma que se queda sin balas conserva su nivel y la mano pasa a la pistola. `MeFrame` cambia `pri`/`am` por `wl`, `wa`, `sc` (chatarra) y `ws` (está en un taller); `CharFrame` suma `wlv` (nivel del arma en la mano). Eventos: `shot` lleva `lv`, y hay `wup` (subió de nivel) y `burn` (un zombi prendido). `PROTOCOL_VERSION` pasó de 15 a 16.
+- **Comandos nuevos** (`parseCommand` los valida como `perk`): `weapon` (sacar el arma i: la rueda y las teclas 1 a 4) y `upgrade` (comprar el siguiente nivel de i). `upgradeWeapon` verifica que haya reglas de armas, que el héroe esté vivo, que tenga el arma, que no esté al máximo, que esté en un taller (`GameMode.workshop`, que en la Horda es una mini base o el campamento) y que alcance la chatarra; si algo falla, avisa y no cambia nada.
+- **Chatarra.** Es un valor nuevo de `Ruleset.pickups` (`'scrap'`). La junta cualquiera y suma +1 a cada héroe que no está eliminado; cada uno gasta la suya. Los zombis que caen al vacío la sueltan en el último lugar firme que pisaron (`ZombieAI.gx/gy/gz`). Cantidades como en la tarea (1/1/2/6/30 y 10 por nido).
+- **Efectos de nivel** en `weaponStats` (`weapons.ts`): +35 % de daño en el 2 y el 4 (suman), y los del 3 y el 5 como en la tabla. El racimo del lanzacohetes usa un gancho nuevo `BlastSpec.then`; el fuego del uzi es `Simulation.ignite` (un golpecito de 3 de daño cada 0,5 s durante 3 s, solo a zombis).
+- **Se ve y se oye.** Traza más gruesa y larga con el nivel y rosa en el 5; el arma de la mano brilla y en el 4 crece un poco; los disparos suenan más graves y fuertes; subir de nivel hace columna de luz, anillo y cartel.
+- **HUD.** Una fila sobre la barra con las cuatro armas (nivel, balas, cuál está en la mano; tocarla la saca) y el contador de chatarra, que se marca verde en un taller. El taller reutiliza el panel de la forja (`renderWorkshop`): nivel, qué da el siguiente, costo y botón. Con los dedos, el botón ⚒️ lo abre.
+- **Bots.** Eligen el arma por distancia (cohete de lejos y sin zombis encima, escopeta de cerca, uzi, pistola) llamando a `selectWeapon`; compran al pasar por un taller (primero escopeta o uzi, la que traen) y van hasta uno a menos de 24 m cuando les alcanza para subir esa arma.
+- **Dificultad.** Con armas que crecen, `HORDE.threatHp`, `threatCount` y `threatDmg` pasaron de 0,15 / 0,15 / 0,07 a 0,3 / 0,2 / 0,08. Sin tocarlos, los bots ganaban 8, 7 y 8 de 8 partidas.
+- **Herramienta.** `npm run tool:horde` ahora imprime también la chatarra juntada, la misión alcanzada y el nivel medio final de cada arma.
+
+**Mediciones** (`npm run tool:horde`, El Refugio, tres bots, 20 partidas por dificultad, con la vida máxima por misión de la tarea 04): ganan 16 de 20 en Fácil, 13 en Normal y 6 en Difícil (otra tanda de semillas: 18, 13 y 9). Los equipos juntan unos 430 a 450 de chatarra por partida y les sobran de 65 a 110 por héroe (los bots solo gastan en un arma). Al llegar a la quinta misión, **todos los bots tienen al menos un arma en nivel 3** en las 57 partidas que llegaron. Nivel final medio por arma (pistola / uzi / escopeta / cohete): 1,8 a 2,3 / 3,9 a 4,3 / 3,8 a 4,4 / 1,3 a 1,6.
+
+**Pantalla** (Edge): en una pestaña, teclas 1 a 4, rueda y Q cambian de arma (la 4 sin arma no cambia nada); el taller se abre con C en el campamento, mejora la uzi a nivel 2 (100 → 85 de chatarra), y el mismo comando fuera del taller no cambia nada. Capturas en `tests/e2e/out` (`05-*.png`).
+
+**Pendiente de que el usuario lo juegue:** si los costos (15 / 30 / 50 / 80) y los efectos de cada nivel se sienten bien, si la chatarra alcanza o sobra para quien reparte entre varias armas, y los sonidos y brillos de nivel, que se hicieron sin poder escucharlos ni verlos en movimiento.

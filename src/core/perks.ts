@@ -57,7 +57,7 @@ const pct = (n: number) => Math.round(n * 100);
 export const PERKS: Record<PerkId, PerkDef> = {
   dmg: { id: 'dmg', name: 'Pólvora brava', icon: '🔥', desc: `+${pct(PERK.dmg)}% de daño con todas las armas`, max: 3, weight: 10 },
   rate: { id: 'rate', name: 'Gatillo fácil', icon: '⚡', desc: `Disparás ${pct(PERK.rate)}% más rápido`, max: 3, weight: 10 },
-  ammo: { id: 'ammo', name: 'Bandolera', icon: '🎒', desc: `Las cajas traen ${pct(PERK.ammo)}% más balas. Te recarga el arma ahora`, max: 2, weight: 8 },
+  ammo: { id: 'ammo', name: 'Bandolera', icon: '🎒', desc: `Las cajas traen ${pct(PERK.ammo)}% más balas. Te recarga las armas ahora`, max: 2, weight: 8 },
   legs: { id: 'legs', name: 'Piernas livianas', icon: '👟', desc: `Disparar ya no te frena y corrés ${pct(PERK.legsSpeed - 1)}% más`, max: 1, weight: 8 },
   pierce: { id: 'pierce', name: 'Balas perforantes', icon: '🎯', desc: 'Cada bala atraviesa un zombi más', max: 2, weight: 8 },
   crit: { id: 'crit', name: 'Ojo de halcón', icon: '🦅', desc: `${pct(PERK.crit)}% de golpes críticos: daño ×${PERK.critMul}`, max: 3, weight: 9 },

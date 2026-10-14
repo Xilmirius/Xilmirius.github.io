@@ -12,6 +12,8 @@ export const CRATE_COLORS: Record<string, number> = { uzi: 0xffd23f, shotgun: 0x
 /** Color de la traza de cada arma (mismo orden que WEAPON_IDS). */
 export const TRACER_COLORS = [0xffe9a8, 0xffd23f, 0xffa24f, 0xff8a3c];
 export const BASE_COLOR = 0x4fd1ff;
+/** Color de la traza de un arma al nivel máximo. */
+export const LV5_COLOR = 0xff6be0;
 
 const toon = (color: number) => new THREE.MeshToonMaterial({ color, gradientMap: toonGradient() });
 

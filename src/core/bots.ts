@@ -15,7 +15,7 @@ import type { RaceMode } from './race';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
-import { C4, WEAPON_IDS, WEAPONS } from './weapons';
+import { C4, selectWeapon, upgradeCost, upgradeWeapon, usable, WEAPON_IDS, WEAPON_MAX_LV, WEAPONS } from './weapons';
 
 /** pace: a qué fracción de su velocidad corre una carrera (los fáciles se dejan alcanzar). */
 const DIFF = {
@@ -59,6 +59,7 @@ export class BotBrain {
   private hold = 0;
   private tap = 0;
   private lastB = 0;
+  private swapTick = -999;
   private pushT = 0;
   private strafe = 1;
   private strafeT = 0;
@@ -293,11 +294,25 @@ export class BotBrain {
     this.target = near;
     const dist = near ? here(near.pos) : Infinity;
 
-    // Arma: la principal mientras sirva a esa distancia (escopeta de cerca, cohete de lejos); si no, la pistola.
-    const pri = ch.primary >= 0 ? WEAPON_IDS[ch.primary] : null;
-    const want = pri && (pri !== 'shotgun' || dist < 8) && (pri !== 'launcher' || (dist > 5 && crowd < 2)) ? ch.primary : 0;
-    if (want !== ch.weapon) this.tap |= BTN.Q;
+    // Arma: la que sirva a esa distancia (cohete de lejos y sin zombis encima, escopeta de cerca, uzi); si no, la pistola.
+    let want = 0;
+    if (usable(ch, 3) && dist > 5 && crowd < 2) want = 3;
+    else if (usable(ch, 2) && dist < 8) want = 2;
+    else if (usable(ch, 1)) want = 1;
+    if (want !== ch.weapon && sim.tick - this.swapTick > 40) { this.swapTick = sim.tick; selectWeapon(sim, ch, want); }
     const w = WEAPONS[WEAPON_IDS[ch.weapon]];
+
+    // Taller: compra solo cuando pasa por uno, primero el arma que más usa (la escopeta o el uzi que trae). Si le alcanza y hay uno cerca, va.
+    const mainW = [2, 1, 3, 0].find((i) => ch.wLv[i] > 0 && ch.wLv[i] < WEAPON_MAX_LV) ?? -1;
+    if (mainW >= 0 && ch.scrap >= upgradeCost(ch.wLv[mainW])) {
+      if (m.workshop(sim, ch)) {
+        if (sim.tick - this.swapTick > 20) { this.swapTick = sim.tick; upgradeWeapon(sim, ch, mainW); }
+      } else if (crowd < 2 && MISSIONS[m.step]?.kind !== 'extract') {
+        const pts = [...m.bases, sim.baseCenter(ch.team)];
+        const shop = pts.reduce((a, b) => (here(a) <= here(b) ? a : b));
+        if (here(shop) < 24) { this.goal = here(shop) > HORDE.baseR - 1.5 ? { x: shop.x, z: shop.z } : null; return; }
+      }
+    }
 
     const nest = m.nests.length ? m.nests.reduce((a, b) => (here(a) <= here(b) ? a : b)) : null;
     // Con un nido a tiro y ningún zombi encima, el nido primero: mientras viva, no paran de salir.
@@ -352,7 +367,7 @@ export class BotBrain {
     this.retreating = false;
 
     // Una caja que le sirva y le quede a mano (más lejos si todavía no tiene arma principal). El combustible, siempre.
-    let crate: { x: number; z: number } | null = null, cd = ch.primary < 0 ? 20 : 9;
+    let crate: { x: number; z: number } | null = null, cd = ch.wLv.some((l, i) => i > 0 && l > 0 && ch.wAmmo[i] > 0) ? 9 : 20;
     for (const c of m.crates) {
       const k = CRATE_KINDS[c.kind];
       if (k === 'c4' ? ch.c4 >= C4.max : k === 'med' ? ch.hp > ch.maxHp * 0.47 : false) continue;

@@ -40,7 +40,7 @@ const tap = async (id, q, ms = 60) => { await down(id, q.x, q.y); await wait(ms 
 const me = () => p.evaluate(() => {
   const a = window.__rubble, s = a.session.sim, c = s.chars.find((x) => x.pid === a.session.localPid);
   return { x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), f: +c.facing.toFixed(2), basic: +c.cds.basic.toFixed(2), push: +c.cds.push.toFixed(2), charging: c.charging, dashCd: +c.dashCd.toFixed(2),
-    q: +c.cds.q.toFixed(1), e: +c.cds.e.toFixed(1), act: c.actives.join(','), rival: (() => { const o = s.chars.find((x) => x !== c && x.alive); return o ? +Math.atan2(o.pos.x - c.pos.x, o.pos.z - c.pos.z).toFixed(2) : 0; })(), armed: a.match.input.cast.armed, aim: !!a.match.view.aim, wp: c.weapon, ammo: c.ammo, c4: c.c4, recall: +c.recallT.toFixed(2), alive: c.alive, mx: c.input.mx, mz: c.input.mz, b: c.input.b };
+    q: +c.cds.q.toFixed(1), e: +c.cds.e.toFixed(1), act: c.actives.join(','), rival: (() => { const o = s.chars.find((x) => x !== c && x.alive); return o ? +Math.atan2(o.pos.x - c.pos.x, o.pos.z - c.pos.z).toFixed(2) : 0; })(), armed: a.match.input.cast.armed, aim: !!a.match.view.aim, wp: c.weapon, ammo: c.wAmmo[c.weapon], c4: c.c4, recall: +c.recallT.toFixed(2), alive: c.alive, mx: c.input.mx, mz: c.input.mz, b: c.input.b };
 });
 const ok = (name, cond, extra = '') => { console.log(`${cond ? '✔' : '✘ FALLA'} ${name}${extra ? ' · ' + extra : ''}`); if (!cond) errors.push('FALLA: ' + name); };
 const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
@@ -205,7 +205,7 @@ async function arena() {
 async function horde() {
   console.log('\n── Horda ──');
   await start('horde', { bots: 0 });
-  await place(() => { const a = window.__rubble, c = a.session.sim.chars.find((x) => x.pid === a.session.localPid); c.primary = 1; c.ammo = 60; c.c4 = 2; });
+  await place(() => { const a = window.__rubble, c = a.session.sim.chars.find((x) => x.pid === a.session.localPid); c.wLv[1] = 1; c.wAmmo[1] = 60; c.weapon = 1; c.c4 = 2; });
   const at = await btn('basic');
   const a0 = await me();
   await down(3, at.x, at.y); await slide(3, at.x - 60, at.y); await wait(0.5);
@@ -223,6 +223,18 @@ async function horde() {
   ok('cambiar de arma', w.wp !== a0.wp, `arma ${a0.wp} → ${w.wp}`);
   await tap(3, await btn('r'), 60); await wait(0.25);
   ok('plantar C4', (await me()).c4 === 1, `cargas ${(await me()).c4}`);
+  // Taller: el botón ⚒️ lo abre, se mejora un arma con el dedo y se cierra con la ✕.
+  await place(() => { const a = window.__rubble, c = a.session.sim.chars.find((x) => x.pid === a.session.localPid); c.scrap = 40; const b = a.session.sim.baseCenter(c.team); c.pos = { x: b.x, y: a.session.sim.groundY(b.x, b.z, 0), z: b.z }; });
+  await wait(0.5);
+  await tap(3, await btn('forge'), 70); await wait(0.4);
+  ok('botón del taller abre el taller', await p.evaluate(() => !document.querySelector('.forge').classList.contains('hidden') && !!document.querySelector('.forge .wrow')));
+  await shot('horde-3-taller');
+  const up1 = p.locator('.forge .wrow .btn:not(.off)').first();
+  if (await up1.count()) await up1.tap();
+  await wait(0.4);
+  ok('mejorar un arma con el dedo', await p.evaluate(() => { const a = window.__rubble, c = a.session.sim.chars.find((x) => x.pid === a.session.localPid); return c.wLv.some((l) => l >= 2) && c.scrap < 40; }));
+  await p.locator('.forge .x').tap(); await wait(0.2);
+  ok('la ✕ cierra el taller', await p.evaluate(() => document.querySelector('.forge').classList.contains('hidden')));
   await shot('horde-2');
 }
 

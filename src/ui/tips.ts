@@ -14,7 +14,7 @@ import { PERK, PERKS, type PerkId } from '../core/perks';
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
 import { GRAB } from '../core/sim';
 import { FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type HeroId, type ModeId, type Route } from '../core/types';
-import { C4, WEAPON_IDS, WEAPONS, type WeaponId } from '../core/weapons';
+import { C4, upgradeCost, WEAPON_IDS, WEAPON_LEVEL_TEXT, WEAPON_MAX_LV, WEAPONS, type WeaponId } from '../core/weapons';
 import { esc } from './tooltip';
 import { keyName, type ActionId } from '../game/keybinds';
 import { touchMode } from '../config';
@@ -207,7 +207,8 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
     touchMode()
       ? '<b>Armas en vez de poderes</b>: el botón grande dispara (mantenelo y arrastrá para apuntar; sin arrastrar apunta solo al zombi más cercano), <kbd>🫸</kbd> es el empujón, <kbd>🔁</kbd> cambia entre la pistola y tu arma y <kbd>🧨</kbd> planta C4.'
       : `<b>Armas en vez de poderes</b>: <kbd>Clic</kbd> dispara (mantenelo), <kbd>Clic derecho</kbd> es el empujón, <kbd>${keyName('q')}</kbd> cambia entre la pistola y tu arma, <kbd>${keyName('r')}</kbd> planta C4.`,
-    'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que cura. Disparar te frena: hay que elegir entre correr y tirar.',
+    'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que cura, y <b>llevás todas las armas que juntás</b>: cambiás con <kbd>Q</kbd>, la rueda o las teclas <kbd>1</kbd> a <kbd>4</kbd>. Disparar te frena: hay que elegir entre correr y tirar.',
+    `Los zombis sueltan <b>chatarra 🔩</b> (es de todo el equipo). Con ella <b>mejorás cada arma hasta el nivel 5</b> en un <b>taller</b>: una mini base o el campamento de salida (${touchMode() ? '⚒️' : '<kbd>' + keyName('forge') + '</kbd>'}).`,
     'Las oleadas <b>no paran de crecer</b>. Se gana cumpliendo las <b>misiones</b> del mapa, una tras otra, hasta la <b>extracción</b>.',
     'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde curarse y punto de reaparición.',
     `Al cumplir cada misión <b>elegís una mejora</b> entre tres (${touchMode() ? 'tocá la que quieras' : 'teclas <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> o clic'}): más daño, balas que atraviesan, zombis que explotan... Tenés ${PERK.time} s; se acumulan hasta el final.`,
@@ -232,17 +233,33 @@ const GUN_DESC: Record<WeaponId, string> = {
 };
 
 /** El arma que tenés en la mano (Horda). */
-export function gunTip(idx: number) {
+export function gunTip(idx: number, lv = 1) {
   const w = WEAPONS[WEAPON_IDS[idx] ?? 'pistol'];
-  return head(w.icon, w.name) + p(GUN_DESC[w.id])
-    + p(`Mantené <kbd>Clic</kbd> para disparar. ${w.ammo ? `Trae ${w.ammo} ${w.id === 'launcher' ? 'cohetes' : 'balas'} por caja.` : 'Munición infinita.'} Disparar te frena un poco.`, 'tt-note');
+  return head(w.icon, `${w.name} · nivel ${lv}`) + p(GUN_DESC[w.id])
+    + p(`Mantené <kbd>Clic</kbd> para disparar. ${w.ammo ? `Trae ${w.ammo} ${w.id === 'launcher' ? 'cohetes' : 'balas'} por caja.` : 'Munición infinita.'} Disparar te frena un poco.`, 'tt-note')
+    + p(lv >= WEAPON_MAX_LV ? 'Está al máximo.' : `Se mejora con chatarra en un taller (${keyName('forge')}).`, 'tt-note');
 }
 
 export function swapTip(other: number) {
   const w = other >= 0 ? WEAPONS[WEAPON_IDS[other]] : null;
   return head('🔁', 'Cambiar de arma', keyName('q'))
-    + p(w ? `Pasás a: ${w.icon} <b>${w.name}</b>.` : 'Llevás la pistola y <b>un</b> arma más. Todavía no tenés otra: agarrá una caja de suministros.')
-    + p('Agarrar una caja del arma que ya tenés suma balas; una distinta la reemplaza.', 'tt-note');
+    + p(w ? `Pasás a: ${w.icon} <b>${w.name}</b>.` : 'Todavía no tenés otra arma con balas: agarrá una caja de suministros.')
+    + p('Llevás todas las que juntás. También: la rueda del mouse y las teclas <kbd>1</kbd> a <kbd>4</kbd>.', 'tt-note');
+}
+
+/** Una de las cuatro armas de la fila (nivel 0 = no la tenés todavía). */
+export function weaponChipTip(idx: number, lv: number, ammo: number) {
+  const w = WEAPONS[WEAPON_IDS[idx]];
+  if (lv < 1) return head(w.icon, w.name) + p(GUN_DESC[w.id]) + p('Todavía no la tenés: agarrá una caja de suministros.', 'tt-note');
+  return head(w.icon, `${w.name} · nivel ${lv}`, `${idx + 1}`) + p(GUN_DESC[w.id])
+    + p(w.ammo ? `Balas: <b>${ammo}</b>${ammo <= 0 ? ' (vacía: agarrá una caja)' : ''}.` : 'Munición infinita.', 'tt-note')
+    + (lv < WEAPON_MAX_LV ? p(`Nivel ${lv + 1}: ${WEAPON_LEVEL_TEXT[w.id][lv - 1]} (${upgradeCost(lv)} 🔩).`, 'tt-note') : p('Está al máximo.', 'tt-note'));
+}
+
+export function scrapTip(inWorkshop: boolean) {
+  return head('🔩', 'Chatarra')
+    + p('La sueltan los zombis (las Moles y los nidos, mucha) y la juntás pasando cerca. <b>Es del equipo</b>: la que junta uno suma para todos, y cada uno gasta la suya.')
+    + p(inWorkshop ? `Estás en un taller: abrilo con <kbd>${keyName('forge')}</kbd>.` : `Se gasta en el taller (<kbd>${keyName('forge')}</kbd>), que está en cada mini base y en el campamento de salida.`, 'tt-note');
 }
 
 export function c4Tip() {
