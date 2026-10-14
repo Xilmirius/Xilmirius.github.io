@@ -23,6 +23,7 @@ Pilares:
 | Armas, disparo instantáneo, cohete y C4 | `src/core/weapons.ts` |
 | Mejoras: la lista y sus números | `src/core/perks.ts` |
 | Oleadas, IA de zombis, misiones, nidos, jefe, mini bases y cajas | `src/core/horde.ts` |
+| Grafo de celdas caminables, campo de distancias y ruta de los zombis (§10) | `src/core/nav.ts` |
 | Bots que disparan, van al objetivo, juntan cajas y plantan C4 | `src/core/bots.ts` (`decideHorde`) |
 | Trazas, C4 en el piso, cajas, mini bases y arma en la mano | `src/render/hordeView.ts`, `src/render/beanView.ts` |
 | Nido y Mole Madre | `src/render/propsView.ts`, `src/render/mobaView.ts` |
@@ -172,3 +173,15 @@ Con la vida en 150 y tres bots en El Refugio (20 partidas por dificultad, `npm r
 - ¿El C4 con mecha alcanza, o conviene detonarlo a distancia?
 - ¿Recarga de cargador, o solo munición total como está?
 - ¿Las explosiones propias deberían empujar (sin daño) a los compañeros?
+
+## 10. Cómo caminan los zombis
+
+Un módulo propio, `src/core/nav.ts` (`Nav`), que `HordeMode` usa en lugar del viejo campo por celdas y de `steer` (los esbirros del Asedio siguen con `steer`). Solo corre en el host.
+
+- **El grafo.** Los nodos son las celdas caminables del plano. Hay una arista a cada vecina (las ocho) si un cuerpo **la puede caminar de verdad**: `Nav.walk` recorre el segmento entre los dos centros de a 0,25 m contra el mismo `CollisionWorld` del movimiento, siguiendo el piso. Falla si no hay piso, si hay que subir más de `STEP_UP` o si un cuerpo de radio `CHAR_RADIUS` choca con algo. Bajar es una arista de un solo sentido (hasta 2 m, cuesta un poco más). Las diagonales piden que las dos celdas de los costados también sean nodos. Con esa única regla las rampas se entran por la punta baja y se salen por la alta, y la cobertura, los nidos y las torretas cortan las aristas que tapan. Las celdas pegadas al vacío cuestan más.
+- **Cuándo se rehace.** `Simulation.obstacleRev` sube cada vez que cambia la lista de obstáculos; `Nav.update` compara con la lista anterior y las losas que se cayeron, y rehace solo las aristas a una celda de lo que cambió.
+- **El campo.** Distancia a pie al héroe vivo más cercano (en celdas), con un montículo y hacia atrás por las aristas, cada 0,4 s. Cada héroe siembra su celda; si no es un nodo (está sobre un muro o una cobertura), el nodo más cercano a no más de 3 m. Así, con un héroe fuera de alcance, los zombis se juntan al pie. Los bordes por donde salen los zombis que el campo no alcanza (cerrados por un nido, una cobertura o piso caído) no se usan: dejaban al zombi encerrado.
+- **Seguir el campo.** Cada 0,2 s el zombi elige el vecino que más baja y, de los dos nodos siguientes, el más lejano que se alcanza en línea recta (corta las esquinas). Con el blanco a menos de 2,6 m y camino libre va derecho. A la dirección se le suma un empuje que lo aleja de los zombis a menos de 1 m. El escupidor retrocede por el grafo (el vecino que más lo aleja).
+- **Trabado, por avance.** Cada zombi recuerda cuánto le faltaba (por el camino) la última vez que se acercó medio metro. Si en 2,5 s no mejoró (ni se movió 2 m), prueba el segundo mejor vecino un segundo (`HORDE.stuckAfter`, `stuckAlt`); si a los 6 s sigue igual (`HORDE.stuck`) reaparece por otro borde, que es el último recurso. No cuenta como trabado estar peleando, esperar a menos de 3 m del héroe por el camino ni hacer cola detrás de dos zombis más cerca.
+- **Medirlo:** `npm run tool:stuck [mapa] [partidas]` corre partidas de Horda con tres bots y cuenta zombis salidos, reubicados, segundos-zombi sin avanzar y caídos solos al vacío. Con El Refugio, 20 partidas: antes 4,52 % reubicados y 10,34 % de segundos sin avanzar; después 0,16 % y 0,21 %.
+- Un cuerpo que cae pegado a una pared (de una rampa, de una plataforma) queda encimado y `moveAxis` le prohibía moverse en cualquier dirección. Ahora alejarse del obstáculo con el que está encimado siempre se permite (`src/core/movement.ts`).

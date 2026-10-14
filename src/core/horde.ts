@@ -6,10 +6,10 @@
 // cadena de misiones del mapa (MISSIONS) y llegando a la extracción. Cada zona asegurada queda como mini
 // base (torreta, punto de reaparición y lugar donde enfriarse). Las armas y la munición caen en cajas.
 // Se pierde cuando a nadie le quedan vidas. Diseño completo: docs/ZOMBIS.md.
-import { CHAR_RADIUS, LEVEL_H } from './constants';
+import { CELL, CHAR_RADIUS, LEVEL_H } from './constants';
 import type { Character, Structure, UnitKind } from './entities';
 import type { GameMode, ModeHud, ModeResult } from './modes';
-import { steer } from './moba/mode';
+import { Nav } from './nav';
 import { NO_MODS } from './mutations';
 import { PERK, PERK_IDS, PERKS, perkLv } from './perks';
 import type { Simulation } from './sim';
@@ -43,8 +43,11 @@ export const HORDE = {
   batchEvery: 1,
   /** Los héroes les pegan más fuerte a los zombis que entre ellos. */
   heroVsUnit: 1.6,
-  /** Un zombi que no logra avanzar tanto tiempo vuelve a salir por otro borde. */
-  stuck: 7,
+  /** Un zombi que no logra avanzar tanto tiempo vuelve a salir por otro borde (último recurso; antes prueba otro camino). */
+  stuck: 6,
+  /** Sin acercarse medio metro por este tiempo, prueba el segundo mejor vecino durante `stuckAlt` segundos. */
+  stuckAfter: 2.5,
+  stuckAlt: 1,
   /** Cajas de suministros: cada cuánto cae una, cuántas puede haber, cuánto tardan en caer y desde dónde se agarran. */
   crateEvery: 15,
   maxCrates: 3,
@@ -167,7 +170,22 @@ interface ZombieAI {
   windup: number;
   /** Dónde va a caer el escupitajo que está preparando. */
   aim: { x: number; z: number } | null;
+  /** Segundos sin acercarse (por el camino) al héroe. */
   stuck: number;
+  /** A dónde camina ahora (el último que dio la navegación; se rehace cada 0,15 s). */
+  goal: { x: number; z: number } | null;
+  navT: number;
+  /** Con el blanco al lado: ¿hay camino libre en línea recta? (se mira cada vez que se rehace el camino) */
+  direct: boolean;
+  /** Empuje que lo aleja de los zombis pegados (se rehace con el camino). */
+  sx: number; sz: number;
+  /** Segundos desde que se rehízo el camino. */
+  sinceT: number;
+  /** Lo que le faltaba (m) y dónde estaba la última vez que se acercó medio metro. */
+  mark: number; ax: number; az: number;
+  /** Segundos que le quedan probando el segundo mejor vecino; `altDone`: ya lo probó en este atasco. */
+  alt: number;
+  altDone: boolean;
   /** Último lugar firme que pisó (ahí suelta la chatarra si cae al vacío). */
   gx: number; gy: number; gz: number;
 }
@@ -182,6 +200,8 @@ export class HordeMode implements GameMode {
   /** Oleada actual; 0 antes de la primera. */
   wave = 0;
   kills = 0;
+  /** Zombis que se reubicaron por trabados (para medir la navegación: `npm run tool:stuck`). */
+  relocated = 0;
   /** Misión en curso (índice en MISSIONS). */
   step = 0;
   /** Zona de la misión en curso (hold, extract); null en las que no tienen. */
@@ -215,8 +235,8 @@ export class HordeMode implements GameMode {
   private last: P2 = { x: 0, z: 0 };
   /** Celdas de borde por donde salen los zombis. */
   private edges: number[] = [];
-  /** Distancia a pie de cada celda al héroe más cercano (los zombis bajan por este campo). */
-  private field = new Float32Array(0);
+  /** Grafo de celdas caminables y campo de distancias a pie al héroe más cercano (los zombis bajan por él). */
+  private nav: Nav | null = null;
   private fieldT = 0;
   private fieldOk = false;
   /** Torretas de bolsillo elegidas por alguien que no tenía dónde plantarla (estaba fuera de juego o en el aire). */
@@ -227,7 +247,7 @@ export class HordeMode implements GameMode {
     this.level = HORDE_LEVELS[sim.settings.difficulty] ?? HORDE_LEVELS[2];
     for (const c of sim.chars) c.lives = sim.settings.lives;
     const t = sim.terrain;
-    this.field = new Float32Array(t.cells.length);
+    this.nav = new Nav(sim);
     for (let i = 0; i < t.cells.length; i++) {
       const c = t.cells[i];
       if (c.type !== CellType.Floor || c.level !== 0 || c.fragile >= 0 || c.pad) continue;
@@ -304,8 +324,11 @@ export class HordeMode implements GameMode {
     const heroes = sim.chars.filter((c) => c.alive);
     let far = -1, farD = -1;
     const ok: number[] = [];
+    // Un borde que el campo no alcanza (cerrado por un nido, una cobertura o piso caído) dejaría al zombi encerrado.
+    const nav = this.nav!;
+    const open = nav.seeds.some((s) => s.node >= 0);
     for (const i of this.edges) {
-      if (!t.isWalkable(i)) continue;
+      if (!t.isWalkable(i) || (open && !nav.reaches(i))) continue;
       const c = t.cellCenter(i % t.w, Math.floor(i / t.w));
       let near = Infinity;
       for (const h of heroes) near = Math.min(near, d2(c, h.pos));
@@ -320,7 +343,10 @@ export class HordeMode implements GameMode {
     // Cada oleada llegan un poco más duros, y cada misión cumplida, bastante más.
     const hp = (fixedHp || def.hp * (1 + 0.06 * Math.max(0, this.wave - 1))) * (1 + HORDE.threatHp * this.step);
     const u = sim.addUnit(kind as UnitKind, ZOMBIE_TEAM, x, z, { name: def.name, family: def.family, hp, speed: def.speed, kbTaken: def.kbTaken });
-    u.ai = { kind, target: null, think: sim.rng.range(0, 0.3), windup: 0, aim: null, stuck: 0, gx: x, gy: u.pos.y, gz: z } satisfies ZombieAI;
+    u.ai = {
+      kind, target: null, think: sim.rng.range(0, 0.3), windup: 0, aim: null, stuck: 0, goal: null, navT: sim.rng.range(0, 0.2), direct: false, sx: 0, sz: 0, sinceT: 0,
+      mark: Infinity, ax: x, az: z, alt: 0, altDone: false, gx: x, gy: u.pos.y, gz: z,
+    } satisfies ZombieAI;
     u.invuln = 0.5;
     u.cds.basic = 0.6;
     sim.emit({ k: 'gad', w: 'rise', i: -1, id: u.id, x: u.pos.x, y: u.pos.y, z: u.pos.z });
@@ -670,11 +696,11 @@ export class HordeMode implements GameMode {
     const ok: P2[] = [], any: P2[] = [];
     for (let i = 0; i < t.cells.length; i++) {
       const c = t.cells[i];
-      if (c.type !== CellType.Floor || c.fragile >= 0 || c.pad || !t.isWalkable(i) || this.field[i] === Infinity) continue;
+      if (c.type !== CellType.Floor || c.fragile >= 0 || c.pad || !t.isWalkable(i) || !this.nav!.reaches(i)) continue;
       const p = t.cellCenter(i % t.w, Math.floor(i / t.w));
       if (!this.freeSpot(sim, p, 1.3)) continue;
       any.push(p);
-      if (near ? d2(p, near) > 1 && d2(p, near) < 3.4 : this.field[i] >= 2 && this.field[i] <= 7) ok.push(p);
+      if (near ? d2(p, near) > 1 && d2(p, near) < 3.4 : this.nav!.field[i] >= 2 && this.nav!.field[i] <= 7) ok.push(p);
     }
     if (ok.length) return sim.rng.pick(ok);
     if (!any.length) return null;
@@ -684,7 +710,7 @@ export class HordeMode implements GameMode {
 
   private dropCrate(sim: Simulation, kind: number, near: P2 | null = null) {
     // El campo de distancias hace falta para saber qué celdas alcanzan los héroes.
-    if (!this.fieldOk) this.buildField(sim);
+    if (!this.fieldOk) { this.nav!.buildField(); this.fieldOk = true; }
     const p = this.crateCell(sim, near);
     if (!p) return;
     this.crates.push({ id: this.crateId++, kind, x: p.x, y: sim.groundY(p.x, p.z, 0), z: p.z, t: 0 });
@@ -722,78 +748,18 @@ export class HordeMode implements GameMode {
 
   // ───────────── IA de los zombis ─────────────
 
-  /** Distancia a pie de cada celda al héroe vivo más cercano (subiendo solo por rampas, bajando por donde sea). */
-  private buildField(sim: Simulation) {
-    const t = sim.terrain;
-    const f = this.field;
-    this.fieldOk = true;
-    f.fill(Infinity);
-    const level = (i: number) => {
-      const c = t.cells[i];
-      return c.type === CellType.Ramp ? c.level + 0.5 : c.level;
-    };
-    const open: number[] = [];
-    for (const h of sim.chars) {
-      if (!h.alive) continue;
-      const ci = t.cellIndexAt(h.pos.x, h.pos.z);
-      if (ci >= 0 && t.isWalkable(ci) && f[ci] !== 0) { f[ci] = 0; open.push(ci); }
-    }
-    while (open.length) {
-      let bi = 0;
-      for (let i = 1; i < open.length; i++) if (f[open[i]] < f[open[bi]]) bi = i;
-      const cur = open.splice(bi, 1)[0];
-      const cx = cur % t.w, cz = Math.floor(cur / t.w);
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dz) continue;
-          const nx = cx + dx, nz = cz + dz;
-          if (nx < 0 || nz < 0 || nx >= t.w || nz >= t.h) continue;
-          const ni = nz * t.w + nx;
-          if (!t.isWalkable(ni)) continue;
-          if (dx && dz && (!t.isWalkable(cz * t.w + nx) || !t.isWalkable(nz * t.w + cx))) continue;
-          // El zombi camina de `ni` a `cur`: no puede subir más de medio nivel (no salta).
-          if (level(cur) - level(ni) > 0.55) continue;
-          const nc = f[cur] + (dx && dz ? 1.42 : 1);
-          if (nc < f[ni]) {
-            if (f[ni] === Infinity) open.push(ni);
-            f[ni] = nc;
-          }
-        }
-      }
-    }
-  }
-
-  /** Hacia dónde caminar para acercarse a un héroe: la celda vecina que más baja en el campo. */
-  private nextStep(sim: Simulation, u: Character): P2 | null {
-    const t = sim.terrain;
-    const ci = t.cellIndexAt(u.pos.x, u.pos.z);
-    if (ci < 0 || this.field[ci] === Infinity) return null;
-    const cx = ci % t.w, cz = Math.floor(ci / t.w);
-    let best = -1, bv = this.field[ci];
-    for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dz) continue;
-        const nx = cx + dx, nz = cz + dz;
-        if (nx < 0 || nz < 0 || nx >= t.w || nz >= t.h) continue;
-        const ni = nz * t.w + nx;
-        if (this.field[ni] === Infinity) continue;
-        if (dx && dz && (!t.isWalkable(cz * t.w + nx) || !t.isWalkable(nz * t.w + cx))) continue;
-        const v = this.field[ni] + (dx && dz ? 0.42 : 0);
-        if (v < bv) { bv = v; best = ni; }
-      }
-    }
-    return best < 0 ? null : t.cellCenter(best % t.w, Math.floor(best / t.w));
-  }
-
   preTick(sim: Simulation, dt: number) {
     if (sim.phase !== 'play') {
       for (const u of sim.units) { u.input.mx = 0; u.input.mz = 0; }
       return;
     }
+    const nav = this.nav!;
+    nav.update();
     this.fieldT -= dt;
     if (this.fieldT <= 0) {
       this.fieldT = 0.4;
-      this.buildField(sim);
+      nav.buildField();
+      this.fieldOk = true;
     }
     for (const u of sim.units) if (u.alive) this.think(sim, u, dt);
   }
@@ -844,22 +810,34 @@ export class HordeMode implements GameMode {
       return;
     }
 
-    let goal: P2 | null;
+    const nav = this.nav!;
+    ai.sinceT += dt;
+    ai.navT -= dt;
+    if (ai.alt > 0) ai.alt -= dt;
+    const near = gap <= def.range + 1;
+    // Al alcance de su blanco no está trabado: está peleando.
+    if (near) this.resetProgress(u, ai);
+
+    let goal: P2 | null = null;
     if (ai.kind === 'spitter' && gap < 4 && sameFloor) {
-      // El escupidor no se deja alcanzar: retrocede.
-      goal = { x: u.pos.x + (u.pos.x - tg.pos.x), z: u.pos.z + (u.pos.z - tg.pos.z) };
+      // El escupidor no se deja alcanzar: retrocede por el grafo.
+      const r = nav.retreat(u.pos.x, u.pos.z);
+      goal = r ? { x: r.x, z: r.z } : { x: u.pos.x + (u.pos.x - tg.pos.x), z: u.pos.z + (u.pos.z - tg.pos.z) };
+      this.resetProgress(u, ai);
     } else if (ai.kind === 'spitter' && gap <= def.range && sameFloor) {
       goal = null;
     } else {
-      goal = dist < 2.6 && sameFloor ? tg.pos : this.nextStep(sim, u) ?? tg.pos;
+      if (ai.navT <= 0 || !ai.goal) this.replan(sim, u, ai, near, sameFloor ? dist : Infinity, tg);
+      // Al lado y con camino libre: derecho.
+      goal = ai.direct ? tg.pos : ai.goal;
     }
-    if (goal) [inp.mx, inp.mz] = steer(sim, u, goal.x, goal.z);
+    [inp.mx, inp.mz] = goal ? this.heading(sim, u, ai, goal) : [0, 0];
 
-    // Trabado (un héroe subido a donde no llega, un muro que apareció): volver a salir por otro borde.
-    const moving = Math.hypot(u.vel.x, u.vel.z) > 0.4;
-    ai.stuck = moving || gap <= def.range + 1 ? 0 : ai.stuck + dt;
+    // Trabado: sin acercarse por el camino. Primero otro vecino un rato; si no, volver a salir por otro borde.
+    if (ai.stuck > HORDE.stuckAfter && !ai.altDone) { ai.altDone = true; ai.alt = HORDE.stuckAlt; ai.navT = 0; }
     if (ai.stuck > HORDE.stuck) {
-      ai.stuck = 0;
+      this.relocated++;
+      this.resetProgress(u, ai);
       const ci = this.spawnCell(sim);
       if (ci >= 0) {
         const t = sim.terrain;
@@ -870,6 +848,83 @@ export class HordeMode implements GameMode {
         sim.emit({ k: 'gad', w: 'rise', i: -1, id: u.id, x: u.pos.x, y: u.pos.y, z: u.pos.z });
       }
     }
+  }
+
+  private resetProgress(u: Character, ai: ZombieAI) {
+    ai.stuck = 0; ai.altDone = false; ai.alt = 0; ai.mark = Infinity; ai.ax = u.pos.x; ai.az = u.pos.z; ai.sinceT = 0;
+  }
+
+  /** Rehace el camino del zombi por el campo y lleva la cuenta de cuánto se viene acercando. */
+  private replan(sim: Simulation, u: Character, ai: ZombieAI, near: boolean, dist: number, tg: Character) {
+    const nav = this.nav!;
+    ai.navT = 0.2;
+    const dt = ai.sinceT;
+    ai.sinceT = 0;
+    this.separation(sim, u, ai);
+    ai.direct = dist < 2.6 && nav.walk(u.pos.x, u.pos.z, u.pos.y, tg.pos.x, tg.pos.z) > 0;
+    const r = ai.direct ? null : nav.route(u.pos.x, u.pos.z, u.grounded ? u.pos.y : ai.gy, ai.alt > 0 ? 1 : 0);
+    if (ai.direct) { if (!near) { ai.mark = Math.min(ai.mark, dist); ai.stuck = 0; } return; }
+    if (!r) {
+      ai.goal = null;
+      // Sin camino: o ya está donde el campo termina (junto al héroe), o no hay a quién llegar: nada que medir. Aislado, sí cuenta.
+      const here = nav.nodeNear(u.pos.x, u.pos.z, CELL);
+      if (here >= 0 && nav.field[here] === Infinity && nav.seeds.some((s) => s.node >= 0)) ai.stuck += dt; else ai.stuck = 0;
+      return;
+    }
+    ai.goal = { x: r.x, z: r.z };
+    if (near) return;
+    if (r.remain <= ai.mark - 0.5 || Math.hypot(u.pos.x - ai.ax, u.pos.z - ai.az) >= 2) {
+      ai.mark = r.remain; ai.ax = u.pos.x; ai.az = u.pos.z; ai.stuck = 0; ai.altDone = false;
+      return;
+    }
+    // Esperando al pie de un muro o en la cola de un pasillo: juntarse no es estar trabado.
+    if (r.remain <= 3.2 || this.queued(sim, u)) { ai.stuck = 0; return; }
+    ai.stuck += dt;
+  }
+
+  /** ¿Hay al menos dos zombis pegados a este y más cerca del héroe? */
+  private queued(sim: Simulation, u: Character): boolean {
+    const nav = this.nav!, t = sim.terrain;
+    const mine = nav.field[t.cellIndexAt(u.pos.x, u.pos.z)];
+    let ahead = 0;
+    for (const v of sim.units) {
+      if (v === u || !v.alive || d2(u.pos, v.pos) > 1.3) continue;
+      const f = nav.field[t.cellIndexAt(v.pos.x, v.pos.z)];
+      if (f < mine && ++ahead >= 2) return true;
+    }
+    return false;
+  }
+
+  /** Empuje que aleja al zombi de los que tiene a menos de 1 m. */
+  private separation(sim: Simulation, u: Character, ai: ZombieAI) {
+    let sx = 0, sz = 0;
+    for (const v of sim.units) {
+      if (v === u || !v.alive) continue;
+      const vx = u.pos.x - v.pos.x, vz = u.pos.z - v.pos.z;
+      if (vx >= 1 || vx <= -1 || vz >= 1 || vz <= -1) continue;
+      const vd = Math.sqrt(vx * vx + vz * vz);
+      if (vd >= 1 || vd < 0.001 || Math.abs(v.pos.y - u.pos.y) > 1.2) continue;
+      sx += (vx / vd) * (1 - vd); sz += (vz / vd) * (1 - vd);
+    }
+    ai.sx = sx * 0.9; ai.sz = sz * 0.9;
+  }
+
+  /** ¿Hay piso (cualquiera, también uno más alto: eso lo resuelve el camino) a 0,9 m del zombi en esa dirección? */
+  private floorAhead(sim: Simulation, u: Character, x: number, z: number) {
+    return sim.cw.groundAt(u.pos.x + x * 0.9, u.pos.z + z * 0.9, Infinity) !== -Infinity;
+  }
+
+  /** La dirección para ir a `goal`: derecho, más el empuje de la separación, sin salirse a un vacío. */
+  private heading(sim: Simulation, u: Character, ai: ZombieAI, goal: P2): [number, number] {
+    let dx = goal.x - u.pos.x, dz = goal.z - u.pos.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d < 0.05) return [0, 0];
+    dx /= d; dz /= d;
+    let mx = dx + ai.sx, mz = dz + ai.sz;
+    const m = Math.sqrt(mx * mx + mz * mz);
+    if (m > 1) { mx /= m; mz /= m; }
+    if (!this.floorAhead(sim, u, mx, mz)) { mx = dx; mz = dz; }
+    return this.floorAhead(sim, u, mx, mz) ? [mx, mz] : [0, 0];
   }
 
   private strike(sim: Simulation, u: Character, def: ZombieDef, ai: ZombieAI, tg: Character) {

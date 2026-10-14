@@ -185,6 +185,8 @@ export class Simulation {
   private nextUnitId = 1000;
   private unitsDirty = false;
   private obstaclesDirty = true;
+  /** Sube cada vez que cambia la lista de obstáculos (la navegación rehace sus aristas). */
+  obstacleRev = 0;
   private commands: { pid: string; cmd: Command }[] = [];
   private mo = newMoveOut();
   private mp = defaultMoveParams();
@@ -1854,6 +1856,7 @@ export class Simulation {
     for (const s of this.structures) if (s.hp > 0) obs.push(s.obstacle);
     this.cw.obstacles = obs;
     this.obstaclesDirty = false;
+    this.obstacleRev++;
   }
 
   /** Devuelve true si el obstáculo quedó destruido. */

@@ -81,3 +81,39 @@ El escupidor conserva lo suyo (retroceder si se le acercan, quedarse a tiro), mo
 - La banda de victorias de la tarea 04 se mantiene (los zombis llegan más: si hace falta, se reajusta la
   dificultad y se anota).
 - `docs/ZOMBIS.md` cuenta cómo se mueven los zombis y dónde vive.
+
+## Notas de ejecución
+
+**Archivos:** `src/core/nav.ts` (nuevo: grafo, campo, ruta), `src/core/horde.ts` (usa `Nav`; `think`, `replan`, `separation`, `heading`; ya no importa `steer`), `src/core/sim.ts` (`obstacleRev`), `src/core/movement.ts` (ver abajo), `scripts/botstats.ts` + `npm run tool:stuck`. Cómo camina un zombi ahora: [ZOMBIS.md](../ZOMBIS.md) §10.
+
+**Números** (`npm run tool:stuck`, El Refugio, 20 partidas con tres bots, dificultad Normal)
+
+| | Antes | Después |
+|---|---|---|
+| Zombis que salieron | 9.716 | 11.211 |
+| Reubicados por trabados | 439 (4,52 %) | 18 (0,16 %) |
+| Segundos-zombi sin avanzar | 13.351 de 129.080 (10,34 %) | 250 de 116.604 (0,21 %) |
+| Caídos solos al vacío | 421 (4,33 %) | 321 (2,86 %) |
+
+**Lo que había de más que los nodos y el campo** (lo fue mostrando la medición, de a una causa por vez)
+
+- Un zombi que cae pegado a una rampa o a una plataforma quedaba **encimado con esa pared** y `moveAxis` le prohibía cualquier paso que siguiera tocándola, también el de alejarse: se quedaba ahí para siempre. Pasaba cuando el camino bajaba de la rampa por el costado. Ahora, si ya está encimado, se le permite el paso que lo aleja de ese obstáculo (`movement.ts`). Los héroes comparten el código; el único cambio es en un caso en que antes no se podían mover. Pasaron de 7,1 % a 3,2 % reubicados.
+- Los zombis **nacían en bordes cerrados** (un nido o una cobertura sobre la única celda de salida, o piso caído) y no podían salir. `spawnCell` ahora descarta los bordes que el campo no alcanza: de 3,2 % a 0,39 %.
+- El campo en `Float32Array` hacía que el montículo repitiera actualizaciones por redondeo (148 ms en un mapa de 64×44); con `Float64Array`, 0,19 ms.
+- La comprobación de "hay piso adelante" tiene que aceptar un piso más alto (la rampa): si no, el zombi se quedaba quieto al pie de una rampa.
+
+**Listo cuando** (scripts descartables)
+
+| | |
+|---|---|
+| Reubicados < 1 % y segundos sin avanzar < 3 % | 0,16 % y 0,21 % |
+| Zombi al pie del costado de la rampa de El Refugio, héroe arriba de la plataforma | llega en 3,1 s, por la punta de la rampa |
+| Zombi con una roca entre él y el héroe | llega en 2,8 s |
+| Único héroe parado arriba de un muro | 0 reubicados en 40 s; 10 de 12 zombis a menos de 6 m |
+| Campo: El Refugio / mapa de 64×44 | 0,016 ms / 0,19 ms (el grafo entero, una sola vez: 3,7 ms / 67 ms) |
+| Horda sin pantalla (6 partidas, 200 s) | 2,58 ms por segundo simulado contra 2,37 de antes: +9 % |
+| Banda de victorias de la tarea 04 (20 partidas por dificultad) | Fácil 19, Normal 13, Difícil 8 de 20 (antes 16 a 18, 13 y 6 a 9): sin reajustar |
+| `tests/e2e/run.mjs`, `moba.mjs` | pasan |
+| `npm run test:touch` | **falla a veces, también sin estos cambios** (probado con el commit anterior: falló 2 de 3 veces, en "soltar la palanca → se frena" y "empujón: sale al soltar"); con los cambios, lo mismo. Es una prueba de tiempos en la Carrera, no toca la Horda |
+
+**Pendiente de que lo juegues:** cómo se ve el movimiento de la horda en grupo (el empuje de separación y el atajo por las esquinas se probaron solo con números).

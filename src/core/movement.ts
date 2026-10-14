@@ -285,6 +285,16 @@ function moveAxis(s: MoveState, isX: boolean, d: number, p: MoveParams, cw: Coll
     s.pos.z = nz;
     return false;
   }
+  // Ya encimado con una pared (cayó pegado a una rampa o a una plataforma): alejarse no puede estar prohibido, o queda trabado para siempre.
+  if (cw.blockAt(s.pos.x, s.pos.z, CHAR_RADIUS, s.pos.y)) {
+    const here = Math.hypot(s.pos.x < b.minX ? b.minX - s.pos.x : s.pos.x > b.maxX ? s.pos.x - b.maxX : 0, s.pos.z < b.minZ ? b.minZ - s.pos.z : s.pos.z > b.maxZ ? s.pos.z - b.maxZ : 0);
+    const there = Math.hypot(nx < b.minX ? b.minX - nx : nx > b.maxX ? nx - b.maxX : 0, nz < b.minZ ? b.minZ - nz : nz > b.maxZ ? nz - b.maxZ : 0);
+    if (there > here + 1e-6) {
+      s.pos.x = nx;
+      s.pos.z = nz;
+      return false;
+    }
+  }
   // Trepar un borde (recuperación): en el aire, empujando contra una cornisa baja.
   const rise = b.top - s.pos.y;
   if (!s.grounded && canAct(s) && !p.lock && rise > 0 && rise <= MANTLE_H && s.vel.y < 5) {

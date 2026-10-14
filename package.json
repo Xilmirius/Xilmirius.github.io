@@ -17,6 +17,7 @@
     "tool:bots": "tsx scripts/botstats.ts",
     "tool:race": "tsx scripts/botstats.ts race",
     "tool:horde": "tsx scripts/botstats.ts horde",
+    "tool:stuck": "tsx scripts/botstats.ts stuck",
     "tool:clearings": "tsx scripts/clearings.ts"
   },
   "dependencies": {
