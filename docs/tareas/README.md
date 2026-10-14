@@ -57,7 +57,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [05](05-horda-armas-chatarra-taller.md) | 04 | Se llevan todas las armas que se juntan y se mejoran con chatarra |
 | [x] | [06](06-apuntado-con-altura.md) | 05 | Las balas van al punto del mundo que marca el cursor, también en altura |
 | [ ] | [07](07-navegacion-de-zombis.md) | 04 | Los zombis se traban: caminos que respetan rampas y obstáculos |
-| [ ] | [10](10-malla-generador.md) | – | Generador de la malla irregular (archivo nuevo, sin tocar el juego) |
+| [x] | [10](10-malla-generador.md) | – | Generador de la malla irregular (archivo nuevo, sin tocar el juego) |
 | [ ] | [11](11-malla-estampado.md) | 10 | El plano del mapa estampado sobre la malla, con consultas y garantías |
 | [ ] | [12](12-terreno-sobre-la-malla.md) | 07, 11 | El terreno consulta la malla (todavía cuadrada) y las rampas pasan a ser piezas |
 | [ ] | [13](13-colision-contra-poligonos.md) | 12 | El movimiento choca contra polígonos y desliza con la normal real |

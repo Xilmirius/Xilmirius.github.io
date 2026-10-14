@@ -65,6 +65,22 @@ navegadores. Las rotaciones que hacen falta son de 90°, que son intercambios de
 **El generador se revisa a sí mismo:** todos los cuadriláteros convexos, ángulos entre 35° y 145°, lados de más de
 0,35 m y radio menor que 0,97 m. Si una semilla no cumple, se prueba la siguiente.
 
+**Cómo quedó en `src/core/mesh.ts`** (tarea 10). Para que la revisión pase en mallas de 15.000 cuadriláteros hizo falta
+agregar dos cosas a lo de arriba:
+
+- **Reparación del apareo.** Un vértice de la trama que no queda con ninguna diagonal (ningún rombo lo toca por un
+  lado compartido) termina con seis cuadriláteros de 60° y un radio de 1,0 a 1,1 m, que ninguna relajación arregla.
+  Después del apareo al azar se recorre la trama y, donde pasa eso, se juntan dos triángulos vecinos de ese vértice.
+  Siguen quedando triángulos sueltos y vértices de valencia 3 y 5: de ahí sale lo irregular. Un apareo perfecto no sirve:
+  en una franja de trama es único y sale una grilla cuadrada.
+- **Peso extra a los cuadriláteros que van mal.** En el relajado, uno que se acerca a lo que la revisión no tolera
+  (radio mayor que 0,86 m, lado menor que 0,5 m o ángulo a menos de unos 5° del límite) pesa 8 veces más en el tirón
+  de sus vértices: se arregla a costa de los vecinos, que tienen margen. Con esto una semilla de 130×90 m pasa la
+  revisión 9 de cada 10 veces; sin esto, nunca.
+
+La malla devuelta es solo lo que toca la región (los cuadriláteros de la franja de 3 m de margen se descartan). Las
+dos conversiones de coordenadas del espejo son exactas: se redondea a 1/256 antes de copiar con el signo cambiado.
+
 ## 4. Cómo se estampa el plano
 
 1. A cada celda de la malla se le mira el centro: la celda del plano que hay ahí le da la clase y queda como su
