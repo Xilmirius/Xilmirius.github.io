@@ -2095,7 +2095,7 @@ export class Simulation {
         for (const s of this.structures) {
           if (s.x >= b.minX && s.x <= b.maxX && s.z >= b.minZ && s.z <= b.maxZ) s.hp = 0;
         }
-        for (const c of this.bodies) if (c.alive && c.grounded && t.cellIndexAt(c.pos.x, c.pos.z) === t.fragile[fi]) c.grounded = false;
+        for (const c of this.bodies) if (c.alive && c.grounded && t.fragileIndexAt(c.pos.x, c.pos.z) === fi) c.grounded = false;
       }
     }
   }

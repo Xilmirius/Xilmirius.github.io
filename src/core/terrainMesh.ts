@@ -8,11 +8,20 @@
 //
 // Mismo determinismo que `mesh.ts`: solo `+ - * /`, `sqrt` y las funciones exactas. Host y clientes tienen que llegar
 // a la misma malla, y por eso a la misma huella.
-import { CELL, LEVEL_H } from './constants';
+import { CELL, LEVEL_H, WALL_TOP } from './constants';
 import { CellType, RampDir, type Terrain } from './terrain';
 import { generateMesh, type QuadMesh } from './mesh';
 
 export interface Rect { minX: number; maxX: number; minZ: number; maxZ: number }
+
+/** Altura de la superficie de una cuña en (x,z), recortado a la cuña: lineal a lo largo de la dirección en que sube. */
+export function wedgeTop(p: RampPiece, x: number, z: number): number {
+  const w = p.wedge;
+  const cx = x < w.minX ? w.minX : x > w.maxX ? w.maxX : x;
+  const cz = z < w.minZ ? w.minZ : z > w.maxZ ? w.maxZ : z;
+  const t = p.dx > 0 ? (cx - w.minX) / CELL : p.dx < 0 ? (w.maxX - cx) / CELL : p.dz > 0 ? (cz - w.minZ) / CELL : (w.maxZ - cz) / CELL;
+  return (p.level + t) * LEVEL_H;
+}
 
 /** Clase de una celda de la malla: piso o muro. (El vacío no tiene celda.) */
 export const MESH_FLOOR = 1, MESH_WALL = 2;
@@ -66,7 +75,7 @@ export function isMirrored(t: Terrain): boolean {
   return k === 'arena' || k === 'moba';
 }
 
-const inRect = (r: Rect, x: number, z: number, tol = 0) => x >= r.minX - tol && x <= r.maxX + tol && z >= r.minZ - tol && z <= r.maxZ + tol;
+export const inRect = (r: Rect, x: number, z: number, tol = 0) => x >= r.minX - tol && x <= r.maxX + tol && z >= r.minZ - tol && z <= r.maxZ + tol;
 
 export class TerrainMesh {
   readonly count: number;
@@ -92,6 +101,19 @@ export class TerrainMesh {
   readonly ramps: RampPiece[];
   /** Un número que cambia si cambia un vértice o una clase: host y cliente lo comparan. */
   readonly hash: number;
+  /** Altura de lo plano de cada celda (un muro vale `WALL_TOP`). */
+  readonly top: Float64Array;
+  /** La caja que envuelve a cada celda. */
+  readonly minX: Float64Array;
+  readonly maxX: Float64Array;
+  readonly minZ: Float64Array;
+  readonly maxZ: Float64Array;
+  /** Solo en la cuadrada: la celda de la malla de cada celda del plano (o -1), para responder sin buscar. */
+  private readonly grid: Int32Array | null;
+  private readonly gw: number;
+  private readonly gh: number;
+  private readonly gx0: number;
+  private readonly gz0: number;
   private readonly bx0: number;
   private readonly bz0: number;
   private readonly nbx: number;
@@ -109,12 +131,31 @@ export class TerrainMesh {
       vx: Float64Array; vz: Float64Array; quads: Int32Array; cx: Float64Array; cz: Float64Array; radius: Float64Array;
       cls: Uint8Array; level: Int8Array; src: Int32Array; slab: Int32Array; pad: Uint8Array; lowered: Uint8Array;
       nbr: Int32Array; ramps: RampPiece[];
+      grid?: { cells: Int32Array; w: number; h: number; x0: number; z0: number };
     },
   ) {
+    this.grid = d.grid ? d.grid.cells : null;
+    this.gw = d.grid ? d.grid.w : 0; this.gh = d.grid ? d.grid.h : 0;
+    this.gx0 = d.grid ? d.grid.x0 : 0; this.gz0 = d.grid ? d.grid.z0 : 0;
     this.vx = d.vx; this.vz = d.vz; this.quads = d.quads; this.cx = d.cx; this.cz = d.cz; this.radius = d.radius;
     this.cls = d.cls; this.level = d.level; this.src = d.src; this.slab = d.slab; this.pad = d.pad;
     this.lowered = d.lowered; this.nbr = d.nbr; this.ramps = d.ramps;
     this.count = d.quads.length >> 2;
+    this.top = new Float64Array(this.count);
+    for (let q = 0; q < this.count; q++) this.top[q] = d.cls[q] === MESH_WALL ? WALL_TOP : d.level[q] * LEVEL_H;
+    this.minX = new Float64Array(this.count); this.maxX = new Float64Array(this.count);
+    this.minZ = new Float64Array(this.count); this.maxZ = new Float64Array(this.count);
+    for (let q = 0; q < this.count; q++) {
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let k = 0; k < 4; k++) {
+        const v = d.quads[q * 4 + k];
+        if (d.vx[v] < x0) x0 = d.vx[v];
+        if (d.vx[v] > x1) x1 = d.vx[v];
+        if (d.vz[v] < z0) z0 = d.vz[v];
+        if (d.vz[v] > z1) z1 = d.vz[v];
+      }
+      this.minX[q] = x0; this.maxX[q] = x1; this.minZ[q] = z0; this.maxZ[q] = z1;
+    }
     // Índice por baldes: cada celda en todos los baldes que toca su caja.
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < d.vx.length; i++) {
@@ -173,6 +214,10 @@ export class TerrainMesh {
 
   /** La celda de la malla en un punto, o -1 si es vacío. En un lado compartido, la de menor índice. */
   cellAt(x: number, z: number): number {
+    if (this.grid) {
+      const gi = Math.floor((x - this.gx0) / CELL), gj = Math.floor((z - this.gz0) / CELL);
+      return gi < 0 || gj < 0 || gi >= this.gw || gj >= this.gh ? -1 : this.grid[gj * this.gw + gi];
+    }
     const i = Math.floor((x - this.bx0) / BUCKET), j = Math.floor((z - this.bz0) / BUCKET);
     if (i < 0 || j < 0 || i >= this.nbx || j >= this.nbz) return -1;
     const b = j * this.nbx + i;
@@ -194,9 +239,21 @@ export class TerrainMesh {
     return dx * dx + dz * dz;
   }
 
-  /** Las celdas que puede tocar un círculo (para la colisión). Llena `out` y lo devuelve. */
+  /**
+   * Las celdas que puede tocar un círculo (para la colisión). Llena `out` y lo devuelve. En la cuadrada son las de la caja
+   * del círculo, en orden de fila (puede traer alguna que el círculo no toca: quien pregunta lo verifica); en la orgánica,
+   * las que el círculo toca de verdad.
+   */
   cellsNear(x: number, z: number, r: number, out: number[] = []): number[] {
     out.length = 0;
+    if (this.grid) {
+      const i0 = Math.max(0, Math.floor((x - r - this.gx0) / CELL)), i1 = Math.min(this.gw - 1, Math.floor((x + r - this.gx0) / CELL));
+      const j0 = Math.max(0, Math.floor((z - r - this.gz0) / CELL)), j1 = Math.min(this.gh - 1, Math.floor((z + r - this.gz0) / CELL));
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) { const q = this.grid[j * this.gw + i]; if (q >= 0) out.push(q); }
+      }
+      return out;
+    }
     const i0 = Math.max(0, Math.floor((x - r - this.bx0) / BUCKET)), i1 = Math.min(this.nbx - 1, Math.floor((x + r - this.bx0) / BUCKET));
     const j0 = Math.max(0, Math.floor((z - r - this.bz0) / BUCKET)), j1 = Math.min(this.nbz - 1, Math.floor((z + r - this.bz0) / BUCKET));
     const g = ++this.gen;
@@ -410,7 +467,13 @@ function assemble(t: Terrain, qm: QuadMesh, mode: 'square' | 'organic', seed: nu
     cls[j] = kcls[k]; level[j] = klv[k]; src[j] = ksrc[k]; slab[j] = kslab[k]; pad[j] = kpad[k]; low[j] = lowered[k];
   }
   for (const p of ramps) p.lowered = p.lowered.filter((k) => remap[k] >= 0).map((k) => remap[k]);
-  return new TerrainMesh(mode, seed, attempts, { vx: Float64Array.from(xs), vz: Float64Array.from(zs), quads, cx, cz, radius, cls, level, src, slab, pad, lowered: low, nbr, ramps });
+  let grid: { cells: Int32Array; w: number; h: number; x0: number; z0: number } | undefined;
+  if (mode === 'square') {
+    const cells = new Int32Array(t.w * t.h).fill(-1);
+    for (let j = 0; j < n; j++) cells[src[j]] = j;
+    grid = { cells, w: t.w, h: t.h, x0: t.originX, z0: t.originZ };
+  }
+  return new TerrainMesh(mode, seed, attempts, { vx: Float64Array.from(xs), vz: Float64Array.from(zs), quads, cx, cz, radius, cls, level, src, slab, pad, lowered: low, nbr, ramps, grid });
 }
 
 /** ¿El punto está dentro del cuadrilátero q de un `QuadMesh` (el borde cuenta)? */

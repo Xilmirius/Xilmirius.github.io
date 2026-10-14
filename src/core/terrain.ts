@@ -1,7 +1,8 @@
 // Terreno como grilla de alturas (heightfield por celdas). Simple, barato de sincronizar y
 // suficiente para "desniveles limitados de 1-2 niveles" (GDD §7).
 import { CELL, ISLAND_BOTTOM, LEVEL_H, TILE_HP, WALL_TOP } from './constants';
-import type { V3 } from './math';
+import { circleOverlapsBox, type V3 } from './math';
+import { buildSquareMesh, wedgeTop, type TerrainMesh } from './terrainMesh';
 import type { GadgetKind, GadgetSpawn } from './gadgets';
 import type { Family } from './types';
 import { MAPS, type MapDef } from './maps';
@@ -20,6 +21,12 @@ export interface Cell {
 }
 
 /** explosive: barril que explota al romperse (usa el cuerpo de la chatarra). */
+/** ¿Está el punto en el rectángulo? Los bordes de abajo y de la izquierda cuentan y los otros no: un punto sobre el borde entre dos celdas es de una sola, como en la grilla. */
+const inCell = (r: { minX: number; maxX: number; minZ: number; maxZ: number }, x: number, z: number) => x >= r.minX && x < r.maxX && z >= r.minZ && z < r.maxZ;
+
+/** Lo que frena a un cuerpo en el terreno (`Terrain.blockAt`). */
+export interface TerrainBlock { minX: number; maxX: number; minZ: number; maxZ: number; top: number; cell: number }
+
 export interface DestructSpawn { kind: Family; x: number; z: number; y: number; explosive?: boolean }
 /** Pieza fija de un mapa de Asedio (torre o núcleo) de un equipo. */
 export interface TeamPiece { team: number; x: number; z: number }
@@ -66,6 +73,12 @@ export class Terrain {
   tileTimer: Float32Array;
   /** Se incrementa cada vez que cambia el terreno (para que el render se entere). */
   version = 0;
+  /**
+   * La malla: la capa física (docs/MALLA.md). Las preguntas de piso, choque, losa y resorte pasan por acá; el plano
+   * (`cells`, `cellIndexAt`, `isWalkable`...) sigue siendo la capa lógica.
+   */
+  mesh!: TerrainMesh;
+  private nearBuf: number[] = [];
 
   constructor(mapId: string) {
     const def = MAPS[mapId] ?? MAPS.cantera;
@@ -157,6 +170,7 @@ export class Terrain {
     this.tileState = new Uint8Array(n);
     this.tileHp = new Float32Array(n).fill(TILE_HP);
     this.tileTimer = new Float32Array(n);
+    this.mesh = buildSquareMesh(this);
   }
 
   /** Agrupa celdas marcadas contiguas en un solo punto (el promedio). */
@@ -187,8 +201,8 @@ export class Terrain {
 
   /** ¿Hay un resorte en (x,z)? */
   isPad(x: number, z: number): boolean {
-    const i = this.cellIndexAt(x, z);
-    return i >= 0 && this.cells[i].pad;
+    const q = this.mesh.cellAt(x, z);
+    return q >= 0 && this.mesh.pad[q] === 1;
   }
 
   cellCenter(ix: number, iz: number) {
@@ -237,8 +251,67 @@ export class Terrain {
     return c.level * LEVEL_H;
   }
 
+  /** ¿La celda de la malla se puede pisar? (una losa caída no) */
+  private meshSolid(q: number): boolean {
+    const s = this.mesh.slab[q];
+    return s < 0 || this.tileState[s] !== TILE_GONE;
+  }
+
+  /** Cuánto sube cada pieza se suma a lo que dice la malla: la cuña de las rampas y, en la orgánica, su descanso. */
+  private pieceAt(x: number, z: number): number {
+    const m = this.mesh;
+    for (let i = 0; i < m.ramps.length; i++) if (inCell(m.ramps[i].wedge, x, z)) return wedgeTop(m.ramps[i], x, z);
+    if (m.mode === 'organic') for (let i = 0; i < m.ramps.length; i++) if (inCell(m.ramps[i].landing, x, z)) return (m.ramps[i].level + 1) * LEVEL_H;
+    return -Infinity;
+  }
+
+  /** Altura del piso en (x,z): la malla y las piezas de las rampas. -Infinity si no hay piso. */
   groundAt(x: number, z: number): number {
-    return this.topAt(this.cellIndexAt(x, z), x, z);
+    const p = this.pieceAt(x, z);
+    if (p !== -Infinity) return p;
+    const q = this.mesh.cellAt(x, z);
+    return q < 0 || !this.meshSolid(q) ? -Infinity : this.mesh.top[q];
+  }
+
+  /** La celda del plano que da el piso en (x,z) (la de la cuña si hay una), o -1 si no hay piso. */
+  groundCellAt(x: number, z: number): number {
+    const m = this.mesh;
+    for (let i = 0; i < m.ramps.length; i++) if (inCell(m.ramps[i].wedge, x, z)) return m.ramps[i].src;
+    const q = m.cellAt(x, z);
+    return q < 0 || !this.meshSolid(q) ? -1 : m.src[q];
+  }
+
+  /**
+   * Lo primero que no se puede subir contra un círculo (x,z,r) con los pies en feetY: una celda de la malla, una cuña o un
+   * descanso más alto que `feetY + stepUp`. Devuelve su caja, su altura y la celda del plano de la que salió; de varias,
+   * la de menor celda del plano (el orden de filas de siempre).
+   */
+  blockAt(x: number, z: number, r: number, feetY: number, stepUp: number): TerrainBlock | null {
+    const m = this.mesh;
+    const near = m.cellsNear(x, z, r, this.nearBuf);
+    const lim = feetY + stepUp;
+    let hit = false, bsrc = Infinity, btop = 0, x0 = 0, x1 = 0, z0 = 0, z1 = 0;
+    for (let k = 0; k < near.length; k++) {
+      const q = near[k];
+      if (m.top[q] <= lim || m.src[q] >= bsrc) continue;
+      if (!circleOverlapsBox(x, z, r, m.minX[q], m.maxX[q], m.minZ[q], m.maxZ[q]) || !this.meshSolid(q)) continue;
+      hit = true; bsrc = m.src[q]; btop = m.top[q]; x0 = m.minX[q]; x1 = m.maxX[q]; z0 = m.minZ[q]; z1 = m.maxZ[q];
+    }
+    const rs = m.ramps;
+    for (let i = 0; i < rs.length; i++) {
+      const p = rs[i];
+      if (p.src > bsrc) continue;
+      const w = p.wedge;
+      if (circleOverlapsBox(x, z, r, w.minX, w.maxX, w.minZ, w.maxZ)) {
+        const top = wedgeTop(p, x, z);
+        if (top > lim) { hit = true; bsrc = p.src; btop = top; x0 = w.minX; x1 = w.maxX; z0 = w.minZ; z1 = w.maxZ; }
+      }
+      if (m.mode === 'organic') {
+        const l = p.landing, top = (p.level + 1) * LEVEL_H;
+        if (top > lim && circleOverlapsBox(x, z, r, l.minX, l.maxX, l.minZ, l.maxZ)) { hit = true; bsrc = p.src; btop = top; x0 = l.minX; x1 = l.maxX; z0 = l.minZ; z1 = l.maxZ; }
+      }
+    }
+    return hit ? { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: btop, cell: bsrc } : null;
   }
 
   bottom() { return ISLAND_BOTTOM; }
@@ -271,9 +344,10 @@ export class Terrain {
     for (let i = 0; i < this.tileState.length && i < s.length; i++) this.setTileState(i, s.charCodeAt(i) - 48);
   }
 
+  /** La losa frágil que se pisa en (x,z), o -1. */
   fragileIndexAt(x: number, z: number): number {
-    const i = this.cellIndexAt(x, z);
-    return i < 0 ? -1 : this.cells[i].fragile;
+    const q = this.mesh.cellAt(x, z);
+    return q < 0 ? -1 : this.mesh.slab[q];
   }
 
   /** Celdas caminables (para spawns seguros / IA). */

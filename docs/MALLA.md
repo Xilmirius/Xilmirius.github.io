@@ -136,6 +136,10 @@ juego usa hasta que la orgánica esté validada.
 - **El pozo** es una celda bajada que asoma más de 0,25 m fuera de la cuña y el descanso y no toca piso del nivel de
   abajo: una rendija más angosta que un cuerpo (0,5 m de diámetro) no lo atrapa.
 
+### Quién responde (tarea 12)
+
+`Terrain.mesh` es la malla cuadrada y el juego la usa: `Terrain.groundAt`, `groundCellAt`, `blockAt`, `isPad` y `fragileIndexAt` la consultan (con las cuñas de las rampas), y `CollisionWorld` ya no hace cuentas de grilla. El plano sigue respondiendo lo lógico. Un punto justo sobre el borde entre dos celdas es de la de abajo y la de la derecha, en la malla y en las cuñas.
+
 ### Comprobación
 
 Después de estampar se verifican las tres garantías de §2 sobre el mapa real, que cada cosa del

@@ -59,7 +59,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [07](07-navegacion-de-zombis.md) | 04 | Los zombis se traban: caminos que respetan rampas y obstáculos |
 | [x] | [10](10-malla-generador.md) | – | Generador de la malla irregular (archivo nuevo, sin tocar el juego) |
 | [x] | [11](11-malla-estampado.md) | 10 | El plano del mapa estampado sobre la malla, con consultas y garantías |
-| [ ] | [12](12-terreno-sobre-la-malla.md) | 07, 11 | El terreno consulta la malla (todavía cuadrada) y las rampas pasan a ser piezas |
+| [x] | [12](12-terreno-sobre-la-malla.md) | 07, 11 | El terreno consulta la malla (todavía cuadrada) y las rampas pasan a ser piezas |
 | [ ] | [13](13-colision-contra-poligonos.md) | 12 | El movimiento choca contra polígonos y desliza con la normal real |
 | [ ] | [14](14-malla-organica-en-el-nucleo.md) | 13 | La simulación corre sobre la malla orgánica, sembrada por partida |
 | [ ] | [15](15-dibujo-del-terreno.md) | 14 | El terreno se dibuja desde los polígonos: costa, acantilados, muros, losas |

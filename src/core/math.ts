@@ -6,6 +6,12 @@ export const v3 = (x = 0, y = 0, z = 0): V3 => ({ x, y, z });
 export const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 export const len2 = (x: number, z: number) => Math.hypot(x, z);
+/** ¿El círculo (x,z,r) se encima con la caja? (estricto: rozar no cuenta) */
+export function circleOverlapsBox(x: number, z: number, r: number, minX: number, maxX: number, minZ: number, maxZ: number) {
+  const dx = x < minX ? minX - x : x > maxX ? x - maxX : 0;
+  const dz = z < minZ ? minZ - z : z > maxZ ? z - maxZ : 0;
+  return dx * dx + dz * dz < r * r;
+}
 export const dist2 = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
 
 /** Dirección unitaria desde un ángulo de yaw (0 = +Z, igual que rotation.y de Three.js). */

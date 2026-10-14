@@ -53,3 +53,33 @@ Además:
 - Una partida de Horda sin pantalla tarda como mucho un 15 % más que antes (medir las dos).
 - Ningún archivo fuera de `terrain.ts` y del módulo de la malla hace cuentas con `CELL` para responder una
   pregunta física.
+
+## Notas de ejecución
+
+**Archivos:** `src/core/terrain.ts` (`Terrain.mesh`, y las preguntas físicas: `groundAt`, `groundCellAt`, `blockAt`, `isPad`, `fragileIndexAt`), `src/core/terrainMesh.ts` (grilla de acceso directo en la cuadrada, cajas y altura por celda, `wedgeTop`), `src/core/collision.ts` (ya no calcula índices de grilla: pregunta al terreno), `src/core/math.ts` (`circleOverlapsBox` se mudó acá para que `terrain.ts` no importe `collision.ts`; `collision.ts` lo sigue exportando), `src/core/sim.ts` (la caída de una losa suelta a quien estaba encima según la losa, no según la celda).
+
+**Cómo quedó**
+
+- `Terrain` arma `mesh = buildSquareMesh(this)` al construirse. El plano (`cells`, `cellIndexAt`, `cellCenter`, `isWalkable`, `topAt(i, x, z)`, `isSolidCell`, `cellBounds`) no cambió: son preguntas lógicas, y el dibujo y los bots siguen usándolas.
+- `groundAt(x, z)`: primero las piezas de las rampas (la cuña sube lineal, recortada a sus extremos, igual que antes), después la celda de la malla. `blockAt` junta las celdas de la malla que toca el círculo y las cuñas, y devuelve lo primero que no se puede subir, en el orden de filas de antes. En la orgánica el descanso también cuenta (todavía no se usa: la cuadrada ya lo tiene como celda de plataforma, y si lo contara taparía una losa caída).
+- En la cuadrada, `cellAt` y `cellsNear` no buscan: indexan una grilla (la celda de la malla de cada celda del plano). En la orgánica buscan por baldes.
+- **Bordes.** Un punto justo sobre el borde entre dos celdas es de una sola, la de arriba y la de la izquierda no (como en la grilla). Con el borde de la cuña contado en las dos, un zombi que caminaba por la esquina de una rampa veía otro camino y la Horda se separaba del código viejo a los 130 s; con el borde de un solo lado, las partidas dan lo mismo número por número.
+
+**Listo cuando** (comparando contra el commit anterior en un worktree, importado desde el mismo script descartable; 20.000 puntos por mapa y por pregunta, la mitad pegados a bordes de a 0,5 m, con losas caídas o flojas al azar y 25 obstáculos al azar)
+
+| | |
+|---|---|
+| Altura del piso (también con `cw.groundAt` y tope), en los diez mapas | igual (difieren menos de 1e-6 en 0 puntos) |
+| Choca o no choca, con su caja, su altura y su celda | igual en los 20.000 de cada mapa (de 300 a 3.000 choques por mapa) |
+| "Hay algo sólido" en puntos 3D, con su celda y su obstáculo | igual |
+| Resorte y losa frágil en cada punto | igual |
+| Puntos que cayeron sobre rampas (cantera, islote, flipper, refugio, pista) | 85 a 430 por mapa, todos iguales |
+| Una partida por juego, cuerpo por cuerpo, a cada tick | idéntica: Horda 300 s, Asedio (`cornisas`) 300 s |
+| `tool:bots` (Arena), `tool:race` (las cuatro pistas) y `tool:horde` (6 partidas por dificultad) | números idénticos a los de antes |
+| `tool:stuck` | 11.211 zombis, 18 reubicados (0,16 %), 250 s sin avanzar (0,21 %): los mismos que antes de la tarea |
+| Horda sin pantalla | 2,99 a 3,03 ms por segundo simulado contra 2,68 a 2,75 de antes: **+11 a 12 %** (límite 15 %). Lo que más pesa: `cellsNear` y `blockAt` |
+| `tests/e2e/run.mjs`, `moba.mjs`, `maps.mjs` | pasan |
+| `npm run test:touch` | falla a veces en "soltar la palanca → se frena", como antes de esta tarea (ver nota de la tarea 07) |
+| Fuera de `terrain.ts` y `terrainMesh.ts`, nadie usa `CELL` para una pregunta física | `collision.ts` y `movement.ts` ya no lo importan; `nav.ts` lo usa para buscar celdas del plano (es lógica) |
+
+**Queda para la tarea 13:** `blockAt` todavía devuelve una caja y `moveAxis` prueba un eje por vez. La orgánica ya está lista para recibirlo (las celdas traen su caja y sus vecinas).

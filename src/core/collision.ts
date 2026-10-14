@@ -1,7 +1,10 @@
 // Mundo de colisión: terreno (grilla) + obstáculos (destructibles y estructuras, AABB con altura).
 // Lo usan el host (simulación completa) y el cliente (predicción de su propio movimiento).
-import { CELL, CHAR_HEIGHT, ISLAND_BOTTOM, STEP_UP } from './constants';
+import { CHAR_HEIGHT, ISLAND_BOTTOM, STEP_UP } from './constants';
+import { circleOverlapsBox } from './math';
 import { Terrain } from './terrain';
+
+export { circleOverlapsBox };
 
 export interface Obstacle {
   id: number;
@@ -17,12 +20,6 @@ export interface BlockHit {
   cell: number;
 }
 
-export function circleOverlapsBox(x: number, z: number, r: number, minX: number, maxX: number, minZ: number, maxZ: number) {
-  const dx = x < minX ? minX - x : x > maxX ? x - maxX : 0;
-  const dz = z < minZ ? minZ - z : z > maxZ ? z - maxZ : 0;
-  return dx * dx + dz * dz < r * r;
-}
-
 export class CollisionWorld {
   obstacles: Obstacle[] = [];
   constructor(public terrain: Terrain) {}
@@ -30,9 +27,7 @@ export class CollisionWorld {
   /** Superficie más alta bajo (x,z) cuyo tope sea <= maxY. -Infinity si no hay nada (vacío). */
   groundAt(x: number, z: number, maxY: number): number {
     let g = -Infinity;
-    const t = this.terrain;
-    const ci = t.cellIndexAt(x, z);
-    const tt = t.topAt(ci, x, z);
+    const tt = this.terrain.groundAt(x, z);
     if (tt <= maxY + 1e-4) g = tt;
     for (const o of this.obstacles) {
       if (x >= o.minX && x <= o.maxX && z >= o.minZ && z <= o.maxZ && o.top <= maxY + 1e-4 && o.top > g) g = o.top;
@@ -42,22 +37,9 @@ export class CollisionWorld {
 
   /** ¿Un círculo en (x,z) de radio r con los pies en feetY choca contra algo que no puede subir? */
   blockAt(x: number, z: number, r: number, feetY: number, stepUp = STEP_UP): BlockHit | null {
-    const t = this.terrain;
     if (feetY + CHAR_HEIGHT > ISLAND_BOTTOM) {
-      const ix0 = Math.floor((x - r - t.originX) / CELL), ix1 = Math.floor((x + r - t.originX) / CELL);
-      const iz0 = Math.floor((z - r - t.originZ) / CELL), iz1 = Math.floor((z + r - t.originZ) / CELL);
-      for (let iz = iz0; iz <= iz1; iz++) {
-        if (iz < 0 || iz >= t.h) continue;
-        for (let ix = ix0; ix <= ix1; ix++) {
-          if (ix < 0 || ix >= t.w) continue;
-          const ci = iz * t.w + ix;
-          if (!t.isSolidCell(ci)) continue;
-          const b = t.cellBounds(ci);
-          if (!circleOverlapsBox(x, z, r, b.minX, b.maxX, b.minZ, b.maxZ)) continue;
-          const top = t.topAt(ci, x, z);
-          if (top > feetY + stepUp) return { ...b, top, obstacle: null, cell: ci };
-        }
-      }
+      const hit = this.terrain.blockAt(x, z, r, feetY, stepUp);
+      if (hit) return { ...hit, obstacle: null };
     }
     for (const o of this.obstacles) {
       if (o.top <= feetY + stepUp || o.base >= feetY + CHAR_HEIGHT) continue;
@@ -70,10 +52,9 @@ export class CollisionWorld {
 
   /** Para proyectiles: ¿hay algo sólido que tape una esfera en (x,y,z)? */
   solidAt(x: number, y: number, z: number, r: number): { obstacle: Obstacle | null; cell: number } | null {
-    const t = this.terrain;
-    const ci = t.cellIndexAt(x, z);
-    if (ci >= 0 && t.isSolidCell(ci)) {
-      const top = t.topAt(ci, x, z);
+    const ci = this.terrain.groundCellAt(x, z);
+    if (ci >= 0) {
+      const top = this.terrain.groundAt(x, z);
       if (y < top && y > ISLAND_BOTTOM) return { obstacle: null, cell: ci };
     }
     for (const o of this.obstacles) {
