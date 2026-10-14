@@ -1,5 +1,5 @@
 // HUD de partida + Forja + Tabla + pantalla de resultados. Las teclas que muestra salen de game/keybinds.ts.
-import { DASH_CD, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
+import { DASH_CD, HERO_HP, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
 import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
@@ -18,7 +18,7 @@ import { F_DEAD, F_ELIMINATED, F_SHIELD, F_ULTREADY, type CharFrame, type MeFram
 import { unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { iconHtml, iconNode } from '../assets/registry';
 import { tip } from './tooltip';
-import { abilityTip, basicTip, c4Tip, dashTip, grabTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, stageTip, swapTip, ultBarTip } from './tips';
+import { abilityTip, basicTip, c4Tip, dashTip, grabTip, gunTip, itemIdTip, itemTip, levelTip, matTip, perkTip, pushTip, recallTip, routeTip, healthTip, stageTip, swapTip, ultBarTip } from './tips';
 import { FAMILIES, FAMILY_COLORS, FAMILY_NAMES, ROUTE_NAMES, type AbilitySlot, type Family, type Route } from '../core/types';
 import { audio } from '../audio/audio';
 import { ACH_BY_ID, unlock, xpToNext, type MatchContext, type MatchReward } from '../game/profile';
@@ -165,7 +165,7 @@ export class Hud {
     if (!c || !me || !r) return '';
     if (this.hoverPart === 'level' && this.rules.progression) return levelTip(c.lv, me.xp, me.xpNext, r.hero);
     if (this.hoverPart === 'ult' && this.rules.ultCharge) return ultBarTip(me.ult);
-    return stageTip(c.st, c.heat);
+    return this.rules.health ? healthTip(c.hp, c.st) : stageTip(c.st, c.heat);
   }
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
@@ -417,6 +417,9 @@ export class Hud {
     const hero = HEROES[this.me!.hero];
     const fam = hero.family;
     const pips = [0, 1, 2, 3].map((i) => `<i class="${i <= c.st ? 'on s' + c.st : ''}"></i>`).join('');
+    const state = this.rules.health
+      ? `<div class="hpbar s${c.st}" data-part="stage"><div class="fill" style="width:${Math.round(c.hp * 100)}%"></div><span>❤ ${Math.ceil(c.hp * HERO_HP)}</span></div>`
+      : `<div class="bodystate s${c.st}" data-part="stage"><span>${STAGE_NAMES[c.st]}</span><div class="pips">${pips}</div><em>${c.heat}</em></div>`;
     const repair = me.rep > 0 ? `<div class="repair"><div style="width:${Math.round(me.rep * 100)}%"></div></div>` : '';
     let progress: string;
     if (this.rules.progression) {
@@ -433,12 +436,17 @@ export class Hud {
         <div class="lvl" data-part="level">${this.rules.progression ? c.lv : iconHtml(`icon.mat.${fam}`, MAT_ICON[fam])}</div>
         <div class="who"><b>${hero.name}</b><span>${FAMILY_NAMES[fam]} · ${hero.role}</span></div>
       </div>
-      <div class="bodystate s${c.st}" data-part="stage"><span>${STAGE_NAMES[c.st]}</span><div class="pips">${pips}</div><em>${c.heat}</em></div>
+      ${state}
       ${c.fl & F_SHIELD ? `<div class="shieldtag">🛡️ Escudo ${c.sh}</div>` : ''}
       ${repair}
       ${progress}`;
     if (this.body.innerHTML !== html) this.body.innerHTML = html;
+    // Destello al recibir daño: el panel se sacude y se tiñe de rojo un instante.
+    if (this.rules.health && c.hp < this.lastHp - 0.001) { this.body.classList.add('flash'); restart(this.body); }
+    this.lastHp = c.hp;
   }
+
+  private lastHp = 1;
 
   /** Armas: el arma en la mano con sus balas, a cuál cambia la tecla y cuántas cargas de C4 quedan. */
   private renderGuns(c: CharFrame, me: MeFrame) {
@@ -814,13 +822,14 @@ export class Hud {
         const row = h('div', { class: 'feed-row' + (e.v === this.localId || e.a === this.localId ? ' me' : '') });
         row.innerHTML = k
           ? `<b style="color:${col(k)}">${esc(k.name)}</b> 💥 sacó a <b style="color:${col(v)}">${esc(v.name)}</b>${e.as.length ? ` <small>+${e.as.map((a) => esc(this.byId.get(a)?.name ?? '')).join(', ')}</small>` : ''}`
+          : e.br ? `<b style="color:${col(v)}">${esc(v.name)}</b> quedó sin vida 💀`
           : `<b style="color:${col(v)}">${esc(v.name)}</b> se cayó solo 🙈`;
         this.feed.prepend(row);
         while (this.feed.children.length > 5) this.feed.lastChild?.remove();
         setTimeout(() => row.classList.add('out'), 6000);
         setTimeout(() => row.remove(), 6600);
         row.classList.add('in');
-        if (e.v === this.localId) this.showCenter('¡RING-OUT!', 1.4, 'bad');
+        if (e.v === this.localId) this.showCenter(e.br ? '¡Sin vida!' : '¡RING-OUT!', 1.4, 'bad');
         else if (e.a === this.localId) this.showCenter('¡Lo sacaste!', 1.2, 'good');
         // Rachas y multi-kills (se calculan igual en todas las pantallas)
         const vs = this.streaks.get(e.v) ?? 0;

@@ -48,7 +48,7 @@ Lo que ya existe y cualquier modo puede reutilizar:
 
 | Pieza | Estado | Notas |
 |---|---|---|
-| Combate de heat + knockback por etapas, ring-out | ✅ | El corazón. Sin barra de vida. |
+| Combate de heat + knockback por etapas, ring-out | ✅ | El corazón. Sin barra de vida, salvo en la Horda (regla `health`). |
 | Cuerpo lanzado como proyectil (billar, paredes) | ✅ | |
 | Mapa destructible por etapas + baldosas frágiles | ✅ | Coberturas reaparecen a los 40 s. |
 | Materiales / trozos | ✅ | Configurable por reglas. |

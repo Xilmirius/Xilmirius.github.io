@@ -53,7 +53,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [01](01-copa-cliente-sin-controles.md) | – | En una copa en multijugador, el que no es host no se puede mover desde la segunda pista |
 | [x] | [02](02-carrera-salida-en-linea.md) | – | Los corredores salen en dos filas y los de adelante llevan ventaja |
 | [x] | [03](03-carrera-sin-salto-y-agarrar.md) | 02 | Carrera con salto flotante y sin golpes: agarrar, empujar y un dash que tarda en volver |
-| [ ] | [04](04-horda-barra-de-vida.md) | – | La Horda pasa del heat a una barra de vida |
+| [x] | [04](04-horda-barra-de-vida.md) | – | La Horda pasa del heat a una barra de vida |
 | [ ] | [05](05-horda-armas-chatarra-taller.md) | 04 | Se llevan todas las armas que se juntan y se mejoran con chatarra |
 | [ ] | [06](06-apuntado-con-altura.md) | 05 | Las balas van al punto del mundo que marca el cursor, también en altura |
 | [ ] | [07](07-navegacion-de-zombis.md) | 04 | Los zombis se traban: caminos que respetan rampas y obstáculos |
@@ -98,7 +98,7 @@ El usuario no opinó sobre estos números; son el punto de partida de cada tarea
 | Recarga del dash en la Carrera | 5 s (hoy 1,3 s) | 03 |
 | Agarre | hasta 1,5 s; el agarrado va al 25 % y el que agarra al 50 %; 3 s para volver a agarrar | 03 |
 | Salto de la Carrera | fuerza ×0,75 y gravedad ×0,75 (sube ~1,4 m en ~0,7 s), sin doble salto | 03 |
-| Vida de un héroe en la Horda | 100; se recupera sola a 5 por segundo tras 3 s sin recibir daño | 04 |
+| Vida de un héroe en la Horda | 150 (el plan decía 100; ver tarea 04); se recupera sola a 5 por segundo tras 3 s sin recibir daño | 04 |
 | Niveles de un arma | 5, a 15 / 30 / 50 / 80 de chatarra | 05 |
 | Dónde se usa el taller | en una mini base o en el campamento de salida | 05 |
 | La chatarra es del equipo | la junta uno y suma para todos | 05 |

@@ -6,7 +6,7 @@ import {
   LAUNCH_THRESHOLD, MAX_LEVEL, MAX_PICKUPS, MUTATION_LEVELS, PICKUP_COLLECT, PICKUP_MAGNET, PICKUP_TTL,
   PUSH_CD, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, REPAIR_TIME, RESPAWN_TIME, SPAWN_INVULN, STAGE_AT,
   STAGE_KB, TICK_RATE, TILE_CRUMBLE, TILE_HP, WALL_SLAM_SPEED, XP_ASSIST, XP_DESTRUCT, XP_KILL, XP_PER_HEAT, XP_PICKUP,
-  XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE, RECALL_TIME, BASE_RADIUS, ISLAND_BOTTOM,
+  HEALTH_KB, HERO_HP, healthStage, XP_TABLE, XP_TRICKLE, GRAVITY, LEVEL_H, ULT_PER_HEAT, ULT_PER_PICKUP, ULT_TRICKLE, RECALL_TIME, BASE_RADIUS, ISLAND_BOTTOM,
 } from './constants';
 import {
   baseStats, Character, DESTRUCT_DEF, type BlastSpec, type Destructible, type Gadget, type HitSpec, type Pickup,
@@ -203,6 +203,7 @@ export class Simulation {
       ch.ppos = { ...ch.pos };
       ch.facing = ch.pos.x < 0 ? Math.PI / 2 : -Math.PI / 2;
       if (this.rules.weapons) ch.c4 = C4.start;
+      if (this.rules.health) ch.hp = ch.maxHp = HERO_HP;
       this.recalcStats(ch);
       this.chars.push(ch);
       this.charById.set(ch.id, ch);
@@ -314,9 +315,21 @@ export class Simulation {
     return Math.hypot(ch.pos.x - b.x, ch.pos.z - b.z) <= BASE_RADIUS;
   }
 
-  /** Enfría (baja heat) a un héroe: base, cerca de sus torres. */
+  /** Enfría (baja heat) a un héroe: base, cerca de sus torres. Con reglas de vida, lo cura. */
   coolHeat(ch: Character, amount: number) {
-    if (ch.unit === 'hero' && ch.heat > 0) this.setHeat(ch, ch.heat - amount);
+    if (ch.unit !== 'hero') return;
+    if (this.rules.health) { if (ch.alive && ch.hp < ch.maxHp) ch.hp = Math.min(ch.maxHp, ch.hp + amount); }
+    else if (ch.heat > 0) this.setHeat(ch, ch.heat - amount);
+  }
+
+  /** ¿Está lastimado? (heat arriba de cero o, con reglas de vida, vida por debajo del máximo). */
+  isHurt(ch: Character) {
+    return this.rules.health ? ch.hp < ch.maxHp : ch.heat > 0;
+  }
+
+  /** Etapa del cuerpo de un héroe: la del heat, o la que sale de la vida con reglas de vida. */
+  heroStage(ch: Character) {
+    return this.rules.health ? healthStage(ch.hp, ch.maxHp) : ch.stage;
   }
 
   /** Crea una unidad (esbirro, neutral) con cuerpo, física y knockback como un héroe. */
@@ -619,6 +632,7 @@ export class Simulation {
     ch.grounded = false;
     ch.heat = 0;
     ch.stage = 0;
+    if (this.rules.health) ch.hp = ch.maxHp;
     ch.tumble = ch.hitstun = ch.stun = 0;
     ch.invuln = SPAWN_INVULN;
     ch.shield = 0;
@@ -998,7 +1012,8 @@ export class Simulation {
     this.emit({ k: 'body', id: b.id, x: (a.pos.x + b.pos.x) / 2, y: b.pos.y + 0.8, z: (a.pos.z + b.pos.z) / 2, a: launcher ? launcher.id : -1 });
   }
 
-  private die(ch: Character) {
+  /** broke: se cayó por quedarse sin vida (se rompe en el lugar) y no por salir del mapa. */
+  private die(ch: Character, broke = false) {
     if (!ch.alive) return;
     ch.alive = false;
     ch.deaths++;
@@ -1038,8 +1053,9 @@ export class Simulation {
     }
     ch.lethalAt = -1;
     if (this.phase === 'play') this.mode.onDeath(this, ch, killer);
-    this.emit({ k: 'ring', id: ch.id, x: ch.pos.x, z: ch.pos.z, tm: ch.team, last: ch.eliminated ? 1 : 0 });
-    this.emit({ k: 'feed', a: killer ? killer.id : -1, v: ch.id, as: assists });
+    if (broke) this.emit({ k: 'broke', id: ch.id, x: ch.pos.x, y: ch.pos.y, z: ch.pos.z, tm: ch.team, last: ch.eliminated ? 1 : 0 });
+    else this.emit({ k: 'ring', id: ch.id, x: ch.pos.x, z: ch.pos.z, tm: ch.team, last: ch.eliminated ? 1 : 0 });
+    this.emit({ k: 'feed', a: killer ? killer.id : -1, v: ch.id, as: assists, br: broke ? 1 : 0 });
     ch.pos.y = KILL_Y;
   }
 
@@ -1090,7 +1106,8 @@ export class Simulation {
       t.shield -= a;
       heat -= a;
     }
-    this.setHeat(t, t.heat + heat);
+    if (this.rules.health) t.hp = Math.max(0, t.hp - heat);
+    else this.setHeat(t, t.heat + heat);
     t.lastHitTick = this.tick;
     if (attacker && attacker.team !== t.team) {
       if (attacker.unit === 'hero') {
@@ -1103,6 +1120,7 @@ export class Simulation {
       }
       // Esbirros y torres no se llevan el crédito del ring-out: queda para el último héroe que pegó.
     }
+    if (this.rules.health && t.hp <= 0) this.die(t, true);
     return heat;
   }
 
@@ -1116,14 +1134,16 @@ export class Simulation {
     const hadShield = t.shield > 0;
     const applied = this.applyHeat(t, attacker, spec.heat);
     const isUnit = t.unit !== 'hero';
-    const stage = isUnit ? this.unitStage(t) : t.stage;
+    const stage = isUnit ? this.unitStage(t) : this.heroStage(t);
     let lethal = 0;
     if (!t.alive) {
       // La unidad murió con este golpe: solo el efecto.
       if (!spec.quiet) this.emit({ k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: 0, f: spec.fx ?? t.family, id: t.id, a: attacker ? attacker.id : -1, h: Math.round(applied), st: stage, l: 0, dx: 0, dz: 0 });
       return true;
     }
-    const byStage = spec.flat ? 1 : STAGE_KB[stage] * (isUnit ? 1 : 1 + 0.003 * (t.heat - STAGE_AT[stage]));
+    const byStage = spec.flat ? 1
+      : !isUnit && this.rules.health ? HEALTH_KB
+      : STAGE_KB[stage] * (isUnit ? 1 : 1 + 0.003 * (t.heat - STAGE_AT[stage]));
     let force = spec.kb * byStage * t.stats.kbTaken;
     if (hadShield) force *= 0.6;
     if (t.kbImmune > 0) force = 0;
@@ -1170,7 +1190,7 @@ export class Simulation {
     }
     if (!spec.quiet) this.emit({
       k: 'hit', x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z, p: Math.round(force * 10) / 10, f: spec.fx ?? t.family, id: t.id,
-      a: attacker ? attacker.id : -1, h: Math.round(applied), st: t.stage, l: lethal, dx: Math.round(dx * 10) / 10, dz: Math.round(dz * 10) / 10,
+      a: attacker ? attacker.id : -1, h: Math.round(applied), st: isUnit ? t.stage : stage, l: lethal, dx: Math.round(dx * 10) / 10, dz: Math.round(dz * 10) / 10,
     });
     return true;
   }

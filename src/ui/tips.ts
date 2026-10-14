@@ -2,7 +2,7 @@
 // así si cambia el balance, el tooltip se actualiza solo).
 import { iconHtml } from '../assets/registry';
 import {
-  DASH_CD, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
+  DASH_CD, HERO_HP, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
 } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
@@ -137,6 +137,13 @@ export function stageTip(stage: number, heat: number) {
     + `<table class="tt-table"><tr><th>Etapa</th><th>Heat</th><th>Vuelo</th></tr>${rows}</table>`;
 }
 
+export function healthTip(hp: number, stage: number) {
+  return head('❤', `Tu vida: ${Math.ceil(hp * HERO_HP)} de ${HERO_HP}`)
+    + p('Los zombis te la bajan; en cero <b>perdés una vida</b> y volvés en la última mini base. Los golpes te empujan poco y siempre igual.')
+    + p('Se recupera sola si pasás unos segundos sin recibir golpes, más rápido parado en una mini base, con un botiquín y al cumplir una misión.', 'tt-note')
+    + p(`El cuerpo se agrieta a medida que la perdés (${STAGE_NAMES[stage]}). Caer al vacío también cuesta una vida.`, 'tt-note');
+}
+
 export function levelTip(level: number, xp: number, next: number, heroId: HeroId) {
   const hero = HEROES[heroId];
   const unlocks = (['q', 'e', 'f', 'r'] as AbilitySlot[]).map((sl) => `${KEY[sl]} nv ${hero.abilities[sl].unlock}`).join(' · ');
@@ -194,13 +201,13 @@ const MODE_NOTES: Partial<Record<ModeId, () => string[]>> = {
     '<b>El Coloso</b> despierta a los 2 min: derrotarlo bendice a tus esbirros.',
   ],
   horde: () => [
-    '<b>Cooperativo</b>: no hay equipos rivales. Se pierde cuando a nadie le quedan vidas.',
+    '<b>Cooperativo</b>: no hay equipos rivales. Los zombis te bajan la <b>barra de vida</b>; en cero perdés una vida y volvés en la última mini base. Se pierde cuando a nadie le quedan vidas.',
     touchMode()
       ? '<b>Armas en vez de poderes</b>: el botón grande dispara (mantenelo y arrastrá para apuntar; sin arrastrar apunta solo al zombi más cercano), <kbd>🫸</kbd> es el empujón, <kbd>🔁</kbd> cambia entre la pistola y tu arma y <kbd>🧨</kbd> planta C4.'
       : `<b>Armas en vez de poderes</b>: <kbd>Clic</kbd> dispara (mantenelo), <kbd>Clic derecho</kbd> es el empujón, <kbd>${keyName('q')}</kbd> cambia entre la pistola y tu arma, <kbd>${keyName('r')}</kbd> planta C4.`,
-    'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que enfría. Disparar te frena: hay que elegir entre correr y tirar.',
+    'Empezás con la pistola y un arma cargada. Las <b>cajas</b> que caen del cielo traen uzi, escopeta, lanzacohetes, C4 o un botiquín que cura. Disparar te frena: hay que elegir entre correr y tirar.',
     'Las oleadas <b>no paran de crecer</b>. Se gana cumpliendo las <b>misiones</b> del mapa, una tras otra, hasta la <b>extracción</b>.',
-    'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde enfriarse y punto de reaparición.',
+    'Cada zona asegurada queda como <b>mini base</b>: torreta, lugar donde curarse y punto de reaparición.',
     `Al cumplir cada misión <b>elegís una mejora</b> entre tres (${touchMode() ? 'tocá la que quieras' : 'teclas <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> o clic'}): más daño, balas que atraviesan, zombis que explotan... Tenés ${PERK.time} s; se acumulan hasta el final.`,
     '<b>Zombis</b> (lentos), <b>Corredores</b> (rápidos y frágiles), <b>Escupidores</b> (a distancia, avisan dónde cae) y <b>Moles</b> (enormes: su golpe se ve venir). A todos se los puede <b>tirar al vacío</b>.',
   ],

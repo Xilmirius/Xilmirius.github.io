@@ -589,6 +589,7 @@ export class AudioEngine {
       case 'tile': if (e.s >= 3) this.play('tile', vol * 0.8, pan); break;
       case 'stage': this.play('stage', vol * (e.id === localId ? 1 : 0.7), pan); break;
       case 'ring': this.play('ringout', Math.max(0.6, vol), pan); this.play('crowd', e.last ? 0.9 : 0.6); break;
+      case 'broke': this.play('stage', Math.max(0.8, vol), pan); this.play('ringout', 0.5, pan); break;
       case 'jump': this.play(e.air ? 'airjump' : 'jump', vol * (e.id === localId ? 1 : 0.5), pan); break;
       case 'dash': this.play('whoosh', vol * (e.id === localId ? 0.8 : 0.45), pan, 1.4); break;
       case 'land': this.play('land', vol * Math.min(1, e.p / 20), pan); break;

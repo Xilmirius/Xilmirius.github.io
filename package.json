@@ -16,6 +16,7 @@
     "tool:kb": "tsx scripts/kbtune.ts",
     "tool:bots": "tsx scripts/botstats.ts",
     "tool:race": "tsx scripts/botstats.ts race",
+    "tool:horde": "tsx scripts/botstats.ts horde",
     "tool:clearings": "tsx scripts/clearings.ts"
   },
   "dependencies": {

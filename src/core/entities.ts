@@ -34,7 +34,7 @@ export interface ActionState {
 
 export class Character implements MoveState {
   unit: UnitKind = 'hero';
-  /** Unidades: vida (los héroes no tienen: se agrietan con heat y mueren por ring-out). */
+  /** Vida: la de las unidades y la de los héroes en reglas con `health` (Horda). Sin ellas los héroes se agrietan con heat y mueren por ring-out. */
   hp = 0;
   maxHp = 0;
   /** Unidades: estado de su IA (lo maneja el modo). */

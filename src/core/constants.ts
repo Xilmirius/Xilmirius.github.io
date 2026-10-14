@@ -1,7 +1,7 @@
 // Constantes de juego. Todo lo "tuneable" vive acá para iterar balance sin tocar sistemas.
 export const GAME_TITLE = 'RUBBLE';
 export const GAME_SUBTITLE = 'muchos juegos · un mundo que se rompe';
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -41,6 +41,17 @@ export const HEAT_MAX = 260;
 export const LAUNCH_THRESHOLD = 6;
 export const WALL_SLAM_SPEED = 9;
 export const BODY_HIT_SPEED = 7;
+
+// Vida de los héroes (reglas con `health`, la Horda): reemplaza al heat. La etapa que se ve sale de la fracción de vida.
+export const HERO_HP = 150;
+/** Multiplicador fijo del empuje que recibe un héroe con vida (en vez de STAGE_KB): los golpes empujan siempre igual. */
+export const HEALTH_KB = 0.45;
+/** Fracción de vida por encima de la cual se está en la etapa 0, 1 y 2; por debajo de la última, 3. */
+export const HEALTH_STAGE_AT = [0.66, 0.33, 0.15] as const;
+export const healthStage = (hp: number, maxHp: number) => {
+  const f = maxHp > 0 ? hp / maxHp : 1;
+  return f > HEALTH_STAGE_AT[0] ? 0 : f > HEALTH_STAGE_AT[1] ? 1 : f > HEALTH_STAGE_AT[2] ? 2 : 3;
+};
 
 // Respawn
 export const RESPAWN_TIME = 3;

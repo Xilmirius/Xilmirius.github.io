@@ -342,9 +342,9 @@ export class BotBrain {
       return;
     }
 
-    // Muy roto y con una mini base cerca: a enfriarse (salvo en la extracción, que es llegar o nada).
+    // Con poca vida y una mini base cerca: a curarse (salvo en la extracción, que es llegar o nada).
     const base = m.bases.length ? m.bases.reduce((a, c) => (here(a) <= here(c) ? a : c)) : null;
-    if (base && here(base) < 18 && MISSIONS[m.step]?.kind !== 'extract' && (ch.heat > 150 || (this.retreating && ch.heat > 60))) {
+    if (base && here(base) < 18 && MISSIONS[m.step]?.kind !== 'extract' && (ch.hp < 30 || (this.retreating && ch.hp < 60))) {
       this.retreating = true;
       this.goal = here(base) > HORDE.baseR - 1.5 ? { x: base.x, z: base.z } : null;
       return;
@@ -355,7 +355,7 @@ export class BotBrain {
     let crate: { x: number; z: number } | null = null, cd = ch.primary < 0 ? 20 : 9;
     for (const c of m.crates) {
       const k = CRATE_KINDS[c.kind];
-      if (k === 'c4' ? ch.c4 >= C4.max : k === 'med' ? ch.heat < 50 : false) continue;
+      if (k === 'c4' ? ch.c4 >= C4.max : k === 'med' ? ch.hp > 70 : false) continue;
       const d = k === 'fuel' ? here(c) * 0.2 : here(c);
       if (d < cd) { cd = d; crate = c; }
     }

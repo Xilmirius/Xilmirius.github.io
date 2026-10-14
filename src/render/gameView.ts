@@ -56,6 +56,8 @@ export interface ViewOptions {
   theme?: string;
   /** Qué dan los trozos al juntarlos (según las reglas): cambia el texto flotante. */
   pickups?: 'materials' | 'ult' | 'none';
+  /** Reglas con vida (Horda): los nombres llevan una barra de vida en vez de las etapas del heat. */
+  health?: boolean;
 }
 
 /** Los textos grandes de peleas ajenas solo se muestran si pasan cerca tuyo (menos ruido). */
@@ -194,6 +196,7 @@ export class GameView {
       const isLocal = r.pid === localPid;
       if (isLocal) { this.localId = r.id; this.myTeam = r.team; }
       const b = new BeanView(r.hero, r.team, TEAM_COLORS[r.team % TEAM_COLORS.length], r.name, isLocal, r.hat);
+      if (opts.health) b.useHealthBar();
       this.beans.set(r.id, b);
       this.scene.add(b.root, ...b.groundObjects());
       this.labels.appendChild(b.label);
@@ -901,6 +904,19 @@ export class GameView {
         F.add(e.x, 1.5, e.z, e.last ? '¡ELIMINADO!' : '¡RING-OUT!', 'big ring', { size: e.last ? 52 : 44, life: 1.5, rise: 3 });
         if (e.id === me) this.post?.flash(DANGER_RED, 0.25);
         else if (this.nearMe(e.x, e.z) < 16) this.post?.flash(tc, 0.12);
+        break;
+      }
+      case 'broke': {
+        // Se quedó sin vida: el cuerpo se rompe en el lugar (a diferencia del ring-out, que cae al vacío).
+        const tc = this.teamColor(e.tm);
+        const fam = this.charFamily(e.id);
+        const col = fam ? FAMILY_COLORS[fam] : tc;
+        P.burst(e.x, e.y + 0.7, e.z, 36, col, { speed: 6, up: 5, size: 0.2 });
+        S.burst(e.x, e.y + 0.7, e.z, 24, DANGER_RED, { speed: 7, up: 5, size: 0.07, life: 0.6, gravity: 8 });
+        G.ring(e.x, e.y + 0.1, e.z, 3.5, DANGER_RED, 0.5);
+        L.flash(e.x, e.y + 0.7, e.z, DANGER_RED, 60, 14, 0.4);
+        F.add(e.x, e.y + 1.6, e.z, e.last ? '¡ELIMINADO!' : '¡CAYÓ!', 'big ring', { size: e.last ? 48 : 40, life: 1.3, rise: 2.5 });
+        if (e.id === me) this.post?.flash(DANGER_RED, 0.3);
         break;
       }
       case 'jump': {

@@ -11,7 +11,9 @@ export type SimEvent =
   | { k: 'tile'; i: number; s: number }
   | { k: 'stage'; id: number; s: number }
   | { k: 'ring'; id: number; x: number; z: number; tm: number; last: number }
-  | { k: 'feed'; a: number; v: number; as: number[] }
+  /** Un héroe se quedó sin vida (reglas con `health`): se rompe en el lugar. */
+  | { k: 'broke'; id: number; x: number; y: number; z: number; tm: number; last: number }
+  | { k: 'feed'; a: number; v: number; as: number[]; /** 1 si se quedó sin vida en vez de caer del mapa (reglas con `health`). */ br?: number }
   | { k: 'jump'; id: number; air: number }
   | { k: 'dash'; id: number; dx: number; dz: number }
   | { k: 'land'; id: number; p: number }

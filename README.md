@@ -2,7 +2,7 @@
 
 > Codename **ProjectRubble**. Nombre final del juego/estudio todavía TBD (ver [docs/GDD.md](docs/GDD.md)).
 
-**Una plataforma de juegos en el navegador**, para jugar con amigos con un link. Todos corren sobre el mismo núcleo: personajes de materiales, física de **knockback** estilo Smash, mapa que se rompe, bots y red P2P. No hay barra de vida: cada golpe te **agrieta** y, cuanto más roto estás, más lejos volás. Se muere solo por **ring-out** (saliendo del mapa).
+**Una plataforma de juegos en el navegador**, para jugar con amigos con un link. Todos corren sobre el mismo núcleo: personajes de materiales, física de **knockback** estilo Smash, mapa que se rompe, bots y red P2P. No hay barra de vida: cada golpe te **agrieta** y, cuanto más roto estás, más lejos volás. Se muere solo por **ring-out** (saliendo del mapa). La excepción es la Horda, donde los héroes sí tienen barra de vida.
 
 El menú es una **vitrina de juegos**: elegís uno y creás la sala o practicás con bots. Detrás se ve una partida de bots de ese juego, y dentro de la sala el host puede cambiar de juego sin salir.
 

@@ -312,6 +312,16 @@ export class BeanView {
     this.label.append(this.labelName, this.labelBar);
   }
 
+  /** Reglas con vida (Horda): en vez de las cuatro etapas, una barra de vida bajo el nombre. */
+  useHealthBar() {
+    this.hpFill = document.createElement('div');
+    this.labelBar.className = 'nt-bar hp';
+    this.labelBar.replaceChildren(this.hpFill);
+  }
+
+  private hpFill: HTMLDivElement | null = null;
+  private hpShown = -1;
+
   /** Objetos que viven en el suelo (no se inclinan con el personaje). */
   groundObjects() { return [this.ring, this.shadow, this.chargeCone, this.aura]; }
 
@@ -384,6 +394,7 @@ export class BeanView {
     this.bodyMat.emissiveMap = skin.glow;
     this.bodyMat.emissiveIntensity = [0, 0.35, 0.8, 1.3][stage] ?? 0;
     this.bodyMat.needsUpdate = true;
+    if (this.hpFill) return;
     const pips = this.labelBar.children;
     for (let i = 0; i < pips.length; i++) (pips[i] as HTMLElement).className = i <= stage ? 'on s' + stage : '';
     this.labelBar.title = STAGE_NAMES[stage];
@@ -480,6 +491,11 @@ export class BeanView {
     this.label.style.display = dead ? 'none' : '';
     if (dead) return;
     this.setStage(f.st);
+    if (this.hpFill && f.hp !== this.hpShown) {
+      this.hpShown = f.hp;
+      this.hpFill.style.width = `${Math.round(f.hp * 100)}%`;
+      this.hpFill.className = 's' + f.st;
+    }
 
     this.root.position.set(f.x, f.y, f.z);
     const grounded = (f.fl & F_GROUNDED) !== 0;

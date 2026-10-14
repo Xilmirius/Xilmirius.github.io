@@ -1,5 +1,6 @@
 // Herramienta de balance: estadísticas de partidas de bots por nivel (`npm run tool:bots`).
 // `npm run tool:race`: lo mismo para las cuatro pistas de Carrera (tarea 03: llegadas, trabados, agarres).
+// `npm run tool:horde [mapa] [partidas]`: partidas de Horda con tres bots por dificultad (tarea 04: victorias, vidas perdidas, duración).
 import { BotBrain } from '../src/core/bots';
 import { DT } from '../src/core/constants';
 import type { RaceMode } from '../src/core/race';
@@ -83,5 +84,41 @@ function raceStats() {
   console.log(out.join('\n'));
 }
 
+
+/** Una partida de Horda con bots (sin pantalla): gana el equipo si llega a la extracción, pierde si se queda sin vidas. */
+function runHorde(map: string, level: 1 | 2 | 3, seed: number, bots = 3, maxSec = 900) {
+  const sim = new Simulation({
+    settings: { ...DEFAULT_SETTINGS, mode: 'horde', map, difficulty: level, lives: 3, timeLimit: 0 },
+    roster: Array.from({ length: bots }, (_, i) => ({ pid: 'b' + i, name: 'b' + i, hero: HERO_IDS[i % 4], team: 0, bot: true })),
+    seed,
+  });
+  const brains = sim.chars.map((_, i) => new BotBrain(2, seed * 97 + i + 1));
+  let broke = 0, falls = 0, heatSeen = 0;
+  for (let t = 0; t < maxSec * 60 && sim.phase !== 'end'; t++) {
+    sim.chars.forEach((c, k) => { c.input = brains[k].think(sim, c, DT); });
+    sim.step();
+    for (const e of sim.drainEvents()) { if (e.k === 'broke') broke++; else if (e.k === 'ring') falls++; }
+    for (const c of sim.chars) heatSeen = Math.max(heatSeen, c.heat);
+  }
+  const lost = sim.chars.reduce((n, c) => n + (sim.settings.lives - c.lives), 0);
+  return { won: sim.result?.winner === 0, secs: sim.tick / 60, lost, broke, falls, heatSeen };
+}
+
+function hordeStats() {
+  const map = process.argv[3] ?? 'refugio';
+  const runs = Number(process.argv[4] ?? 20);
+  let seed = Number(process.argv[5] ?? 5000);
+  for (const level of [1, 2, 3] as const) {
+    let wins = 0, lost = 0, secs = 0, broke = 0, falls = 0, heat = 0;
+    for (let i = 0; i < runs; i++) {
+      const r = runHorde(map, level, ++seed);
+      if (r.won) wins++;
+      lost += r.lost; secs += r.secs; broke += r.broke; falls += r.falls; heat = Math.max(heat, r.heatSeen);
+    }
+    console.log(`${map} dificultad ${level}: ganan ${wins}/${runs} · vidas perdidas/partida ${(lost / runs).toFixed(1)} (por vida en cero ${(broke / runs).toFixed(1)}, por caída ${(falls / runs).toFixed(1)}) · dura ${(secs / runs).toFixed(0)}s · heat máx ${heat}`);
+  }
+}
+
 if (process.argv[2] === 'race') raceStats();
+else if (process.argv[2] === 'horde') hordeStats();
 else brawlStats();

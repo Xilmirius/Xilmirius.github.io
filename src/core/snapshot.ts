@@ -39,6 +39,8 @@ export interface CharFrame {
   wp: number;
   /** Agarrar (reglas con `grab`): id del otro (a quién agarra o quién lo agarra, según `fl`); -1 si ninguno. */
   gb: number;
+  /** Fracción de vida 0..1 (reglas con `health`); 1 si la partida no usa vida. */
+  hp: number;
 }
 
 /** Unidad del Asedio: k = índice en UNIT_KINDS, hp 0..1. */
@@ -139,12 +141,13 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
     phaseT: sim.phaseT,
     chars: sim.chars.map((c) => ({
       id: c.id, x: c.pos.x, y: c.pos.y, z: c.pos.z, f: c.facing, vx: c.vel.x, vy: c.vel.y, vz: c.vel.z,
-      fl: charFlags(c, sim), heat: Math.round(c.heat), st: c.stage, lv: c.level,
+      fl: charFlags(c, sim), heat: Math.round(c.heat), st: sim.heroStage(c), lv: c.level,
       ac: c.action ? c.action.kind : '', ap: c.action ? Math.min(1, c.action.t / c.action.dur) : 0,
       ch: c.charging ? c.pushCharge / PUSH_MAX_CHARGE : c.repairT > 0 ? c.repairT / REPAIR_TIME : c.recallT > 0 ? c.recallT / RECALL_TIME : 0,
       sh: c.shield, k: c.kills, d: c.deaths, a: c.assists, lives: c.lives, rt: c.alive ? 0 : Math.max(0, c.respawnT), cs: c.cs,
       wp: sim.rules.weapons ? c.weapon : -1,
       gb: c.grabbing >= 0 ? c.grabbing : c.grabbedBy,
+      hp: sim.rules.health && c.maxHp > 0 ? Math.max(0, c.hp / c.maxHp) : 1,
     })),
     units: sim.units.filter((u) => u.alive).map((u) => ({
       id: u.id, k: UNIT_KINDS.indexOf(u.unit), tm: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, f: u.facing,
@@ -199,7 +202,7 @@ export function encodeWorld(w: WorldFrame): any[] {
     w.tick,
     w.phase === 'countdown' ? 0 : w.phase === 'play' ? 1 : 2,
     r2(w.phaseT),
-    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs, c.wp, c.gb]),
+    w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs, c.wp, c.gb, r2(c.hp)]),
     w.projs.map((p) => [p.id, p.k, r2(p.x), r2(p.y), r2(p.z), r2(p.vx), r2(p.vz), r2(p.r), p.tm, p.o]),
     w.zones.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
     w.teles.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
@@ -221,7 +224,7 @@ export function decodeWorld(a: any[]): WorldFrame {
     chars: a[3].map((c: any[]) => ({
       id: c[0], x: c[1], y: c[2], z: c[3], f: c[4], vx: c[5], vy: c[6], vz: c[7], fl: c[8], heat: c[9], st: c[10], lv: c[11],
       ac: c[12], ap: c[13], ch: c[14], sh: c[15], k: c[16], d: c[17], a: c[18], lives: c[19], rt: c[20], cs: c[21] ?? 0, wp: c[22] ?? -1,
-      gb: c[23] ?? -1,
+      gb: c[23] ?? -1, hp: c[24] ?? 1,
     })),
     units: (a[11] ?? []).map((u: any[]) => ({ id: u[0], k: u[1], tm: u[2], x: u[3], y: u[4], z: u[5], f: u[6], fl: u[7], hp: u[8], vx: u[9], vz: u[10] })),
     projs: a[4].map((p: any[]) => ({ id: p[0], k: p[1], x: p[2], y: p[3], z: p[4], vx: p[5], vz: p[6], r: p[7], tm: p[8], o: p[9] })),

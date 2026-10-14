@@ -50,8 +50,8 @@ export const HORDE = {
   maxCrates: 3,
   crateLand: 0.9,
   crateReach: 1.25,
-  /** Heat que enfría un botiquín (a quien lo agarra y a los que tenga cerca). */
-  medCool: 60,
+  /** Vida que cura un botiquín (a quien lo agarra y a los que tenga cerca). */
+  medHeal: 60,
   medRadius: 5,
   /** Zonas de misión y mini bases. */
   zoneR: 3.6,
@@ -60,10 +60,10 @@ export const HORDE = {
   /** Con zombis adentro la zona avanza más lento. */
   contested: 0.5,
   baseR: 4,
-  /** Heat por segundo que se enfría un héroe parado en una mini base. */
-  baseCool: 7,
-  /** Heat que se enfría todo el equipo al cumplir una misión. */
-  missionCool: 30,
+  /** Vida por segundo que recupera un héroe parado en una mini base. */
+  baseHeal: 7,
+  /** Vida que recupera todo el equipo al cumplir una misión. */
+  missionHeal: 30,
   /** Al cumplir una misión, la próxima oleada no sale antes de estos segundos: un respiro para elegir la mejora. */
   breather: 7,
   /**
@@ -73,9 +73,9 @@ export const HORDE = {
   threatHp: 0.15,
   threatDmg: 0.07,
   threatCount: 0.15,
-  /** Sin recibir golpes durante `coolAfter` segundos, un héroe se enfría solo a `coolRate` por segundo: despegarse sirve. */
-  coolAfter: 3,
-  coolRate: 5,
+  /** Sin recibir golpes durante `healAfter` segundos, un héroe se cura solo a `healRate` por segundo: despegarse sirve. */
+  healAfter: 3,
+  healRate: 5,
   /** A partir de esta oleada, las siguientes crecen a la mitad del ritmo. */
   softCap: 12,
   /** Nidos: cuántos (uno menos jugando solo), cuánto aguantan (más por cada héroe) y cada cuánto escupe un zombi cada uno. */
@@ -129,7 +129,8 @@ interface ZombieDef {
   hp: number;
   speed: number;
   kbTaken: number;
-  heat: number;
+  /** Daño por golpe (se resta de la vida del héroe). */
+  dmg: number;
   kb: number;
   /** Distancia (entre bordes de los cuerpos) desde la que ataca. */
   range: number;
@@ -141,12 +142,12 @@ interface ZombieDef {
 }
 
 export const ZOMBIES: Record<ZombieKind, ZombieDef> = {
-  zombie: { name: 'Zombi', family: 'goo', hp: 55, speed: 3.4, kbTaken: 1, heat: 8, kb: 7, range: 0.5, cd: 1.1, windup: 0.3 },
-  runner: { name: 'Corredor', family: 'crystal', hp: 30, speed: 6.3, kbTaken: 1.25, heat: 5, kb: 5, range: 0.5, cd: 0.8, windup: 0.2 },
-  brute: { name: 'Mole', family: 'stone', hp: 320, speed: 2.6, kbTaken: 0.4, heat: 14, kb: 13, range: 0.9, cd: 2.2, windup: 0.75, slam: 2.4 },
-  spitter: { name: 'Escupidor', family: 'goo', hp: 40, speed: 3, kbTaken: 1.1, heat: 7, kb: 6, range: 9, cd: 2.3, windup: 0.45 },
+  zombie: { name: 'Zombi', family: 'goo', hp: 55, speed: 3.4, kbTaken: 1, dmg: 8, kb: 7, range: 0.5, cd: 1.1, windup: 0.3 },
+  runner: { name: 'Corredor', family: 'crystal', hp: 30, speed: 6.3, kbTaken: 1.25, dmg: 5, kb: 5, range: 0.5, cd: 0.8, windup: 0.2 },
+  brute: { name: 'Mole', family: 'stone', hp: 320, speed: 2.6, kbTaken: 0.4, dmg: 14, kb: 13, range: 0.9, cd: 2.2, windup: 0.75, slam: 2.4 },
+  spitter: { name: 'Escupidor', family: 'goo', hp: 40, speed: 3, kbTaken: 1.1, dmg: 7, kb: 6, range: 9, cd: 2.3, windup: 0.45 },
   // El jefe de la misión "Derribar a la Mole Madre": su vida sale de HORDE.bossHp.
-  titan: { name: 'Mole Madre', family: 'stone', hp: 1, speed: 3.1, kbTaken: 0.12, heat: 19, kb: 17, range: 1.3, cd: 2.5, windup: 0.85, slam: 3.6 },
+  titan: { name: 'Mole Madre', family: 'stone', hp: 1, speed: 3.1, kbTaken: 0.12, dmg: 19, kb: 17, range: 1.3, cd: 2.5, windup: 0.85, slam: 3.6 },
 };
 
 const SPIT_RADIUS = 1.7;
@@ -461,7 +462,7 @@ export class HordeMode implements GameMode {
     sim.emit({ k: 'alert', w: 'horde_done', tm: this.step, x: z?.x ?? 0, z: z?.z ?? 0 });
     if (m.kind === 'extract') { this.won = true; return; }
     if (m.kind === 'hold' && z) this.makeBase(sim, z);
-    for (const c of sim.chars) if (c.alive) sim.coolHeat(c, HORDE.missionCool);
+    for (const c of sim.chars) if (c.alive) sim.coolHeat(c, HORDE.missionHeal);
     // El premio: una mejora a elegir para cada uno, y un respiro antes de la próxima oleada.
     for (const c of sim.chars) if (!c.eliminated) c.picks++;
     this.waveT = Math.max(this.waveT, HORDE.breather);
@@ -517,12 +518,12 @@ export class HordeMode implements GameMode {
     this.dropCrate(sim, this.rollCrate(sim), z);
   }
 
-  /** Enfriarse: solo, al rato de no recibir golpes; y más rápido parado en una mini base. */
+  /** Curarse: solo, al rato de no recibir golpes; y más rápido parado en una mini base. */
   private tickBases(sim: Simulation, dt: number) {
     for (const c of sim.chars) {
-      if (!c.alive || c.heat <= 0) continue;
-      let rate = sim.tick - c.lastHitTick > HORDE.coolAfter * 60 ? HORDE.coolRate : 0;
-      if (this.bases.some((b) => d2(c.pos, b) <= HORDE.baseR && Math.abs(c.pos.y - b.y) < 2.2)) rate += HORDE.baseCool;
+      if (!c.alive || !sim.isHurt(c)) continue;
+      let rate = sim.tick - c.lastHitTick > HORDE.healAfter * 60 ? HORDE.healRate : 0;
+      if (this.bases.some((b) => d2(c.pos, b) <= HORDE.baseR && Math.abs(c.pos.y - b.y) < 2.2)) rate += HORDE.baseHeal;
       if (rate) sim.coolHeat(c, rate * dt);
     }
   }
@@ -634,10 +635,10 @@ export class HordeMode implements GameMode {
 
   /** Qué trae la próxima caja: más lanzacohetes con las oleadas, más botiquines con el equipo muy roto. */
   private rollCrate(sim: Simulation): number {
-    let heat = 0, n = 0;
-    for (const c of sim.chars) if (c.alive) { heat += c.heat; n++; }
+    let hurt = 0, n = 0;
+    for (const c of sim.chars) if (c.alive) { hurt += 1 - c.hp / c.maxHp; n++; }
     // (el combustible no entra en el sorteo: lo pone su misión)
-    const w = [30, 26, 10 + Math.min(12, this.wave), 16, n && heat / n > 70 ? 32 : 8];
+    const w = [30, 26, 10 + Math.min(12, this.wave), 16, n && hurt / n > 0.4 ? 32 : 8];
     let r = sim.rng.next() * w.reduce((s, x) => s + x, 0);
     for (let i = 0; i < w.length; i++) if ((r -= w[i]) < 0) return i;
     return 0;
@@ -674,7 +675,7 @@ export class HordeMode implements GameMode {
     if (kind === 'fuel') { /* cuenta para la misión: ver tickMission */ }
     else if (kind === 'c4') c.c4 = Math.min(c4Max(c), c.c4 + C4.perCrate);
     else if (kind === 'med') {
-      for (const h of sim.chars) if (h.alive && d2(h.pos, c.pos) <= HORDE.medRadius) sim.coolHeat(h, HORDE.medCool);
+      for (const h of sim.chars) if (h.alive && d2(h.pos, c.pos) <= HORDE.medRadius) sim.coolHeat(h, HORDE.medHeal);
     } else giveWeapon(sim, c, kind);
     c.pickups++;
     sim.emit({ k: 'loot', id: c.id, c: cr.kind, x: r1(cr.x), y: r1(cr.y), z: r1(cr.z) });
@@ -852,9 +853,9 @@ export class HordeMode implements GameMode {
 
   private strike(sim: Simulation, u: Character, def: ZombieDef, ai: ZombieAI, tg: Character) {
     u.cds.basic = def.cd;
-    const heat = def.heat * this.level.dmg * (1 + HORDE.threatDmg * this.step);
+    const dmg = def.dmg * this.level.dmg * (1 + HORDE.threatDmg * this.step);
     if (def.slam) {
-      sim.blast(u, ZOMBIE_TEAM, u.pos.x, u.pos.y + 0.6, u.pos.z, { radius: def.slam, heat, kb: def.kb, up: 1.5, destruct: 30, tile: 30, fx: 'slam' }, NO_MODS);
+      sim.blast(u, ZOMBIE_TEAM, u.pos.x, u.pos.y + 0.6, u.pos.z, { radius: def.slam, heat: dmg, kb: def.kb, up: 1.5, destruct: 30, tile: 30, fx: 'slam' }, NO_MODS);
       sim.emit({ k: 'uatk', id: u.id, tg: tg.id });
       return;
     }
@@ -862,7 +863,7 @@ export class HordeMode implements GameMode {
       const a = ai.aim ?? tg.pos;
       ai.aim = null;
       sim.lob(u, 'goolob', a.x, a.z, SPIT_TIME, (x, y, z) => {
-        sim.blast(u, ZOMBIE_TEAM, x, y + 0.4, z, { radius: SPIT_RADIUS, heat, kb: def.kb, slow: [0.35, 1.2], fx: 'goo' }, NO_MODS);
+        sim.blast(u, ZOMBIE_TEAM, x, y + 0.4, z, { radius: SPIT_RADIUS, heat: dmg, kb: def.kb, slow: [0.35, 1.2], fx: 'goo' }, NO_MODS);
       });
       return;
     }
@@ -871,7 +872,7 @@ export class HordeMode implements GameMode {
     const dx = tg.pos.x - u.pos.x, dz = tg.pos.z - u.pos.z;
     const d = Math.hypot(dx, dz) || 1;
     if (!tg.alive || d - CHAR_RADIUS * 2 > def.range + 0.7 || Math.abs(tg.pos.y - u.pos.y) > 1.6) return;
-    sim.hit(tg, u, { heat, kb: def.kb, dirX: dx / d, dirZ: dz / d, fx: 'minion' });
+    sim.hit(tg, u, { heat: dmg, kb: def.kb, dirX: dx / d, dirZ: dz / d, fx: 'minion' });
   }
 
   onUnitDeath(sim: Simulation, u: Character, killer: Character | null, fell: boolean) {

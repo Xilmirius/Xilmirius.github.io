@@ -23,11 +23,11 @@ export const PERK = {
   crit: 0.15,
   critMul: 2.5,
   critKb: 1.5,
-  /** Heat que se enfría por cada zombi bajado, por nivel. */
+  /** Vida que se cura por cada zombi bajado, por nivel. */
   cold: 2.5,
-  /** Por nivel: cuánto del heat y del empuje se recibe. */
+  /** Por nivel: cuánto del daño y del empuje se recibe. */
   skinHeat: 0.8,
-  skinKb: 0.85,
+  skinKb: 0.8,
   /** Demoledor: cargas que da al elegirla, cuántas más se pueden llevar y cuánto crece la explosión, por nivel. */
   c4: 2,
   c4Radius: 0.2,
@@ -61,8 +61,8 @@ export const PERKS: Record<PerkId, PerkDef> = {
   legs: { id: 'legs', name: 'Piernas livianas', icon: '👟', desc: `Disparar ya no te frena y corrés ${pct(PERK.legsSpeed - 1)}% más`, max: 1, weight: 8 },
   pierce: { id: 'pierce', name: 'Balas perforantes', icon: '🎯', desc: 'Cada bala atraviesa un zombi más', max: 2, weight: 8 },
   crit: { id: 'crit', name: 'Ojo de halcón', icon: '🦅', desc: `${pct(PERK.crit)}% de golpes críticos: daño ×${PERK.critMul}`, max: 3, weight: 9 },
-  cold: { id: 'cold', name: 'Sangre fría', icon: '❄️', desc: 'Cada zombi que bajás te enfría', max: 2, weight: 7 },
-  skin: { id: 'skin', name: 'Piel curtida', icon: '🛡️', desc: `Recibís ${pct(1 - PERK.skinHeat)}% menos de heat y te empujan menos`, max: 2, weight: 7 },
+  cold: { id: 'cold', name: 'Sangre fría', icon: '❄️', desc: `Cada zombi que bajás te cura ${PERK.cold} de vida`, max: 2, weight: 7 },
+  skin: { id: 'skin', name: 'Piel curtida', icon: '🛡️', desc: `Recibís ${pct(1 - PERK.skinHeat)}% menos de daño y te empujan menos`, max: 2, weight: 7 },
   demo: { id: 'demo', name: 'Demoledor', icon: '🧨', desc: `+${PERK.c4} cargas de C4 ahora, llevás ${PERK.c4} más y explotan más grande`, max: 2, weight: 7 },
   turret: { id: 'turret', name: 'Torreta de bolsillo', icon: '🗼', desc: `Planta una torreta donde estás parado (${PERK.turretTime} s)`, max: 99, weight: 6 },
   life: { id: 'life', name: 'Segundo aliento', icon: '❤️', desc: '+1 vida. Si hay un compañero eliminado, vuelve al juego', max: 2, weight: 5 },

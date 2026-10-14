@@ -108,7 +108,7 @@ export class MatchRunner {
     this.heroId = me ? me.hero : null;
     this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
     for (const r of init.roster) this.teams.set(r.id, r.team);
-    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups });
+    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups, health: this.rules.health });
     this.cw = new CollisionWorld(this.view.terrain);
     this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c), this.view.terrain);
     if (init.settings.mode === 'race') this.hud.introRace(init.cup);
