@@ -194,6 +194,8 @@ export class ProjectilesView {
       }
       o.position.set(p.x, p.y, p.z);
       if (p.vx || p.vz) o.rotation.y = Math.atan2(p.vx, p.vz);
+      // El cohete apuntado vuela en 3D: se inclina hacia donde sube o baja.
+      if (p.vy) { o.rotation.order = 'YXZ'; o.rotation.x = -Math.atan2(p.vy, Math.hypot(p.vx, p.vz)); }
       if (p.k === 'nova' || p.k === 'goolob') o.rotation.y = time * 8;
       if (p.k === 'wave') o.position.y = p.y - 0.6;
       if (p.k === 'shard' || p.k === 'lance' || p.k === 'nova') this.particles.trail(p.x, p.y, p.z, PROJ_COLORS[p.k], p.k === 'nova' ? 0.2 : 0.07, 0.25);

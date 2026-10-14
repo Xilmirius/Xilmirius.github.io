@@ -61,10 +61,10 @@ disparos") cuenta lo nuevo.
 
 **Lo que quedó distinto del plan**
 
-- `ay` es la altura del punto apuntado **tal cual** (el piso bajo el cursor o el pecho del rival), no la de la bala. El host decide: si el punto está sobre el piso (`ay` a menos de 0,3 m de `groundAt`), la bala va 0,8 m más arriba; el cohete va al punto sin sumar nada, así apuntado al piso explota en el piso. Sin `ay` (bots sin blanco, zombis, clientes viejos) el tiro sale horizontal. Se manda solo si es un número: el arreglo de la red queda en 6 elementos cuando no hay altura. `PROTOCOL_VERSION` 17.
+- `ay` es la altura del punto apuntado **tal cual** (el piso bajo el cursor o el pecho del rival), no la de la bala. El host decide: si el punto está sobre el piso (`ay` a menos de 0,3 m de `groundAt`), la bala va 0,8 m más arriba; el cohete va al punto sin sumar nada, así apuntado al piso explota en el piso. Sin `ay` (bots sin blanco, zombis, clientes viejos) el tiro sale horizontal. Se manda solo si es un número: el arreglo de la red queda en 6 elementos cuando no hay altura. `PROTOCOL_VERSION` 17 (18 con el `vy` del cohete, ver abajo).
 - Cuando el cursor tiene encima a un rival, el cliente manda **también `ax` y `az` del rival** (si no, el piso detrás de él haría pasar la bala por debajo del pecho). Solo con reglas de armas. Si hay una habilidad en el slot, apunta al rival y no al piso: en la Horda no hay habilidades, así que no se nota.
 - La pendiente del tiro se limita a ±1,2 y se calcula con una distancia mínima de 1,5 m, para que un cursor pegado a los pies no dispare derecho al piso.
-- Los demás proyectiles siguen igual. El cohete lleva `free` y `dirY` (`ProjSpec`, `Projectile.free`): vuela recto, velocidad y alcance medidos sobre el rayo. Su malla no se inclina (el snapshot no trae `vy`); se ve volar en diagonal pero apuntando de lado.
+- Los demás proyectiles siguen igual. El cohete lleva `free` y `dirY` (`ProjSpec`, `Projectile.free`): vuela recto, velocidad y alcance medidos sobre el rayo. El `ProjFrame` trae `vy` (campo final opcional, 0 si el proyectil abraza el piso) y la malla del cohete se inclina hacia donde sube o baja (`ProjectilesView.update`). Los demás proyectiles del juego, a pedido del plan, siguen abrazando el piso.
 - Los bots apuntan al pecho de su blanco (zombi o nido). Siguen eligiendo solo zombis a menos de 2,4 m de diferencia de altura.
 - `scripts/botstats.ts` (`tool:horde`) ahora imprime la **precisión** (balas que dan en un cuerpo sobre balas disparadas, sin cohetes).
 
@@ -93,5 +93,5 @@ La precisión es la misma. Ganan más en Difícil porque ahora le dan a lo que t
 
 **En pantalla (Edge)**: con el mouse sobre el zombi de abajo, desde la plataforma, el héroe le saca vida (la traza del evento `shot` baja de y 2,3 a 1,0); salpicón visible. Pasan `touch.mjs horde` y el E2E de Arena con dos pestañas (el input con `ay` viaja por la red). La captura (`tests/e2e/out/aim06-desde-arriba.png`) no deja ver la inclinación porque la cámara mira desde arriba.
 
-**Pendiente de que lo juegues**: si apuntar al cursor desde una plataforma se siente justo (el radio de 0,7 m para elegir al rival, el perdón de 0,35 m), y si el cohete merece inclinarse en pantalla.
+**Pendiente de que lo juegues**: si apuntar al cursor desde una plataforma se siente justo (el radio de 0,7 m para elegir al rival, el perdón de 0,35 m), y cómo se ve el cohete inclinado.
 

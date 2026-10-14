@@ -88,7 +88,7 @@ El **taller** es una mini base o el campamento de salida (el centro de los punto
 - Los perdigones de la escopeta que dan en el mismo cuerpo son **un solo golpe**: de cerca lanza a un zombi.
 - Las balas de la uzi no generan además el evento de golpe (`HitSpec.quiet`): alcanza con la traza y evita inundar el canal.
 - Una bala que da en un obstáculo le hace daño: **los barriles explotan a tiros** y los nidos se rompen a balazos.
-- **Cohete**: proyectil con explosión que vuela **recto** hacia el punto apuntado, con su pendiente (no abraza el piso como los demás proyectiles), y explota contra lo primero que toca o al final del alcance. Apuntado al piso explota en el piso. **C4**: aviso en el piso, mecha de 2,2 s y explosión. Ninguna explosión propia lastima al equipo; sí rompen piso frágil y hacen estallar barriles.
+- **Cohete**: proyectil con explosión que vuela **recto** hacia el punto apuntado, con su pendiente (no abraza el piso como los demás proyectiles; el snapshot trae su `vy` y el modelo se inclina), y explota contra lo primero que toca o al final del alcance. Apuntado al piso explota en el piso. **C4**: aviso en el piso, mecha de 2,2 s y explosión. Ninguna explosión propia lastima al equipo; sí rompen piso frágil y hacen estallar barriles.
 
 ## 5. Misiones
 

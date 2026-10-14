@@ -50,7 +50,7 @@ export interface CharFrame {
 /** Unidad del Asedio: k = índice en UNIT_KINDS, hp 0..1. */
 export interface UnitFrame { id: number; k: number; tm: number; x: number; y: number; z: number; f: number; fl: number; hp: number; vx: number; vz: number }
 
-export interface ProjFrame { id: number; k: string; x: number; y: number; z: number; vx: number; vz: number; r: number; tm: number; o: number }
+export interface ProjFrame { id: number; k: string; x: number; y: number; z: number; vx: number; vz: number; r: number; tm: number; o: number; /** Velocidad vertical (solo los proyectiles que vuelan en 3D, como el cohete apuntado). */ vy: number }
 export interface AreaFrame { id: number; k: string; x: number; y: number; z: number; r: number; p: number; tm: number }
 export interface StructFrame { id: number; k: string; x: number; y: number; z: number; rot: number; hp: number; tm: number; fam: number; fl: number; tg: number }
 
@@ -159,7 +159,7 @@ export function buildWorldFrame(sim: Simulation): WorldFrame {
       id: u.id, k: UNIT_KINDS.indexOf(u.unit), tm: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, f: u.facing,
       fl: unitFlags(u), hp: u.maxHp > 0 ? Math.max(0, u.hp / u.maxHp) : 1, vx: u.vel.x, vz: u.vel.z,
     })),
-    projs: sim.projectiles.map((p) => ({ id: p.id, k: p.kind, x: p.pos.x, y: p.pos.y, z: p.pos.z, vx: p.vel.x, vz: p.vel.z, r: p.radius, tm: p.team, o: p.owner })),
+    projs: sim.projectiles.map((p) => ({ id: p.id, k: p.kind, x: p.pos.x, y: p.pos.y, z: p.pos.z, vx: p.vel.x, vz: p.vel.z, r: p.radius, tm: p.team, o: p.owner, vy: p.free ? p.vel.y : 0 })),
     zones: sim.zones.map((z) => ({ id: z.id, k: z.kind, x: z.x, y: z.y, z: z.z, r: z.r, p: z.t / z.dur, tm: z.team })),
     teles: sim.telegraphs.map((t) => ({ id: t.id, k: t.kind, x: t.x, y: t.y, z: t.z, r: t.r, p: t.t / t.dur, tm: t.team })),
     structs: sim.structures.map((s) => ({
@@ -209,7 +209,7 @@ export function encodeWorld(w: WorldFrame): any[] {
     w.phase === 'countdown' ? 0 : w.phase === 'play' ? 1 : 2,
     r2(w.phaseT),
     w.chars.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.f), r2(c.vx), r2(c.vy), r2(c.vz), c.fl, Math.round(c.heat), c.st, c.lv, c.ac, r2(c.ap), r2(c.ch), Math.round(c.sh), c.k, c.d, c.a, c.lives, r2(c.rt), c.cs, c.wp, c.gb, r2(c.hp), c.mh, c.wlv]),
-    w.projs.map((p) => [p.id, p.k, r2(p.x), r2(p.y), r2(p.z), r2(p.vx), r2(p.vz), r2(p.r), p.tm, p.o]),
+    w.projs.map((p) => [p.id, p.k, r2(p.x), r2(p.y), r2(p.z), r2(p.vx), r2(p.vz), r2(p.r), p.tm, p.o, r2(p.vy)]),
     w.zones.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
     w.teles.map((z) => [z.id, z.k, r2(z.x), r2(z.y), r2(z.z), r2(z.r), r2(z.p), z.tm]),
     w.structs.map((s) => [s.id, s.k, r2(s.x), r2(s.y), r2(s.z), r2(s.rot), r2(s.hp), s.tm, s.fam, s.fl, s.tg]),
@@ -233,7 +233,7 @@ export function decodeWorld(a: any[]): WorldFrame {
       gb: c[23] ?? -1, hp: c[24] ?? 1, mh: c[25] ?? 0, wlv: c[26] ?? 0,
     })),
     units: (a[11] ?? []).map((u: any[]) => ({ id: u[0], k: u[1], tm: u[2], x: u[3], y: u[4], z: u[5], f: u[6], fl: u[7], hp: u[8], vx: u[9], vz: u[10] })),
-    projs: a[4].map((p: any[]) => ({ id: p[0], k: p[1], x: p[2], y: p[3], z: p[4], vx: p[5], vz: p[6], r: p[7], tm: p[8], o: p[9] })),
+    projs: a[4].map((p: any[]) => ({ id: p[0], k: p[1], x: p[2], y: p[3], z: p[4], vx: p[5], vz: p[6], r: p[7], tm: p[8], o: p[9], vy: p[10] ?? 0 })),
     zones: a[5].map((z: any[]) => ({ id: z[0], k: z[1], x: z[2], y: z[3], z: z[4], r: z[5], p: z[6], tm: z[7] })),
     teles: a[6].map((z: any[]) => ({ id: z[0], k: z[1], x: z[2], y: z[3], z: z[4], r: z[5], p: z[6], tm: z[7] })),
     structs: a[7].map((s: any[]) => ({ id: s[0], k: s[1], x: s[2], y: s[3], z: s[4], rot: s[5], hp: s[6], tm: s[7], fam: s[8], fl: s[9] ?? 0, tg: s[10] ?? -1 })),
