@@ -105,11 +105,13 @@ sobre la rampa, le tapa la subida; si se retira, queda un hueco. Se resuelve as�
   desde el piso.
 - **Franja de llegada:** las celdas de la malla con el centro en el primer metro de plataforma después de la línea
   alta, a lo ancho de la rampa, se bajan al nivel de abajo. Como el radio es menor que 1 m, ninguna celda de la
-  plataforma llega ya a taparle la subida a la cuña.
+  plataforma llega ya a taparle la subida a la cuña. Una celda de la plataforma que asoma en la esquina de la cuña
+  (centro fuera de la franja, pero con un pedazo a más de 0,5 m de la línea alta) también baja: el descanso la tapa.
 - El descanso tapa la franja bajada. Para tapar también lo que esas celdas sobresalen hacia los costados, el
   descanso se ensancha 1 m de cada lado donde la plataforma sigue.
 - **Regla para los planos:** una rampa no va embutida en una plataforma. A sus costados hay piso del nivel de
-  abajo, vacío u otra rampa.
+  abajo, vacío u otra rampa. Y conviene que la plataforma siga a los costados de la celda de llegada: si la rampa
+  queda pegada al borde lateral de la plataforma, el borde irregular se mete hasta 0,7 m en el descanso.
 
 Una celda alta de al lado puede asomar en la esquina de la cuña. No molesta mientras entre menos de 0,5 m antes de
 la línea alta: ahí la cuña ya está a menos de un escalón del nivel de arriba.
@@ -120,10 +122,25 @@ No se genera nada: la malla es un cuadrado por celda del plano, y las rampas no 
 borde de la plataforma ya coincide con la línea alta. Es el mismo código por un camino trivial, y es lo que el
 juego usa hasta que la orgánica esté validada.
 
+### Cómo quedó en `src/core/terrainMesh.ts` (tarea 11)
+
+`buildSquareMesh(terrain)` arma la cuadrada; `buildOrganicMesh(terrain, seed)` prueba hasta cinco semillas
+(`seed + k·65537`) y devuelve `{ mesh, seed, attempts, problems }` con `mesh: null` si ninguna pasa. Las dos dan un
+`TerrainMesh` con `cellAt`, `cellsNear` (para la colisión), `surfaceAt`, `rampAt` y `hash`. Detalles que el diseño no decía:
+
+- **Bajo una rampa** la malla es piso llano del nivel de abajo, con `src` la celda de rampa. La pieza (`RampPiece`) se
+  apoya encima: `wedge` y `landing` son rectángulos y `lowered` lista las celdas que bajó la franja.
+- **Espejo.** Un centro que cae justo sobre el borde de dos celdas del plano se resuelve igual en las dos mitades (se
+  mira con `|x|` y a la gemela se le da la celda espejada); sin esto un par de celdas por mapa salían asimétricas.
+- **El descanso mide 2 m** más allá de la línea alta (una celda del plano), no más.
+- **El pozo** es una celda bajada que asoma más de 0,25 m fuera de la cuña y el descanso y no toca piso del nivel de
+  abajo: una rendija más angosta que un cuerpo (0,5 m de diámetro) no lo atrapa.
+
 ### Comprobación
 
 Después de estampar se verifican las tres garantías de §2 sobre el mapa real, que cada cosa del
-mapa quedó sobre piso del nivel que esperaba y que cada rampa se puede subir. Si falla, se prueba la semilla
+mapa quedó sobre piso del nivel que esperaba y que cada rampa se puede subir (`checkTerrainMesh`; el borde lejano del
+descanso se prueba en el medio, a 0,25 m del eje de la rampa a cada lado, porque el borde de la plataforma es irregular). Si falla, se prueba la semilla
 siguiente; a la quinta, la partida se juega en modo cuadrado y queda un aviso en la consola. Host y clientes
 llegan a la misma malla porque corren la misma comprobación con la misma semilla.
 

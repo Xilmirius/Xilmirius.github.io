@@ -62,3 +62,46 @@ Con un script descartable, sobre los diez mapas:
 
 Y para mirar: un SVG por mapa con las celdas pintadas por clase (vacío, piso por nivel, muro, frágil) y las piezas
 de rampa encima. Dejar en `tests/e2e/out` los de `cantera`, `pista`, `refugio` y `puente`, con dos semillas cada uno.
+
+## Notas de ejecución
+
+**Archivo nuevo:** `src/core/terrainMesh.ts` (importa `mesh.ts`, `constants` y `terrain`; no cambia nada del juego). API:
+`buildSquareMesh(terrain)`, `buildOrganicMesh(terrain, seed)` → `{ mesh | null, seed, attempts, problems }`, `stampOrganic` (una semilla,
+sin comprobar), `checkTerrainMesh(terrain, mesh)` → lista de problemas, `isMirrored`. `TerrainMesh` tiene por celda centro, radio,
+clase (`MESH_FLOOR`/`MESH_WALL`), nivel, `src`, `slab` (índice de `Terrain.fragile`), `pad`, `lowered` y vecina por cada lado, más
+`ramps` (`RampPiece`: cuña, descanso, celdas bajadas) y `hash`. Consultas: `cellAt`, `cellsNear(x, z, r, out)`, `surfaceAt` (cuña →
+rampa de abajo, descanso → piso de arriba, si no la celda), `rampAt`. Cómo quedó, en [MALLA.md](../MALLA.md) §4.
+
+**Lo que quedó distinto del plan**
+
+- **Se retocó La Cantera (aprobado por el usuario).** Sus cuatro rampas estaban pegadas al costado de la plataforma (la regla de
+  §4 las prohíbe y la comprobación las rechazaba siempre). En las filas 3 y 11, `^1111^` pasó a `^.11.^` y `v1111v` a `v.11.v`:
+  la celda de plataforma que tocaba cada rampa pasó a piso llano. Es lo único que cambió de un mapa.
+- **Celdas de la esquina.** Además de la franja de llegada de MALLA.md, baja toda celda de la plataforma que asoma en la esquina de
+  la cuña y entra en ella a más de 0,5 m de la línea alta. Sin esto, 6 de cada 20 semillas de El Refugio y 6 de El Islote no pasaban.
+- **Borde lejano del descanso:** se prueba en tres puntos del medio (a 0,25 m del eje de la rampa), no a todo lo ancho. Con una rampa
+  pegada a un costado de la plataforma, o con un ensanche sobre una plataforma más corta, el borde irregular de la plataforma se
+  mete hasta 0,7 m y la comprobación fallaba por nada (La Cantera retocada: 29 de 100 a lo ancho, 93 de 100 a 0,5 m del eje, 199 de 200 a 0,25 m).
+- **Pozo:** una celda bajada cuenta como pozo si asoma más de 0,25 m fuera de la cuña y el descanso (antes pasaba a pozo por 1 cm).
+- **Espejo:** un centro justo sobre el borde de dos celdas del plano se resolvía distinto en las dos mitades (2 celdas en El Puente, 4 en
+  Las Dos Cornisas). Ahora se mira `|x|` y a la gemela se le da la celda espejada.
+- El **descanso mide 2 m** (una celda del plano) más allá de la línea alta; en la primera versión medía 4 por un error.
+
+**Listo cuando** (script descartable)
+
+| | |
+|---|---|
+| Cuadrada: `cellAt` coincide con `Terrain.cellIndexAt` en 10.000 puntos al azar por mapa (vacío = ninguna celda), y la comprobación pasa | pasa en los diez mapas |
+| Orgánica, 100 semillas por mapa: comprobación a la primera semilla | 100 de 100 en nueve mapas; 99 de 100 en La Pista (un pozo); nunca se agotan los cinco intentos |
+| Misma semilla, misma huella en dos corridas, y otra semilla da otra huella | pasa (El Islote es tan chico que dos semillas seguidas a veces terminan en la misma malla: el generador se salta la que no pasa su revisión) |
+| `cornisas` (el mapa más grande) con la comprobación incluida | mediana 10 ms, peor 13 ms (15 corridas); lo más lento es `bolera`, 28 ms de mediana |
+| Arena y Asedio: cada celda tiene su gemela con la clase, el nivel, el resorte, la losa y la `src` espejados | pasa en los cinco (`cantera`, `islote`, `flipper`, `puente`, `cornisas`) |
+
+Segunda corrida de 100 semillas por mapa (otras semillas): 100 de 100 a la primera en los diez, así que el 99 de La Pista es azar.
+
+**Para mirar:** ocho SVG en `tests/e2e/out` (`estampado-{cantera,pista,refugio,puente}-{a,b}.svg`). Gris = muro, rosado = losa frágil,
+verde = resorte, violeta = celdas bajadas por la franja de llegada, azul = cuña, naranja punteado = descanso; la línea blanca punteada
+es la grilla del plano.
+
+**Pendiente de que lo mires:** cómo se ven las rampas sobre el borde irregular (los SVG), y el retoque de La Cantera. Las otras tres
+con rampa (`islote`, `flipper`, `refugio`) y `pista` ya cumplían la regla de los costados.
