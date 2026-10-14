@@ -105,6 +105,10 @@ export interface ProjSpec {
   explode?: BlastSpec;
   dirX: number;
   dirZ: number;
+  /** Pendiente vertical (metros que sube por metro horizontal), solo con `free`. */
+  dirY?: number;
+  /** Vuela recto con su pendiente en vez de abrazar el piso (el cohete apuntado). */
+  free?: boolean;
   onHit?: (t: Character) => void;
   onSolid?: (p: V3, o: Obstacle | null) => void;
   onEnd?: (p: V3) => void;
@@ -355,7 +359,7 @@ export class Simulation {
     st.maxAirJumps = 0;
     st.restitution = 0.2;
     u.stats = st;
-    u.input = { seq: 0, mx: 0, mz: 0, ax: x, az: z + 1, b: 0 };
+    u.input = { seq: 0, mx: 0, mz: 0, ax: x, az: z + 1, ay: NaN, b: 0 };
     this.units.push(u);
     this.bodies.push(u);
     this.charById.set(id, u);
@@ -1237,7 +1241,7 @@ export class Simulation {
     mp.restitution = t.stats.restitution;
     mp.maxAirJumps = 0;
     const out = newMoveOut();
-    const inp = { seq: 0, mx: 0, mz: 0, ax: t.pos.x, az: t.pos.z + 1, b: 0 };
+    const inp = { seq: 0, mx: 0, mz: 0, ax: t.pos.x, az: t.pos.z + 1, ay: NaN, b: 0 };
     for (let i = 0; i < 200; i++) {
       stepMove(s, inp, mp, this.cw, DT, out);
       if (s.pos.y < KILL_Y) return true;
@@ -1606,11 +1610,11 @@ export class Simulation {
     const p: Projectile = {
       id: this.nextId++, kind: s.kind, owner, team,
       pos: { x: ox, y, z: oz }, ppos: { x: ox, y, z: oz },
-      vel: { x: s.dirX * s.speed, y: 0, z: s.dirZ * s.speed },
+      vel: { x: s.dirX * s.speed, y: s.free ? (s.dirY ?? 0) * s.speed : 0, z: s.dirZ * s.speed },
       radius: s.radius, range: s.range, gravity: 0, heat: s.heat, kb: s.kb, up: s.up ?? 0, stun: s.stun ?? 0, slow: s.slow,
       pierce: !!s.pierce, hit: new Set(), destruct: s.destruct ?? 0, tile: s.tile ?? 0, noCharHit: false, explode: s.explode,
       onHit: s.onHit, onSolid: s.onSolid, onEnd: s.onEnd, mods: m, dead: false, ignoreSolid: !!s.ignoreSolid, life: -1,
-      homing: s.homing ?? -1,
+      homing: s.homing ?? -1, free: !!s.free,
     };
     this.projectiles.push(p);
     return p;
@@ -1664,7 +1668,8 @@ export class Simulation {
         p.pos.x += (p.vel.x * DT) / n;
         p.pos.z += (p.vel.z * DT) / n;
         // Los proyectiles "abrazan" el terreno: si el piso baja, bajan con él (se puede pegar desde lo alto).
-        const g = this.terrain.groundAt(p.pos.x, p.pos.z);
+        if (p.free) p.pos.y += (p.vel.y * DT) / n;
+        const g = p.free ? -Infinity : this.terrain.groundAt(p.pos.x, p.pos.z);
         if (g > -Infinity && g + 0.8 < p.pos.y) p.pos.y = Math.max(g + 0.8, p.pos.y - (14 * DT) / n);
         for (const t of this.bodies) {
           if (!t.alive || t.team === p.team || p.hit.has(t.id)) continue;

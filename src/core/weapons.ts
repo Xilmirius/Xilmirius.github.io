@@ -2,7 +2,7 @@
 // del héroe. Las balas son de impacto instantáneo: se resuelven en el host recorriendo el rayo y viajan a
 // los clientes como un evento `shot` (para la traza, el fogonazo y el sonido), sin proyectiles en el snapshot.
 // El lanzacohetes sí es un proyectil, y el C4 es una carga con mecha.
-import { CHAR_RADIUS } from './constants';
+import { CHAR_HEIGHT, CHAR_RADIUS } from './constants';
 import type { Obstacle } from './collision';
 import type { Character } from './entities';
 import { dirOf } from './math';
@@ -133,6 +133,13 @@ const MUZZLE_Y = 0.9;
 const RAY_STEP = 0.3;
 /** Un poco más ancho que el cuerpo: apuntar con el mouse a algo que se mueve tiene que perdonar. */
 const BODY_R = CHAR_RADIUS + 0.14;
+/** Perdón arriba y abajo del cuerpo: una bala que pasa un poco por encima de la cabeza o por debajo de los pies igual da. */
+const BODY_FORGIVE = 0.35;
+/** Altura del pecho sobre los pies: adonde va la bala si lo apuntado es el piso. */
+export const CHEST_Y = 0.8;
+/** Pendiente máxima del tiro (metros que sube o baja por metro horizontal) y distancia mínima con la que se calcula. */
+const MAX_SLOPE = 1.2;
+const MIN_AIM_D = 1.5;
 /** Las balas les hacen menos daño a las cosas que a los cuerpos (si no, una ráfaga borra la cobertura). */
 const VS_OBSTACLE = 0.8;
 /** Radianes entre las dos balas de la pistola doble. */
@@ -155,28 +162,31 @@ export interface RayHit { x: number; y: number; z: number; kind: 0 | 1 | 2; targ
 export const SHOT_CRIT = 3;
 
 /**
- * Recorre un rayo horizontal desde el pecho de `ch`. Si hay un rival sobre la línea, la bala sube o baja
- * hasta su pecho (no hace falta apuntar en altura), y frena antes si en el camino hay algo sólido.
+ * Recorre un rayo desde el pecho de `ch` en la dirección horizontal (dx,dz) con una pendiente `slope` (metros que
+ * sube por metro horizontal). Un cuerpo es un cilindro: la bala le da si pasa a menos de su radio y, en ese punto,
+ * entre sus pies y su cabeza. Frena antes si en el camino hay algo sólido. `range` se mide sobre el rayo.
  * `skip`: cuerpos que la bala ya atravesó (balas perforantes).
  */
-export function castRay(sim: Simulation, ch: Character, dx: number, dz: number, range: number, skip?: Character[]): RayHit {
+export function castRay(sim: Simulation, ch: Character, dx: number, dz: number, slope: number, range: number, skip?: Character[]): RayHit {
   const ox = ch.pos.x, oz = ch.pos.z, oy = ch.pos.y + MUZZLE_Y;
-  let best: Character | null = null, bt = range;
+  const reach = range / Math.hypot(1, slope);
+  let best: Character | null = null, bt = reach;
   for (const t of sim.bodies) {
     if (!t.alive || t.team === ch.team || t.invuln > 0 || skip?.includes(t)) continue;
     const rx = t.pos.x - ox, rz = t.pos.z - oz;
     const along = rx * dx + rz * dz;
     if (along < 0 || along > bt + BODY_R) continue;
     const perp = Math.abs(rx * dz - rz * dx);
-    if (perp > BODY_R || Math.abs(t.pos.y - ch.pos.y) > 2.4) continue;
+    if (perp > BODY_R) continue;
+    const y = oy + slope * along;
+    if (y < t.pos.y - BODY_FORGIVE || y > t.pos.y + CHAR_HEIGHT + BODY_FORGIVE) continue;
     const at = Math.max(0, along - Math.sqrt(BODY_R * BODY_R - perp * perp));
     if (at < bt) { bt = at; best = t; }
   }
-  const ty = best ? best.pos.y + 0.8 : oy;
   const n = Math.ceil(bt / RAY_STEP);
   for (let i = 1; i <= n; i++) {
     const d = Math.min(bt, i * RAY_STEP);
-    const x = ox + dx * d, z = oz + dz * d, y = bt > 0 ? oy + (ty - oy) * (d / bt) : oy;
+    const x = ox + dx * d, z = oz + dz * d, y = oy + slope * d;
     const s = sim.cw.solidAt(x, y, z, 0.08);
     if (!s) continue;
     // Las construcciones del propio equipo (la torreta de una mini base) no tapan el tiro.
@@ -184,23 +194,35 @@ export function castRay(sim: Simulation, ch: Character, dx: number, dz: number, 
     if (st && st.team === ch.team) continue;
     return { x, y, z, kind: 2, target: null, ob: s.obstacle };
   }
-  return { x: ox + dx * bt, y: ty, z: oz + dz * bt, kind: best ? 1 : 0, target: best, ob: null };
+  return { x: ox + dx * bt, y: oy + slope * bt, z: oz + dz * bt, kind: best ? 1 : 0, target: best, ob: null };
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-/** Hacia dónde apunta: al cursor o, si está encima, hacia donde mira. */
-function aimDir(ch: Character) {
+/**
+ * Hacia dónde apunta: la dirección horizontal al cursor (o hacia donde mira, si está encima) y la pendiente
+ * del tiro, del pecho al punto apuntado. Una bala que apunta al piso va 0,8 m por encima (la altura de un
+ * pecho); el cohete va al punto tal cual, para que explote ahí.
+ */
+function aimDir(sim: Simulation, ch: Character, rocket: boolean) {
   const dx = ch.input.ax - ch.pos.x, dz = ch.input.az - ch.pos.z;
   const d = Math.hypot(dx, dz);
-  return d < 0.05 ? dirOf(ch.facing) : { x: dx / d, z: dz / d };
+  if (d < 0.05) return { x: dirOf(ch.facing).x, z: dirOf(ch.facing).z, slope: 0 };
+  let ay = ch.input.ay;
+  if (!Number.isFinite(ay)) return { x: dx / d, z: dz / d, slope: 0 };
+  if (!rocket) {
+    const g = sim.cw.groundAt(ch.input.ax, ch.input.az, ay + 0.3);
+    if (g > -Infinity && ay - g < 0.3) ay += CHEST_Y;
+  }
+  const slope = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, (ay - (ch.pos.y + MUZZLE_Y)) / Math.max(d, MIN_AIM_D)));
+  return { x: dx / d, z: dz / d, slope };
 }
 
 /** Un disparo del arma que tiene en la mano. Lo llama la simulación con el clic mantenido y el arma lista. */
 export function fireWeapon(sim: Simulation, ch: Character) {
   const idx = ch.weapon;
   const w = weaponStats(WEAPON_IDS[idx] ?? 'pistol', ch.wLv[idx] ?? 1);
-  const aim = aimDir(ch);
+  const aim = aimDir(sim, ch, !!w.blast);
   // Mejoras (core/perks.ts): cadencia, daño, paso al disparar, balas que atraviesan, críticos y pistola doble.
   const cd = w.cd / (1 + PERK.rate * perkLv(ch, 'rate'));
   const dmg = w.dmg * (1 + PERK.dmg * perkLv(ch, 'dmg'));
@@ -210,8 +232,10 @@ export function fireWeapon(sim: Simulation, ch: Character) {
   ch.gunMove = perkLv(ch, 'legs') ? 1 : w.move;
 
   if (w.blast) {
+    // Vuela recto hacia el punto apuntado, también en altura: velocidad y alcance se miden sobre el rayo.
+    const len = Math.hypot(1, aim.slope);
     sim.fireProjectile(ch, {
-      kind: 'rocket', speed: 26, range: w.range, radius: 0.3, heat: 0, kb: 0, dirX: aim.x, dirZ: aim.z, originY: ch.pos.y + MUZZLE_Y,
+      kind: 'rocket', speed: 26 / len, range: w.range / len, radius: 0.3, heat: 0, kb: 0, dirX: aim.x, dirZ: aim.z, dirY: aim.slope, free: true, originY: ch.pos.y + MUZZLE_Y,
       // El golpe lo da la explosión, no el cohete.
       onHit: () => {},
       explode: {
@@ -246,7 +270,7 @@ export function fireWeapon(sim: Simulation, ch: Character) {
       // La bala sigue de largo mientras le queden cuerpos por atravesar.
       const skip: Character[] = [];
       for (;;) {
-        const h = castRay(sim, ch, dx, dz, w.range, skip);
+        const h = castRay(sim, ch, dx, dz, aim.slope, w.range, skip);
         pts.push(r1(h.x), r1(h.y), r1(h.z), h.kind);
         if (!h.target) {
           if (h.ob) sim.damageObstacle(h.ob, dmg * VS_OBSTACLE, ch);

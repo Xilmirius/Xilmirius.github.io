@@ -82,12 +82,13 @@ El **taller** es una mini base o el campamento de salida (el centro de los punto
 
 ### Cómo se resuelven los disparos
 
-- **Pistola, uzi y escopeta: impacto instantáneo** en el host (`castRay`). Se busca el primer rival sobre la línea y se recorre el rayo en pasos de 0,3 m por si hay algo sólido antes. La bala sube o baja sola hasta el pecho del blanco: no hay que apuntar en altura.
+- **Se apunta adonde marca el cursor, también en altura.** El cliente manda `ay` junto con `ax` y `az` (`InputFrame`, al final del arreglo de la red): el pecho del rival si el cursor lo tiene encima (el rayo de la cámara pasa a menos de 0,7 m de su pecho; con los dedos, a menos de 0,6 m del punto apuntado), o el piso bajo el cursor. Los bots mandan el pecho de su blanco. Sin `ay` el tiro sale horizontal.
+- **Pistola, uzi y escopeta: impacto instantáneo** en el host (`castRay`). La bala sale del pecho del héroe hacia el punto apuntado (si es piso, 0,8 m por encima: un pecho; con el piso parejo el tiro es casi horizontal, como antes). Un cuerpo es un **cilindro**: le da si pasa a menos de su radio y, ahí, entre sus pies y su cabeza con 0,35 m de perdón. El rayo se recorre en pasos de 0,3 m contra `CollisionWorld.solidAt` (3D): una bala que baja desde una plataforma pasa por encima de la cobertura baja, y el piso la frena. El alcance se mide sobre el rayo. El desvío y los perdigones siguen siendo un abanico horizontal.
 - Cada disparo viaja como un evento **`shot`** con el punto de llegada de cada bala y qué tocó. Con eso los clientes dibujan la traza, el fogonazo y el impacto. No hay proyectiles en el snapshot.
 - Los perdigones de la escopeta que dan en el mismo cuerpo son **un solo golpe**: de cerca lanza a un zombi.
 - Las balas de la uzi no generan además el evento de golpe (`HitSpec.quiet`): alcanza con la traza y evita inundar el canal.
 - Una bala que da en un obstáculo le hace daño: **los barriles explotan a tiros** y los nidos se rompen a balazos.
-- **Cohete**: proyectil normal con explosión. **C4**: aviso en el piso, mecha de 2,2 s y explosión. Ninguna explosión propia lastima al equipo; sí rompen piso frágil y hacen estallar barriles.
+- **Cohete**: proyectil con explosión que vuela **recto** hacia el punto apuntado, con su pendiente (no abraza el piso como los demás proyectiles), y explota contra lo primero que toca o al final del alcance. Apuntado al piso explota en el piso. **C4**: aviso en el piso, mecha de 2,2 s y explosión. Ninguna explosión propia lastima al equipo; sí rompen piso frágil y hacen estallar barriles.
 
 ## 5. Misiones
 

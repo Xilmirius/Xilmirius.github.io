@@ -94,7 +94,7 @@ function runHorde(map: string, level: 1 | 2 | 3, seed: number, bots = 3, maxSec 
     seed,
   });
   const brains = sim.chars.map((_, i) => new BotBrain(2, seed * 97 + i + 1));
-  let broke = 0, falls = 0, heatSeen = 0, scrapTotal = 0, stepSeen = 0, lv3At5 = -1;
+  let broke = 0, falls = 0, heatSeen = 0, scrapTotal = 0, stepSeen = 0, lv3At5 = -1, bullets = 0, bodyHits = 0;
   const spent = new Map<number, number>();
   for (let t = 0; t < maxSec * 60 && sim.phase !== 'end'; t++) {
     sim.chars.forEach((c, k) => { c.input = brains[k].think(sim, c, DT); });
@@ -102,6 +102,7 @@ function runHorde(map: string, level: 1 | 2 | 3, seed: number, bots = 3, maxSec 
     for (const e of sim.drainEvents()) {
       if (e.k === 'broke') broke++; else if (e.k === 'ring') falls++;
       else if (e.k === 'pick') scrapTotal++;
+      else if (e.k === 'shot') for (let i = 0; i + 3 < e.p.length; i += 4) { bullets++; if (e.p[i + 3] === 1 || e.p[i + 3] === 3) bodyHits++; }
     }
     for (const c of sim.chars) heatSeen = Math.max(heatSeen, c.heat);
     const step = (sim.mode as HordeMode).step;
@@ -113,7 +114,7 @@ function runHorde(map: string, level: 1 | 2 | 3, seed: number, bots = 3, maxSec 
   const lost = sim.chars.reduce((n, c) => n + (sim.settings.lives - c.lives), 0);
   const maxLv = [0, 0, 0, 0];
   for (const c of sim.chars) c.wLv.forEach((l, i) => { maxLv[i] += l; });
-  return { won: sim.result?.winner === 0, secs: sim.tick / 60, lost, broke, falls, heatSeen, scrapTotal, stepSeen, lv3At5, bots: sim.chars.length, lvSum: maxLv, scrapLeft: sim.chars.reduce((n, c) => n + c.scrap, 0) / sim.chars.length };
+  return { won: sim.result?.winner === 0, secs: sim.tick / 60, lost, broke, falls, heatSeen, scrapTotal, stepSeen, lv3At5, bots: sim.chars.length, lvSum: maxLv, bullets, bodyHits, scrapLeft: sim.chars.reduce((n, c) => n + c.scrap, 0) / sim.chars.length };
 }
 
 function hordeStats() {
@@ -121,18 +122,19 @@ function hordeStats() {
   const runs = Number(process.argv[4] ?? 20);
   let seed = Number(process.argv[5] ?? 5000);
   for (const level of [1, 2, 3] as const) {
-    let wins = 0, lost = 0, secs = 0, broke = 0, falls = 0, heat = 0, scrap = 0, steps = 0, lv3 = 0, reached5 = 0, left = 0;
+    let wins = 0, lost = 0, secs = 0, broke = 0, falls = 0, heat = 0, scrap = 0, steps = 0, lv3 = 0, reached5 = 0, left = 0, bullets = 0, bodyHits = 0;
     const lvSum = [0, 0, 0, 0];
     for (let i = 0; i < runs; i++) {
       const r = runHorde(map, level, ++seed);
       if (r.won) wins++;
       lost += r.lost; secs += r.secs; broke += r.broke; falls += r.falls; heat = Math.max(heat, r.heatSeen);
-      scrap += r.scrapTotal; steps += r.stepSeen; left += r.scrapLeft;
+      scrap += r.scrapTotal; steps += r.stepSeen; left += r.scrapLeft; bullets += r.bullets; bodyHits += r.bodyHits;
       if (r.lv3At5 >= 0) { reached5++; lv3 += r.lv3At5 === r.bots ? 1 : 0; }
       r.lvSum.forEach((l, k) => { lvSum[k] += l / r.bots; });
     }
     console.log(`${map} dificultad ${level}: ganan ${wins}/${runs} · vidas perdidas/partida ${(lost / runs).toFixed(1)} (por vida en cero ${(broke / runs).toFixed(1)}, por caída ${(falls / runs).toFixed(1)}) · dura ${(secs / runs).toFixed(0)}s · heat máx ${heat}`);
-    console.log(`   chatarra juntada/partida ${(scrap / runs).toFixed(0)} (sobra ${(left / runs).toFixed(0)} por héroe) · misión alcanzada ${(steps / runs).toFixed(1)} · llegan a la 5ª ${reached5}, con todos los bots en nivel 3+: ${lv3} · nivel final medio por arma (pistola/uzi/escopeta/cohete, 0 = nadie la tiene) ${lvSum.map((l) => (l / runs).toFixed(1)).join('/')}`);
+    console.log(`   precisión de las balas (le dan a un cuerpo / balas disparadas, sin cohetes) ${bullets ? ((bodyHits / bullets) * 100).toFixed(1) : '-'} % de ${(bullets / runs).toFixed(0)} por partida
+   chatarra juntada/partida ${(scrap / runs).toFixed(0)} (sobra ${(left / runs).toFixed(0)} por héroe) · misión alcanzada ${(steps / runs).toFixed(1)} · llegan a la 5ª ${reached5}, con todos los bots en nivel 3+: ${lv3} · nivel final medio por arma (pistola/uzi/escopeta/cohete, 0 = nadie la tiene) ${lvSum.map((l) => (l / runs).toFixed(1)).join('/')}`);
   }
 }
 

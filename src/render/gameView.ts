@@ -269,6 +269,25 @@ export class GameView {
     return new THREE.Vector3(o.x + d.x * k, refY, o.z + d.z * k);
   }
 
+  /**
+   * El rival al que apunta el cursor: el que tenga el pecho a menos de `r` m del rayo de la cámara y no quede
+   * detrás del piso que se ve (`floor`, el punto de `aimPoint`). Devuelve el pecho del que pasa más cerca del rayo.
+   */
+  aimRival(ndcX: number, ndcY: number, chests: Iterable<{ x: number; y: number; z: number }>, floor: THREE.Vector3, r = 0.7) {
+    this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    const o = this.raycaster.ray.origin, d = this.raycaster.ray.direction;
+    const tFloor = floor.distanceTo(o);
+    let best: { x: number; y: number; z: number } | null = null, bp = r;
+    for (const c of chests) {
+      const vx = c.x - o.x, vy = c.y - o.y, vz = c.z - o.z;
+      const t = vx * d.x + vy * d.y + vz * d.z;
+      if (t < 0 || t > tFloor + 1) continue;
+      const perp = Math.hypot(vx - d.x * t, vy - d.y * t, vz - d.z * t);
+      if (perp < bp) { bp = perp; best = c; }
+    }
+    return best;
+  }
+
   flash(color: number, amount: number) { this.post?.flash(color, amount); }
   get hasPost() { return !!this.post; }
   /** Calidad automática: si la PC no da, se apaga el postproceso. */

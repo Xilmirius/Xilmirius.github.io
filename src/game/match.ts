@@ -10,7 +10,7 @@ import { HEROES } from '../core/heroes';
 import { ITEM_BY_ID } from '../core/items';
 import { CORE, TOWER } from '../core/moba/defs';
 import { ROUTE_MODS } from '../core/mutations';
-import { nextWeapon, WEAPON_IDS, WEAPONS } from '../core/weapons';
+import { CHEST_Y, nextWeapon, WEAPON_IDS, WEAPONS } from '../core/weapons';
 import { rulesFor, unlockLevel, usesUltCharge, type Ruleset } from '../core/rules';
 import { TEAM_COLORS } from '../core/constants';
 import type { AbilitySlot, HeroId, MatchSettings } from '../core/types';
@@ -45,6 +45,8 @@ const POINT_SHAPES = new Set(['circle', 'wall', 'point', 'blink']);
 const ASSIST_MELEE = 3;
 /** ...y una habilidad apunta sola al rival que está hasta esta distancia más allá de su alcance. */
 const ASSIST_EXTRA = 1.5;
+/** Con los dedos, el punto apuntado a menos de esto de un rival (m) es ese rival: se le apunta al pecho. */
+const RIVAL_LOCK = 0.6;
 
 export interface MatchHooks {
   onEscape(): void;
@@ -212,13 +214,39 @@ export class MatchRunner {
     const pos = this.pred ? this.pred.pos : this.localChar();
     const refY = pos ? pos.y : 0;
     const t = this.input.touch;
+    // Con armas, el tiro va al punto del mundo que marca el cursor, también en altura (core/weapons.ts: aimDir).
+    let ax: number, az: number, ay = NaN;
     if (t && pos && this.input.touchAim()) {
       // Con los dedos no hay cursor: el punto apuntado se arma desde el personaje.
       const o = t.aim(DT, (k) => this.aimSpec(k), (k) => this.aimTarget(k, pos));
       const x = pos.x + o.x, z = pos.z + o.z, g = this.view.terrain.groundAt(x, z);
       this.cursor.set(x, g > -Infinity ? g : refY, z);
-    } else this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
-    return { seq: ++this.seq, mx: s.mx, mz: s.mz, ax: this.cursor.x, az: this.cursor.z, b: s.b };
+      ax = x; az = z;
+      if (this.rules.weapons) {
+        const r = this.rivalChests().find((c) => Math.hypot(c.x - x, c.z - z) < RIVAL_LOCK);
+        if (r) { ax = r.x; az = r.z; ay = r.y; } else ay = this.cursor.y;
+      }
+    } else {
+      this.cursor.copy(this.view.aimPoint(this.input.mouse.ndcX, this.input.mouse.ndcY, refY));
+      ax = this.cursor.x; az = this.cursor.z;
+      if (this.rules.weapons) {
+        const r = this.view.aimRival(this.input.mouse.ndcX, this.input.mouse.ndcY, this.rivalChests(), this.cursor);
+        if (r) { ax = r.x; az = r.z; ay = r.y; } else ay = this.cursor.y;
+      }
+    }
+    return { seq: ++this.seq, mx: s.mx, mz: s.mz, ax, az, ay, b: s.b };
+  }
+
+  /** El pecho de cada rival del último frame (zombis, héroes de otro equipo y estructuras enemigas): a lo que se le puede apuntar. */
+  private rivalChests(): { x: number; y: number; z: number }[] {
+    const w = this.latestWorld ?? this.frames.latest();
+    if (!w) return [];
+    const mine = this.teams.get(this.localId);
+    const out: { x: number; y: number; z: number }[] = [];
+    for (const c of w.chars) if (c.id !== this.localId && !(c.fl & F_DEAD) && this.teams.get(c.id) !== mine) out.push({ x: c.x, y: c.y + CHEST_Y, z: c.z });
+    for (const u of w.units) if (u.tm !== mine) out.push({ x: u.x, y: u.y + CHEST_Y, z: u.z });
+    for (const s of w.structs) if (s.tm !== mine && s.tm >= 0 && s.hp > 0) out.push({ x: s.x, y: s.y + CHEST_Y, z: s.z });
+    return out;
   }
 
   private step() {

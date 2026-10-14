@@ -15,7 +15,7 @@ import type { RaceMode } from './race';
 import type { Simulation } from './sim';
 import { CellType } from './terrain';
 import type { AbilitySlot, Route } from './types';
-import { C4, selectWeapon, upgradeCost, upgradeWeapon, usable, WEAPON_IDS, WEAPON_MAX_LV, WEAPONS } from './weapons';
+import { C4, CHEST_Y, selectWeapon, upgradeCost, upgradeWeapon, usable, WEAPON_IDS, WEAPON_MAX_LV, WEAPONS } from './weapons';
 
 /** pace: a qué fracción de su velocidad corre una carrera (los fáciles se dejan alcanzar). */
 const DIFF = {
@@ -56,6 +56,8 @@ export class BotBrain {
   private wishZ = 0;
   private aimX = 0;
   private aimZ = 0;
+  /** Altura del punto apuntado (el pecho del blanco); NaN = tiro horizontal. */
+  private aimY = NaN;
   private hold = 0;
   private tap = 0;
   private lastB = 0;
@@ -123,7 +125,7 @@ export class BotBrain {
   }
 
   private frame(ch: Character, b: number): InputFrame {
-    return { seq: this.seq, mx: this.wishX, mz: this.wishZ, ax: this.aimX || ch.pos.x + 1, az: this.aimZ || ch.pos.z, b };
+    return { seq: this.seq, mx: this.wishX, mz: this.wishZ, ax: this.aimX || ch.pos.x + 1, az: this.aimZ || ch.pos.z, ay: this.aimY, b };
   }
 
   // ───────────── decisión ─────────────
@@ -317,15 +319,15 @@ export class BotBrain {
     const nest = m.nests.length ? m.nests.reduce((a, b) => (here(a) <= here(b) ? a : b)) : null;
     // Con un nido a tiro y ningún zombi encima, el nido primero: mientras viva, no paran de salir.
     if (nest && here(nest) < w.range * 0.9 && dist > 4.5) {
-      this.aimAt(ch, nest.x, nest.z);
+      this.aimAt(ch, nest.x, nest.z, nest.y + CHEST_Y);
       this.hold |= BTN.BASIC;
     } else if (near && dist < w.range * 0.95) {
       const err = this.d.aimErr * 0.5 * (0.3 + Math.min(1, dist / 12));
-      this.aimAt(ch, near.pos.x + near.vel.x * 0.1 + this.rng.range(-err, err), near.pos.z + near.vel.z * 0.1 + this.rng.range(-err, err));
+      this.aimAt(ch, near.pos.x + near.vel.x * 0.1 + this.rng.range(-err, err), near.pos.z + near.vel.z * 0.1 + this.rng.range(-err, err), near.pos.y + CHEST_Y);
       this.hold |= BTN.BASIC;
     } else if (nest && here(nest) < w.range * 0.9) {
       // Sin zombis a tiro: al nido.
-      this.aimAt(ch, nest.x, nest.z);
+      this.aimAt(ch, nest.x, nest.z, nest.y + CHEST_Y);
       this.hold |= BTN.BASIC;
     }
 
@@ -709,9 +711,11 @@ export class BotBrain {
     return false;
   }
 
-  private aimAt(_ch: Character, x: number, z: number) {
+  /** `y`: altura del punto apuntado (para las armas); sin ella, el tiro sale horizontal. */
+  private aimAt(_ch: Character, x: number, z: number, y = NaN) {
     this.aimX = x;
     this.aimZ = z;
+    this.aimY = y;
   }
 
   // ───────────── navegación ─────────────

@@ -235,6 +235,8 @@ export interface Projectile {
   life: number; // ticks restantes para proyectiles parabólicos (-1 = no aplica)
   /** Teledirigido a este cuerpo (disparos de torre): lo sigue y solo le puede pegar a él. -1 = no. */
   homing: number;
+  /** Vuela recto con su velocidad vertical en vez de abrazar el piso (el cohete apuntado). */
+  free: boolean;
 }
 
 export interface BlastSpec {
