@@ -2,13 +2,14 @@
 // así si cambia el balance, el tooltip se actualiza solo).
 import { iconHtml } from '../assets/registry';
 import {
-  DASH_CD, HERO_HP, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
+  DASH_CD, MUTATION_LEVELS, PUSH_HEAT, PUSH_MAX_CHARGE, REPAIR_AMOUNT, REPAIR_COST, STAGE_AT, STAGE_KB, STAGE_NAMES, ULT_PER_HEAT, ULT_PER_PICKUP, RECALL_TIME,
 } from '../core/constants';
 import { HEROES } from '../core/heroes';
 import type { AbilityDef, AimShape } from '../core/heroes/types';
 import { ITEM_BY_ID, type ItemDef } from '../core/items';
 import { gameOf, MODE_INFO } from '../core/games';
 import { MUTATION_COST, ROUTE_DESC, ROUTE_FLAVOR, ROUTE_MODS } from '../core/mutations';
+import { HORDE } from '../core/horde';
 import { PERK, PERKS, type PerkId } from '../core/perks';
 import { RULESETS, unlockLevel, usesUltCharge, type Ruleset, type RulesetId } from '../core/rules';
 import { GRAB } from '../core/sim';
@@ -137,9 +138,10 @@ export function stageTip(stage: number, heat: number) {
     + `<table class="tt-table"><tr><th>Etapa</th><th>Heat</th><th>Vuelo</th></tr>${rows}</table>`;
 }
 
-export function healthTip(hp: number, stage: number) {
-  return head('❤', `Tu vida: ${Math.ceil(hp * HERO_HP)} de ${HERO_HP}`)
+export function healthTip(hp: number, max: number, stage: number) {
+  return head('❤', `Tu vida: ${Math.ceil(hp * max)} de ${max}`)
     + p('Los zombis te la bajan; en cero <b>perdés una vida</b> y volvés en la última mini base. Los golpes te empujan poco y siempre igual.')
+    + p(`Cada misión cumplida suma +${HORDE.missionMaxHp} a tu vida máxima.`)
     + p('Se recupera sola si pasás unos segundos sin recibir golpes, más rápido parado en una mini base, con un botiquín y al cumplir una misión.', 'tt-note')
     + p(`El cuerpo se agrieta a medida que la perdés (${STAGE_NAMES[stage]}). Caer al vacío también cuesta una vida.`, 'tt-note');
 }

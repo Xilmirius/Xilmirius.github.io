@@ -1,5 +1,5 @@
 // HUD de partida + Forja + Tabla + pantalla de resultados. Las teclas que muestra salen de game/keybinds.ts.
-import { DASH_CD, HERO_HP, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
+import { DASH_CD, REPAIR_AMOUNT, REPAIR_COST, STAGE_NAMES, TEAM_COLORS, TEAM_NAMES, MUTATION_LEVELS } from '../core/constants';
 import { SLOTS } from '../core/entities';
 import type { SimEvent, TimedEvent } from '../core/events';
 import { HEROES } from '../core/heroes';
@@ -165,7 +165,7 @@ export class Hud {
     if (!c || !me || !r) return '';
     if (this.hoverPart === 'level' && this.rules.progression) return levelTip(c.lv, me.xp, me.xpNext, r.hero);
     if (this.hoverPart === 'ult' && this.rules.ultCharge) return ultBarTip(me.ult);
-    return this.rules.health ? healthTip(c.hp, c.st) : stageTip(c.st, c.heat);
+    return this.rules.health ? healthTip(c.hp, c.mh, c.st) : stageTip(c.st, c.heat);
   }
 
   get me(): RosterInfo | undefined { return this.byId.get(this.localId); }
@@ -418,7 +418,7 @@ export class Hud {
     const fam = hero.family;
     const pips = [0, 1, 2, 3].map((i) => `<i class="${i <= c.st ? 'on s' + c.st : ''}"></i>`).join('');
     const state = this.rules.health
-      ? `<div class="hpbar s${c.st}" data-part="stage"><div class="fill" style="width:${Math.round(c.hp * 100)}%"></div><span>❤ ${Math.ceil(c.hp * HERO_HP)}</span></div>`
+      ? `<div class="hpbar s${c.st}" data-part="stage"><div class="fill" style="width:${Math.round(c.hp * 100)}%"></div><span>❤ ${Math.ceil(c.hp * c.mh)}</span></div>`
       : `<div class="bodystate s${c.st}" data-part="stage"><span>${STAGE_NAMES[c.st]}</span><div class="pips">${pips}</div><em>${c.heat}</em></div>`;
     const repair = me.rep > 0 ? `<div class="repair"><div style="width:${Math.round(me.rep * 100)}%"></div></div>` : '';
     let progress: string;

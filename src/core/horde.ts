@@ -64,6 +64,8 @@ export const HORDE = {
   baseHeal: 7,
   /** Vida que recupera todo el equipo al cumplir una misión. */
   missionHeal: 30,
+  /** Vida máxima que suma cada héroe al cumplir una misión (y se cura esa cantidad al momento). */
+  missionMaxHp: 15,
   /** Al cumplir una misión, la próxima oleada no sale antes de estos segundos: un respiro para elegir la mejora. */
   breather: 7,
   /**
@@ -462,7 +464,11 @@ export class HordeMode implements GameMode {
     sim.emit({ k: 'alert', w: 'horde_done', tm: this.step, x: z?.x ?? 0, z: z?.z ?? 0 });
     if (m.kind === 'extract') { this.won = true; return; }
     if (m.kind === 'hold' && z) this.makeBase(sim, z);
-    for (const c of sim.chars) if (c.alive) sim.coolHeat(c, HORDE.missionHeal);
+    for (const c of sim.chars) {
+      c.maxHp += HORDE.missionMaxHp;
+      if (c.alive) c.hp += HORDE.missionMaxHp;
+      sim.coolHeat(c, HORDE.missionHeal);
+    }
     // El premio: una mejora a elegir para cada uno, y un respiro antes de la próxima oleada.
     for (const c of sim.chars) if (!c.eliminated) c.picks++;
     this.waveT = Math.max(this.waveT, HORDE.breather);
