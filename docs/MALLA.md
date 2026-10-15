@@ -227,6 +227,46 @@ esquina saliente dibuja menos piso del que hay; un relleno en una entrante dibuj
 Sobre el piso firme no se ven las celdas, como hoy. Cada ambientación puede pedir que se pinten las **juntas**
 (un empedrado irregular) donde le quede bien.
 
+### Cómo quedó (tarea 15)
+
+`TerrainShaper` ya no mira la grilla del plano: recibe la malla del terreno (`Terrain.mesh`, cuadrada u orgánica) y arma el
+dibujo con un solo camino de código. Es solo dibujo: la física no cambió.
+
+- **`contour.ts`** (nuevo). `boundarySegs` saca los lados de las celdas de una región que dan a otra cosa y `traceLoops` los
+  encadena en lazos (donde dos celdas se tocan solo en una punta, sigue el lado que da la vuelta más cerrada alrededor de la región:
+  cada rincón queda como un lazo propio). `MeshAdj` guarda lo que el dibujo pide de la malla: las celdas de cada vértice, la altura de
+  lo más alto que lo toca (la sombra de contacto) y los vértices donde no se corta nada (los que tocan una losa frágil, una celda de
+  rampa o una celda que bajó la franja de llegada).
+- **Capas y contorno.** Las capas son las alturas distintas de las celdas de la malla. Una celda está en la capa h si no es de una losa
+  frágil y es de altura h o más (en la capa 0, todas). El contorno de la capa son sus lados expuestos; cada tramo sabe qué hay del otro
+  lado (nada, una losa frágil o piso más bajo) y si la cara de arriba que lo toca es de la altura de la capa (de eso depende el neón y
+  la pintura del borde).
+- **Esquinas.** En cada vértice del contorno se mira cuánto gira. Menos de unos 11°: sigue derecho. Si no, y el vértice no es de los que
+  no se cortan, una **saliente** (gira hacia adentro) se corta con un arco tangente de 0,31 del lado más corto (tope `R_OUT`) y una
+  **entrante** se rellena con un arco de 0,2 (tope `R_IN`). Una esquina viva parte el borde en dos y apaga el relieve del acantilado
+  a 0,8 m de ella. En la cuadrada (lados de 2 m) los radios son los de siempre; en la orgánica (lados de 1 m) las esquinas salen de
+  unos 0,3 m y el relleno de 0,2 m.
+- **Cara de arriba.** Cada celda de la capa es un abanico desde su centro. A la celda que toca una esquina saliente cortada se le recorta
+  el polígono con las cuerdas del arco (solo a las celdas del cono de adentro de esa esquina); a las entrantes se les suma el abanico del
+  relleno. Los lados de más de 1,5 m se parten cada metro para que el color del suelo se tome como siempre.
+- **Descanso de rampa** (solo orgánica). Una losa llana al nivel de arriba, levantada 6 mm sobre la plataforma (que la pisa en parte) para
+  que no le pelee la profundidad. Cuelga su costado de roca solo donde no hay plataforma, cuña ni otro descanso que lo tape; el cordón y
+  el neón del borde de la plataforma que quedan debajo de ella no se pintan.
+- **Losas frágiles** (`terrainPieces.ts`). Una pieza por losa: las celdas de la malla que salieron de la misma celda frágil, con los
+  vértices del contorno metidos un bisel (9 cm, esquinas con inglete) y el costado hasta el fondo de la isla. Las grietas son una
+  calcomanía con las mismas celdas y el UV de la caja de la losa. El hueco que deja una losa caída lo arma el contorno de la capa 0 contra
+  esa losa: cada punto está sobre el contorno de la losa (verificado, a menos de 0,001 mm).
+- **Juntas.** `TerrainLook.joints` (color y ancho). Líneas finas sobre los lados entre dos celdas de la capa, recortadas por las esquinas
+  cortadas. Apagadas en las cuatro ambientaciones.
+- **Para la 16.** `TerrainShape.contours`: cada tramo del contorno de cada capa con `h`, qué hay afuera (`out`), si la cara es de la
+  capa (`mine`) y los puntos con su normal hacia afuera, ya con las esquinas cortadas. `MeshAdj` y `ShapeContour` salen de `contour.ts` y `terrainShape.ts`.
+- **Medido** (script descartable, diez mapas × cuadrada y orgánica con tres semillas): ningún vértice de una cara de arriba, de una losa o de la
+  pintura queda a más de 11,7 cm de piso real de esa altura o más (11,7 cm es el relleno de las esquinas entrantes de la cuadrada; en
+  la orgánica, 6,8 cm en las caras y 9,1 cm en la pintura) y el centro de toda celda de la malla queda cubierto por una cara dibujada
+  a su altura. Armar el dibujo de `cornisas` en Edge, la primera vez en una página recién abierta:
+  83 ms con la orgánica (máx. 89 en cinco corridas), 42 ms con la cuadrada y 44 ms el dibujo de antes; la orgánica tiene 2,8 veces los
+  triángulos de antes (103.700 contra 37.500; 3,0 veces con la semilla que dio más).
+
 ## 8. Red
 
 - La semilla de la malla sale de la que ya viaja en `MatchInit`.

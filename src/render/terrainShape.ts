@@ -1,24 +1,34 @@
-// Formas del terreno por vecindario: la grilla sigue siendo la entrada (y la colisión), pero cada esquina mira
-// a sus vecinas para decidir qué pieza va: costa redondeada, esquina interior, acantilado de roca o borde recto.
-// Es solo visual. Reglas para que el dibujo no le mienta a la colisión:
-//   - se redondean solo las esquinas (R_OUT hacia adentro en las salientes, R_IN de relleno en las entrantes):
-//     el borde recto de cada celda queda exactamente donde está el borde real;
+// Formas del terreno desde los polígonos de la malla (docs/MALLA.md §7, docs/TERRENO.md): la malla (cuadrada u orgánica) es
+// la entrada y un solo camino de código decide la forma. Cada capa de altura (piso, plataformas, muros) es una meseta con su
+// propio contorno: los lados de celda que separan lo que está en la capa de lo que no, encadenados en lazos. Es solo visual.
+// Reglas para que el dibujo no le mienta a la colisión:
+//   - se cortan solo las esquinas: el borde recto queda exactamente donde está el borde real. Una esquina saliente se corta
+//     con un arco de 0,31 del lado más corto de los dos que la forman (tope R_OUT); una entrante lleva un relleno de 0,2
+//     (tope R_IN). En la malla cuadrada (lados de 2 m) son los radios de siempre;
 //   - el acantilado se abulta y se afina por DEBAJO del borde, nunca a la altura del piso;
-//   - al lado de una losa frágil o de una rampa no se redondea nada, así las piezas sueltas calzan justas
-//     (por eso no hay que recalcular nada cuando una losa se cae: el hueco es el de la celda).
+//   - al lado de una losa frágil o de una rampa no se corta nada, así las piezas sueltas calzan justas (por eso no hay que
+//     recalcular nada cuando una losa se cae: el hueco es el de la losa).
 //
-// El terreno se arma por capas de altura (piso, plataformas, muros). Cada capa es una meseta con su propio
-// contorno; las de arriba apoyan sobre las de abajo, así que donde una plataforma redondea la esquina se ve
-// el piso que tiene debajo.
+// El terreno se arma por capas de altura. Cada capa incluye todo lo que es de su altura o más, así que donde una plataforma
+// redondea la esquina se ve el piso que tiene debajo.
 import * as THREE from 'three';
-import { CELL, ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
-import { CellType, type Terrain } from '../core/terrain';
+import { ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
+import type { Terrain } from '../core/terrain';
+import { inRect, type RampPiece, type Rect, type TerrainMesh } from '../core/terrainMesh';
+import { adjOf, boundarySegs, traceLoops, type MeshAdj, type Seg } from './contour';
 import type { GroundStyle } from './ground';
 
-/** Radio de las esquinas salientes y de las entrantes (m). La celda mide CELL. */
+/** Radio de las esquinas salientes y de las entrantes (m) en una malla de lados de 2 m. */
 export const R_OUT = 0.62;
 export const R_IN = 0.4;
-/** Tramos de cada arco y largo de los tramos rectos del acantilado. */
+/** Cuánto del lado más corto se corta en una esquina saliente y se rellena en una entrante (con tope R_OUT y R_IN). */
+const CUT_OUT = 0.31;
+const CUT_IN = 0.2;
+/** Un quiebre del contorno menor que esto (rad, unos 11°) no es una esquina: el borde sigue derecho. */
+const MIN_TURN = 0.2;
+/** Un quiebre más cerrado que esto no se redondea. */
+const MAX_TURN = 2.8;
+/** Tramos de un arco de 90° y largo de los tramos rectos del acantilado. */
 const ARC = 4;
 const STEP = 0.5;
 /** Distancia en la que el relieve del acantilado se apaga al llegar a una esquina viva. */
@@ -26,13 +36,12 @@ const TAPER = 0.8;
 /** Un vecino más alto que esto oscurece el piso a su pie (sombra de contacto). */
 const AO_STEP = 0.6;
 const AO_DARK = 0.72;
+/** Lo que se levanta el descanso de una rampa sobre la plataforma para que no le pelee la profundidad. */
+const LIFT = 0.006;
+/** Los lados más largos que esto se parten en tramos de a un metro, para que el color del suelo tenga de dónde tomar. */
+const SPLIT = 1.5;
 
-/** Normal hacia afuera de cada lado de una celda: norte, este, sur, oeste. El lado s va de la esquina s a la s+1. */
-const SIDE: [number, number][] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-/** Esquinas NO, NE, SE, SO, en medias celdas desde el centro. */
-const CORNER: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-
-/** Qué hay en una celda, para decidir las formas. */
+/** Qué hay del otro lado de un tramo de borde, para decidir las formas. */
 export const enum Cls { Void, Fragile, Ramp, Solid }
 
 /** Colores de la roca y de los muros (la ambientación de cada juego trae los suyos). */
@@ -49,10 +58,14 @@ export interface TerrainLook {
   wallFoot: number;
   /** Franja pintada sobre el borde que da al vacío (los pianos de la Carrera, las rayas de peligro de la Horda). */
   edge?: EdgePaint;
+  /** Juntas: una línea fina pintada sobre los lados entre celdas de la misma capa (un empedrado irregular). Apagadas si falta. */
+  joints?: JointPaint;
 }
 
 /** stripe: largo de cada raya (m); width: ancho de la franja hacia adentro (m). */
 export interface EdgePaint { colors: number[]; stripe: number; width: number }
+/** color de la junta y ancho de la línea (m). */
+export interface JointPaint { color: number; width: number }
 
 export const DEFAULT_LOOK: TerrainLook = { rockTop: 0xc9b39a, rockBottom: 0x5a4a3e, soil: 0x7a5c44, wallTop: 0x8b7b6c, wallSide: 0xa8957f, wallFoot: 0x6b5a4c };
 
@@ -71,6 +84,25 @@ const CLIFF: Ring[] = [
 /** Pared del hueco que deja una losa frágil: recta, para que la losa calce. */
 const PIT: Ring[] = [{ y: 0, off: 0, rough: 0 }, { y: ISLAND_BOTTOM / 2, off: 0, rough: 0 }, { y: ISLAND_BOTTOM, off: 0, rough: 0 }];
 
+/**
+ * Un tramo del contorno de una capa, con la normal hacia afuera en cada punto: lo que necesita la decoración para ir
+ * pegada al borde (tarea 16). Entre dos tramos consecutivos cambia lo que hay del otro lado, o hay una esquina viva.
+ */
+export interface ShapeContour {
+  /** Altura de la capa. */
+  h: number;
+  /** Qué hay del otro lado: vacío, una losa frágil o piso más bajo. */
+  out: Cls;
+  /** ¿La cara de arriba pegada a este tramo está justo a la altura de la capa (y no más alto)? */
+  mine: boolean;
+  /** El tramo es un lazo entero: el último punto vuelve a ser el primero. */
+  closed: boolean;
+  x: number[];
+  z: number[];
+  nx: number[];
+  nz: number[];
+}
+
 export interface TerrainShape {
   /** Caras de arriba (piso, plataformas y muros), con textura de suelo. */
   top: THREE.BufferGeometry;
@@ -78,8 +110,47 @@ export interface TerrainShape {
   rock: THREE.BufferGeometry;
   /** Tiras sobre los bordes que dan al vacío. */
   neon: THREE.BufferGeometry | null;
-  /** Pintura sobre el piso: la franja del borde y el cordón de las plataformas. */
+  /** Pintura sobre el piso: la franja del borde, el cordón de las plataformas y las juntas. */
   paint: THREE.BufferGeometry | null;
+  /** El contorno de cada capa, ya con las esquinas cortadas. */
+  contours: ShapeContour[];
+}
+
+/**
+ * Un punto de una cara de arriba: posición, sombra de contacto y, si es un vértice de la malla, cuál. `e` es el lado de la celda
+ * (0 a 3) sobre el que va el tramo que sale de este punto hacia el siguiente, o -1 si ese tramo es una cuerda de un arco.
+ */
+interface Pt { x: number; z: number; ao: number; v?: number; e?: number }
+
+/** Una esquina saliente cortada: el cono de su interior y, por cada cuerda del arco, un punto y la normal hacia afuera. */
+interface Cut {
+  vx: number; vz: number;
+  /** Los dos rayos que salen del vértice por los lados de la esquina. */
+  r1x: number; r1z: number; r2x: number; r2z: number;
+  chord: number[];
+}
+
+const inWedge = (c: Cut, x: number, z: number) => {
+  const ux = x - c.vx, uz = z - c.vz, det = c.r1x * c.r2z - c.r1z * c.r2x;
+  const a = (ux * c.r2z - uz * c.r2x) / det, b = (c.r1x * uz - c.r1z * ux) / det;
+  return a >= -1e-9 && b >= -1e-9;
+};
+
+/** Recorta un polígono convexo a un semiplano: se queda con lo que está del lado de atrás de la normal (nx, nz) por (px, pz). */
+function clipHalf(poly: Pt[], px: number, pz: number, nx: number, nz: number): Pt[] {
+  const out: Pt[] = [];
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    const da = (a.x - px) * nx + (a.z - pz) * nz, db = (b.x - px) * nx + (b.z - pz) * nz;
+    if (da <= 1e-9) out.push(a);
+    if ((da < -1e-9 && db > 1e-9) || (da > 1e-9 && db < -1e-9)) {
+      // Desde el corte hacia adelante el tramo sigue sobre el lado de la celda si entraba; si salía, sigue sobre la cuerda.
+      const u = da / (da - db);
+      out.push({ x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, ao: a.ao + (b.ao - a.ao) * u, e: da > 1e-9 ? a.e : -1 });
+    }
+  }
+  return out;
 }
 
 export class TerrainShaper {
@@ -91,68 +162,35 @@ export class TerrainShaper {
   private neonPos: number[] = [];
   private paintPos: number[] = [];
   private paintCol: number[] = [];
+  private contours: ShapeContour[] = [];
   private ground: THREE.Color;
   private ground2: THREE.Color;
+  private m: TerrainMesh;
+  private adj: MeshAdj;
+  /** Color de las caras de arriba de los vértices de la malla en la capa que se está armando. */
+  private vcol = new Map<number, THREE.Color>();
+  /** Los descansos de rampa de la capa que se está armando: lo que queda debajo de ellos no se pinta (los tapa su cara de arriba). */
+  private under: Rect[] = [];
 
-  constructor(private t: Terrain, private style: GroundStyle, private look: TerrainLook = DEFAULT_LOOK) {
+  constructor(t: Terrain, private style: GroundStyle, private look: TerrainLook = DEFAULT_LOOK) {
     this.ground = new THREE.Color(t.def.ground);
     this.ground2 = new THREE.Color(t.def.ground2);
-  }
-
-  cls(ix: number, iz: number): Cls {
-    const t = this.t;
-    if (ix < 0 || iz < 0 || ix >= t.w || iz >= t.h) return Cls.Void;
-    const c = t.cells[iz * t.w + ix];
-    if (c.type === CellType.Void) return Cls.Void;
-    if (c.fragile >= 0) return Cls.Fragile;
-    return c.type === CellType.Ramp ? Cls.Ramp : Cls.Solid;
-  }
-
-  /** Altura de la cara de arriba de una celda firme (las rampas cuentan como piso: su cuña va aparte). */
-  topOf(ix: number, iz: number): number {
-    const k = this.cls(ix, iz);
-    if (k < Cls.Ramp) return -Infinity;
-    if (k === Cls.Ramp) return 0;
-    const c = this.t.cells[iz * this.t.w + ix];
-    return c.type === CellType.Wall ? WALL_TOP : c.level * LEVEL_H;
+    this.m = t.mesh;
+    this.adj = adjOf(t);
   }
 
   /** Alturas de las capas, de abajo hacia arriba. La 0 es el piso. */
   layers(): number[] {
+    const m = this.m;
     const hs = new Set<number>([0]);
-    for (let iz = 0; iz < this.t.h; iz++) for (let ix = 0; ix < this.t.w; ix++) { const h = this.topOf(ix, iz); if (h > 0) hs.add(h); }
+    for (let q = 0; q < m.count; q++) if (m.slab[q] < 0 && m.top[q] > 0) hs.add(m.top[q]);
     return [...hs].sort((a, b) => a - b);
   }
 
-  /** ¿La celda es parte de la meseta de altura h? */
-  inLayer(h: number, ix: number, iz: number): boolean {
-    return h === 0 ? this.cls(ix, iz) >= Cls.Ramp : this.cls(ix, iz) === Cls.Solid && this.topOf(ix, iz) >= h - 1e-6;
-  }
-
-  /** Vértice de la grilla (vx, vz): la esquina que comparten las celdas (vx-1..vx, vz-1..vz). No se redondea si toca una losa frágil o una rampa. */
-  blocked(vx: number, vz: number): boolean {
-    for (const [dx, dz] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) {
-      const k = this.cls(vx + dx, vz + dz);
-      if (k === Cls.Fragile || k === Cls.Ramp) return true;
-    }
-    return false;
-  }
-
-  /** ¿Se redondea la esquina k de la celda en la capa h? Tiene que ser saliente (los dos lados que la forman dan afuera). */
-  rounded(h: number, ix: number, iz: number, k: number): boolean {
-    const a = SIDE[(k + 3) % 4], b = SIDE[k];
-    if (this.inLayer(h, ix + a[0], iz + a[1]) || this.inLayer(h, ix + b[0], iz + b[1])) return false;
-    return !this.blocked(ix + (CORNER[k][0] + 1) / 2, iz + (CORNER[k][1] + 1) / 2);
-  }
-
-  /** Esquina entrante en el vértice (vx, vz) de la capa h: tres celdas adentro y una afuera. Devuelve hacia dónde queda la de afuera, o null. */
-  fillet(h: number, vx: number, vz: number): [number, number] | null {
-    let out: [number, number] | null = null, n = 0;
-    for (const q of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as [number, number][]) {
-      if (this.inLayer(h, vx + (q[0] - 1) / 2, vz + (q[1] - 1) / 2)) n++;
-      else out = q;
-    }
-    return n === 3 && out && !this.blocked(vx, vz) ? out : null;
+  /** ¿La celda de la malla es parte de la meseta de altura h? Las losas frágiles no: son piezas aparte. */
+  inLayer(h: number, q: number): boolean {
+    const m = this.m;
+    return m.slab[q] < 0 && (h === 0 || m.top[q] >= h - 1e-6);
   }
 
   build(): TerrainShape {
@@ -186,130 +224,259 @@ export class TerrainShaper {
       paint.setAttribute('normal', new THREE.BufferAttribute(pn, 3));
       paint.computeBoundingSphere();
     }
-    return { top, rock, neon, paint };
+    return { top, rock, neon, paint, contours: this.contours };
   }
 
   // ───────────── una capa ─────────────
 
-  private wx(vx: number) { return this.t.originX + vx * CELL; }
-  private wz(vz: number) { return this.t.originZ + vz * CELL; }
-
   private buildLayer(h: number) {
-    const t = this.t;
-    for (let iz = 0; iz < t.h; iz++) for (let ix = 0; ix < t.w; ix++) {
-      if (!this.inLayer(h, ix, iz)) continue;
-      const cx = this.wx(ix + 0.5), cz = this.wz(iz + 0.5), half = CELL / 2;
-      const round = [0, 1, 2, 3].map((k) => this.rounded(h, ix, iz, k));
-      const mine = this.cls(ix, iz) === Cls.Solid && this.topOf(ix, iz) === h;
-      const covered = this.heightOf(ix, iz) > h + AO_STEP;
+    const m = this.m;
+    this.vcol.clear();
+    this.under = m.mode === 'organic' ? m.ramps.filter((p) => Math.abs((p.level + 1) * LEVEL_H - h) < 1e-6).map((p) => p.landing) : [];
+    const inL = new Uint8Array(m.count);
+    for (let q = 0; q < m.count; q++) inL[q] = this.inLayer(h, q) ? 1 : 0;
+    const cuts = new Map<number, Cut[]>();
+    for (const loop of traceLoops(m, boundarySegs(m, inL))) this.contour(h, loop, cuts);
+    for (let q = 0; q < m.count; q++) if (inL[q]) this.topFace(h, q, cuts);
+    if (this.look.joints) this.joints(h, inL, cuts);
+    // El descanso de una rampa es una losa llana al nivel de arriba (en la cuadrada coincide con la plataforma y no se dibuja).
+    if (m.mode === 'organic') for (const p of m.ramps) if (Math.abs((p.level + 1) * LEVEL_H - h) < 1e-6) this.landing(h, p);
+  }
 
-      // Cara de arriba: abanico desde el centro, con las esquinas salientes hechas arco.
-      const ring: [number, number, number][] = [];
-      for (let k = 0; k < 4; k++) {
-        const px = cx + CORNER[k][0] * half, pz = cz + CORNER[k][1] * half;
-        if (round[k]) for (const p of this.arc(px, pz, k)) ring.push([p.x, p.z, covered ? AO_DARK : 1]);
-        else ring.push([px, pz, this.aoAround(h, ix + (CORNER[k][0] + 1) / 2, iz + (CORNER[k][1] + 1) / 2)]);
-        const n = SIDE[k];
-        ring.push([cx + n[0] * half, cz + n[1] * half, covered || this.heightOf(ix + n[0], iz + n[1]) > h + AO_STEP ? AO_DARK : 1]);
+  /** Sombra de contacto de un vértice de la malla: oscuro si lo toca algo bastante más alto que la capa. */
+  private vAO(h: number, v: number) { return this.adj.vTop[v] > h + AO_STEP ? AO_DARK : 1; }
+
+  /**
+   * Un lazo del contorno de la capa: clasifica cada vértice (recto, esquina saliente, entrante o viva), arma el borde con las
+   * esquinas cortadas y cuelga de él los costados, el neón y la pintura. Las esquinas salientes quedan anotadas en `cuts`
+   * para recortar las caras de arriba; las entrantes se rellenan acá.
+   */
+  private contour(h: number, loop: Seg[], cuts: Map<number, Cut[]>) {
+    const m = this.m, adj = this.adj, n = loop.length;
+    const ux = new Float64Array(n), uz = new Float64Array(n), len = new Float64Array(n);
+    const cls: Cls[] = new Array(n), mine: boolean[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const s = loop[i];
+      const ex = m.vx[s.b] - m.vx[s.a], ez = m.vz[s.b] - m.vz[s.a];
+      len[i] = Math.hypot(ex, ez);
+      ux[i] = ex / len[i]; uz[i] = ez / len[i];
+      cls[i] = s.nb < 0 ? Cls.Void : m.slab[s.nb] >= 0 ? Cls.Fragile : Cls.Solid;
+      mine[i] = Math.abs(m.top[s.q] - h) < 1e-6;
+    }
+    // Vértice i: donde termina el lado i-1 y empieza el i.
+    const kind = new Uint8Array(n); // 0 recto, 1 saliente, 2 entrante, 3 vivo
+    const cutD = new Float64Array(n), turn = new Float64Array(n);
+    const taper = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = (i + n - 1) % n;
+      const cross = ux[p] * uz[i] - uz[p] * ux[i], dot = ux[p] * ux[i] + uz[p] * uz[i];
+      const phi = Math.atan2(Math.abs(cross), dot);
+      turn[i] = phi;
+      const blocked = adj.vBlocked[loop[i].a] === 1;
+      if (phi < MIN_TURN) { kind[i] = 0; taper[i] = cls[p] !== cls[i] ? 1 : 0; continue; }
+      if (blocked || phi > MAX_TURN) { kind[i] = 3; taper[i] = 1; continue; }
+      kind[i] = cross > 0 ? 1 : 2;
+      const short = Math.min(len[p], len[i]);
+      cutD[i] = kind[i] === 1 ? Math.min(CUT_OUT * short, R_OUT) : Math.min(CUT_IN * short, R_IN);
+    }
+
+    // El borde, punto por punto. Cada punto lleva el atributo del tramo que sale de él (clase de lo de afuera y si la cara
+    // de arriba es de esta capa), o BREAK si ahí hay una esquina viva (el borde se parte y el relieve se apaga).
+    const BREAK = -1;
+    const px: number[] = [], pz: number[] = [], pnx: number[] = [], pnz: number[] = [], pattr: number[] = [], psharp: number[] = [];
+    const push = (x: number, z: number, nx: number, nz: number, attr: number, sharp: boolean) => {
+      px.push(x); pz.push(z); pnx.push(nx); pnz.push(nz); pattr.push(attr); psharp.push(sharp ? 1 : 0);
+    };
+    const attrOf = (i: number) => cls[i] * 2 + (mine[i] ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const p = (i + n - 1) % n, a = loop[i].a;
+      const vx = m.vx[a], vz = m.vz[a];
+      const n1x = uz[p], n1z = -ux[p], n2x = uz[i], n2z = -ux[i];
+      if (kind[i] === 0) {
+        const sx = n1x + n2x, sz = n1z + n2z, l = Math.hypot(sx, sz) || 1;
+        push(vx, vz, sx / l, sz / l, attrOf(i), taper[i] === 1);
+      } else if (kind[i] === 3) {
+        push(vx, vz, n1x, n1z, BREAK, true);
+        push(vx, vz, n2x, n2z, attrOf(i), true);
+      } else {
+        const arc = this.arcPoints(h, loop[i].a, vx, vz, ux[p], uz[p], ux[i], uz[i], turn[i], cutD[i], kind[i] === 1, cuts);
+        const arcCls = cls[p] === Cls.Void && cls[i] === Cls.Void ? Cls.Void : Cls.Solid;
+        const arcAttr = arcCls * 2 + (mine[p] && mine[i] ? 1 : 0);
+        for (let j = 0; j < arc.length; j += 4) push(arc[j], arc[j + 1], arc[j + 2], arc[j + 3], j + 4 < arc.length ? arcAttr : attrOf(i), false);
       }
-      const center: [number, number, number] = [cx, cz, covered ? AO_DARK : 1];
-      for (let i = 0; i < ring.length; i++) this.topTri(h, center, ring[i], ring[(i + 1) % ring.length]);
+      // Los puntos del tramo recto, sin los extremos (los pone el vértice).
+      const next = (i + 1) % n;
+      const l2 = len[i] - cutD[i] - cutD[next];
+      const steps = Math.max(1, Math.round(l2 / STEP));
+      const x0 = vx + ux[i] * cutD[i], z0 = vz + uz[i] * cutD[i];
+      for (let j = 1; j < steps; j++) {
+        const u = (l2 * j) / steps;
+        push(x0 + ux[i] * u, z0 + uz[i] * u, n2x, n2z, attrOf(i), false);
+      }
+    }
+    const N = px.length;
 
-      // Costados: los tramos rectos que dan afuera y los arcos de las esquinas salientes.
-      for (let s = 0; s < 4; s++) {
-        const n = SIDE[s];
-        const ox = ix + n[0], oz = iz + n[1];
-        if (this.inLayer(h, ox, oz)) continue;
-        const outCls = this.cls(ox, oz);
-        const ends = [this.sideEnd(h, ix, iz, s, false), this.sideEnd(h, ix, iz, s, true)];
-        const a = [cx + CORNER[s][0] * half, cz + CORNER[s][1] * half];
-        const d = SIDE[(s + 1) % 4];
-        const from = ends[0].trim, len = CELL - ends[0].trim - ends[1].trim;
-        const steps = Math.max(1, Math.round(len / STEP));
-        const rim: Rim[] = [];
-        for (let i = 0; i <= steps; i++) {
-          const u = (len * i) / steps;
-          let amp = 1;
-          if (ends[0].sharp) amp = Math.min(amp, u / TAPER);
-          if (ends[1].sharp) amp = Math.min(amp, (len - u) / TAPER);
-          rim.push({ x: a[0] + d[0] * (from + u), z: a[1] + d[1] * (from + u), nx: n[0], nz: n[1], amp: outCls === Cls.Fragile ? 0 : amp });
+    // Relieve: se apaga a TAPER metros de cada esquina viva.
+    const amp = new Float64Array(N).fill(1);
+    const cum = new Float64Array(N + 1);
+    for (let j = 0; j < N; j++) cum[j + 1] = cum[j] + Math.hypot(px[(j + 1) % N] - px[j], pz[(j + 1) % N] - pz[j]);
+    const total = cum[N];
+    if (psharp.some((s) => s === 1)) {
+      let last = -Infinity;
+      for (let pass = 0; pass < 2; pass++) {
+        for (let j = 0; j < N; j++) {
+          const s = cum[j] + pass * total;
+          if (psharp[j]) last = s;
+          if (pass === 1 || last > -Infinity) amp[j] = Math.min(amp[j], Math.max(0, Math.min(1, (s - last) / TAPER)));
         }
-        this.side(h, rim, outCls);
-        if (mine) this.trim(h, rim, outCls === Cls.Void);
       }
-      for (let k = 0; k < 4; k++) {
-        if (!round[k]) continue;
-        const rim = this.arc(cx + CORNER[k][0] * half, cz + CORNER[k][1] * half, k);
-        const a = SIDE[(k + 3) % 4], b = SIDE[k];
-        const toVoid = this.cls(ix + a[0], iz + a[1]) === Cls.Void && this.cls(ix + b[0], iz + b[1]) === Cls.Void;
-        this.side(h, rim, toVoid ? Cls.Void : Cls.Solid);
-        if (mine) this.trim(h, rim, toVoid);
+      let next = Infinity;
+      for (let pass = 1; pass >= 0; pass--) {
+        for (let j = N - 1; j >= 0; j--) {
+          const s = cum[j] + pass * total;
+          if (psharp[j]) next = s;
+          if (pass === 0 || next < Infinity) amp[j] = Math.min(amp[j], Math.max(0, Math.min(1, (next - s) / TAPER)));
+        }
       }
     }
 
-    // Esquinas entrantes: un relleno curvo en el rincón de la celda de afuera.
-    for (let vz = 0; vz <= t.h; vz++) for (let vx = 0; vx <= t.w; vx++) {
-      const q = this.fillet(h, vx, vz);
-      if (!q) continue;
-      const px = this.wx(vx), pz = this.wz(vz);
+    // Los tramos: puntos consecutivos con el mismo atributo.
+    const starts: number[] = [];
+    for (let j = 0; j < N; j++) if (pattr[j] !== BREAK && pattr[(j + N - 1) % N] !== pattr[j]) starts.push(j);
+    const runs: [number, number][] = []; // desde el punto j hasta el punto e (inclusive)
+    if (!starts.length) runs.push([0, N]);
+    for (const j of starts) {
+      let e = j;
+      while (e - j < N && pattr[e % N] === pattr[j]) e++;
+      runs.push([j, e]);
+    }
+    for (const [j, e] of runs) {
+      const attr = pattr[j % N];
+      const out = (attr >> 1) as Cls, own = (attr & 1) === 1;
       const rim: Rim[] = [];
-      for (let i = 0; i <= ARC; i++) {
-        const th = (Math.PI / 2) * (i / ARC), c = Math.cos(th), s = Math.sin(th);
-        rim.push({ x: px + q[0] * R_IN * (1 - s), z: pz + q[1] * R_IN * (1 - c), nx: q[0] * s, nz: q[1] * c, amp: 1 });
+      for (let k = j; k <= e; k++) {
+        const i = k % N;
+        rim.push({ x: px[i], z: pz[i], nx: pnx[i], nz: pnz[i], amp: out === Cls.Fragile ? 0 : amp[i] });
       }
-      const v: [number, number, number] = [px, pz, this.aoAround(h, vx, vz)];
-      for (let i = 0; i < ARC; i++) this.topTri(h, v, [rim[i].x, rim[i].z, 1], [rim[i + 1].x, rim[i + 1].z, 1]);
-      const ox = vx + (q[0] - 1) / 2, oz = vz + (q[1] - 1) / 2;
-      const outCls = this.cls(ox, oz);
-      this.side(h, rim, outCls);
-      // Brilla si las dos celdas que arman el rincón tienen su cara de arriba en esta capa.
-      if (this.topOf(ox - q[0], oz) === h && this.topOf(ox, oz - q[1]) === h) this.trim(h, rim, outCls === Cls.Void);
+      this.side(h, rim, out);
+      if (own) this.trim(h, rim, out === Cls.Void);
+      this.contours.push({ h, out, mine: own, closed: !starts.length, x: rim.map((r) => r.x), z: rim.map((r) => r.z), nx: rim.map((r) => r.nx), nz: rim.map((r) => r.nz) });
     }
   }
 
-  /** Arco de la esquina saliente k (con centro en la esquina px, pz corrida R_OUT hacia adentro). */
-  private arc(px: number, pz: number, k: number): Rim[] {
-    const a = SIDE[(k + 3) % 4], b = SIDE[k];
-    const ox = px - (a[0] + b[0]) * R_OUT, oz = pz - (a[1] + b[1]) * R_OUT;
-    const out: Rim[] = [];
-    for (let i = 0; i <= ARC; i++) {
-      const th = (Math.PI / 2) * (i / ARC), c = Math.cos(th), s = Math.sin(th);
-      const nx = a[0] * c + b[0] * s, nz = a[1] * c + b[1] * s;
-      out.push({ x: ox + nx * R_OUT, z: oz + nz * R_OUT, nx, nz, amp: 1 });
+  /**
+   * El arco de una esquina: de un punto a `d` antes del vértice a otro a `d` después, tangente a los dos lados. Devuelve
+   * x, z, nx, nz de cada punto (la normal sale del piso). En una saliente el centro queda adentro y el arco le corta la punta
+   * a la capa; en una entrante queda afuera y el arco rellena el rincón (las caras de ese relleno se arman acá).
+   */
+  private arcPoints(h: number, v: number, vx: number, vz: number, ix: number, iz: number, ox: number, oz: number, phi: number, d: number, salient: boolean, cuts: Map<number, Cut[]>): number[] {
+    const r = d / Math.tan(phi / 2);
+    const segs = Math.max(1, Math.ceil(phi / (Math.PI / 2 / ARC) - 1e-6));
+    const lx = -iz, lz = ix; // a la izquierda de la entrada: de ese lado está la capa
+    const p1x = vx - ix * d, p1z = vz - iz * d;
+    const sgn = salient ? 1 : -1;
+    const cx = p1x + sgn * lx * r, cz = p1z + sgn * lz * r;
+    const u0x = -sgn * lx, u0z = -sgn * lz;
+    const out: number[] = [];
+    for (let j = 0; j <= segs; j++) {
+      const th = sgn * phi * (j / segs), c = Math.cos(th), s = Math.sin(th);
+      const ux = u0x * c - u0z * s, uz = u0x * s + u0z * c;
+      out.push(cx + ux * r, cz + uz * r, sgn * ux, sgn * uz);
+    }
+    if (salient) {
+      const chord: number[] = [];
+      for (let j = 0; j < segs; j++) {
+        const a = j * 4, b = (j + 1) * 4;
+        const nx = out[a + 2] + out[b + 2], nz = out[a + 3] + out[b + 3], l = Math.hypot(nx, nz) || 1;
+        chord.push(out[a], out[a + 1], nx / l, nz / l);
+      }
+      const cut: Cut = { vx, vz, r1x: -ix, r1z: -iz, r2x: ox, r2z: oz, chord };
+      const l = cuts.get(v);
+      if (l) l.push(cut); else cuts.set(v, [cut]);
+    } else {
+      // Relleno: abanico desde el vértice por los puntos del arco.
+      const vc = this.topColor(h, vx, vz, this.vAO(h, v));
+      const cols: THREE.Color[] = [];
+      for (let j = 0; j <= segs; j++) cols.push(this.topColor(h, out[j * 4], out[j * 4 + 1], 1));
+      for (let j = 0; j < segs; j++) {
+        this.topTri(h, [vx, vz], vc, [out[j * 4], out[j * 4 + 1]], cols[j], [out[(j + 1) * 4], out[(j + 1) * 4 + 1]], cols[j + 1]);
+      }
     }
     return out;
   }
 
-  /** Cómo termina el tramo recto del lado s en uno de sus extremos: cuánto se recorta y si ahí hay una esquina viva. */
-  private sideEnd(h: number, ix: number, iz: number, s: number, atEnd: boolean): { trim: number; sharp: boolean } {
-    const k = atEnd ? (s + 1) % 4 : s;
-    const along = SIDE[atEnd ? (s + 1) % 4 : (s + 3) % 4];
-    const n = SIDE[s];
-    const vx = ix + (CORNER[k][0] + 1) / 2, vz = iz + (CORNER[k][1] + 1) / 2;
-    if (!this.inLayer(h, ix + along[0], iz + along[1])) {
-      return this.blocked(vx, vz) ? { trim: 0, sharp: true } : { trim: R_OUT, sharp: false };
-    }
-    const dx = ix + along[0] + n[0], dz = iz + along[1] + n[1];
-    if (this.inLayer(h, dx, dz)) return this.blocked(vx, vz) ? { trim: 0, sharp: true } : { trim: R_IN, sharp: false };
-    // Sigue derecho: solo es esquina viva si del otro lado cambia lo que hay (vacío ↔ losa frágil).
-    return { trim: 0, sharp: this.cls(dx, dz) !== this.cls(ix + n[0], iz + n[1]) };
-  }
-
   // ───────────── caras ─────────────
 
-  /** Altura aproximada de una celda (para la sombra de contacto). -Infinity si es vacío o está fuera del mapa. */
-  heightOf(ix: number, iz: number) {
-    const t = this.t;
-    if (ix < 0 || iz < 0 || ix >= t.w || iz >= t.h) return -Infinity;
-    const c = t.cells[iz * t.w + ix];
-    if (c.type === CellType.Void) return -Infinity;
-    if (c.type === CellType.Wall) return WALL_TOP;
-    return (c.level + (c.type === CellType.Ramp ? 0.5 : 0)) * LEVEL_H;
+  /** La cara de arriba de una celda: su polígono, sin la punta de las esquinas salientes que el contorno corta. */
+  private topFace(h: number, q: number, cuts: Map<number, Cut[]>) {
+    const m = this.m;
+    let poly: Pt[] = [];
+    const covered = this.adj.aoTop[q] > h + AO_STEP;
+    for (let k = 0; k < 4; k++) { const v = m.quads[q * 4 + k]; poly.push({ x: m.vx[v], z: m.vz[v], ao: this.vAO(h, v), v, e: k }); }
+    if (cuts.size) {
+      // Las esquinas salientes cortadas que tocan a esta celda: la punta que se corta no ensombrece el arco que la reemplaza.
+      const mine: Cut[] = [];
+      for (let k = 0; k < 4; k++) {
+        const list = cuts.get(m.quads[q * 4 + k]);
+        if (!list) continue;
+        for (const c of list) {
+          if (!inWedge(c, m.cx[q], m.cz[q])) continue;
+          mine.push(c);
+          poly[k].ao = covered ? AO_DARK : 1;
+        }
+      }
+      for (const c of mine) {
+        for (let j = 0; j < c.chord.length; j += 4) poly = clipHalf(poly, c.chord[j], c.chord[j + 1], c.chord[j + 2], c.chord[j + 3]);
+        if (poly.length < 3) return;
+      }
+    }
+    // Los lados largos se parten, para que el color del suelo se tome cada metro como siempre. En un lado de la celda, el punto
+    // del medio se oscurece si lo que hay del otro lado es bastante más alto.
+    const ring: Pt[] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      ring.push(a);
+      const l = Math.hypot(b.x - a.x, b.z - a.z);
+      if (l > SPLIT) {
+        const parts = Math.ceil(l / 1);
+        const nb = a.e !== undefined && a.e >= 0 ? m.nbr[q * 4 + a.e] : -2;
+        for (let j = 1; j < parts; j++) {
+          const u = j / parts;
+          const ao = nb === -2 ? a.ao + (b.ao - a.ao) * u : covered || (nb >= 0 && this.adj.aoTop[nb] > h + AO_STEP) ? AO_DARK : 1;
+          ring.push({ x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, ao });
+        }
+      }
+    }
+    // El abanico sale del centro de la celda (si el recorte no se lo llevó) y si no, del promedio de sus puntos.
+    let cx = m.cx[q], cz = m.cz[q];
+    for (let i = 0; i < poly.length && cx !== undefined; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      if ((b.x - a.x) * (cz - a.z) - (b.z - a.z) * (cx - a.x) < 0) { cx = NaN; break; }
+    }
+    if (Number.isNaN(cx)) {
+      cx = 0; cz = 0;
+      for (const p of ring) { cx += p.x; cz += p.z; }
+      cx /= ring.length; cz /= ring.length;
+    }
+    this.fan(h, h, { x: cx, z: cz, ao: covered ? AO_DARK : 1 }, ring);
   }
 
-  private aoAround(h: number, vx: number, vz: number) {
-    for (const [dx, dz] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) if (this.heightOf(vx + dx, vz + dz) > h + AO_STEP) return AO_DARK;
-    return 1;
+  private pointColor(h: number, p: Pt): THREE.Color {
+    if (p.v === undefined) return this.topColor(h, p.x, p.z, p.ao);
+    const key = p.v * 2 + (p.ao < 1 ? 1 : 0);
+    let c = this.vcol.get(key);
+    if (!c) { c = this.topColor(h, p.x, p.z, p.ao); this.vcol.set(key, c); }
+    return c;
+  }
+
+  /** Abanico desde `center` por los puntos de `ring`, a la altura y. */
+  private fan(h: number, y: number, center: Pt, ring: Pt[]) {
+    const cc = this.pointColor(h, center);
+    const cols = ring.map((p) => this.pointColor(h, p));
+    for (let i = 0; i < ring.length; i++) {
+      const j = (i + 1) % ring.length;
+      this.topTri(y, [center.x, center.z], cc, [ring[i].x, ring[i].z], cols[i], [ring[j].x, ring[j].z], cols[j]);
+    }
   }
 
   private topColor(h: number, x: number, z: number, ao: number): THREE.Color {
@@ -322,17 +489,104 @@ export class TerrainShaper {
     return base.lerp(grass, st.patch(x, z) * 0.75).lerp(dirt, st.path(x, z) * 0.8).multiplyScalar(ao);
   }
 
-  /** Triángulo de una cara de arriba. Cada punto: [x, z, sombra]. */
-  private topTri(h: number, a: [number, number, number], b: [number, number, number], c: [number, number, number]) {
+  /** Triángulo de una cara de arriba a la altura y. */
+  private topTri(y: number, a: [number, number], ca: THREE.Color, b: [number, number], cb: THREE.Color, c: [number, number], cc: THREE.Color) {
     // Que mire hacia arriba, venga en el orden que venga.
     const up = (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]) > 0;
-    for (const p of up ? [a, b, c] : [a, c, b]) {
-      this.topPos.push(p[0], h, p[1]);
+    const pts: [[number, number], THREE.Color][] = up ? [[a, ca], [b, cb], [c, cc]] : [[a, ca], [c, cc], [b, cb]];
+    for (const [p, col] of pts) {
+      this.topPos.push(p[0], y, p[1]);
       this.topUv.push(p[0] * 0.23, p[1] * 0.23);
-      const col = this.topColor(h, p[0], p[1], p[2]);
       this.topCol.push(col.r, col.g, col.b);
     }
   }
+
+  // ───────────── el descanso de una rampa ─────────────
+
+  /** ¿Hay algo sólido de la altura de la capa (o más) en este punto? Lo que tapa el costado de un descanso. */
+  private coveredAt(h: number, x: number, z: number): boolean {
+    const m = this.m;
+    for (const p of m.ramps) if (inRect(p.wedge, x, z) || inRect(p.landing, x, z)) return true;
+    const q = m.cellAt(x, z);
+    return q >= 0 && m.slab[q] < 0 && m.top[q] >= h - 1e-6;
+  }
+
+  /**
+   * El descanso de una rampa: una losa llana al nivel de arriba, apoyada sobre la malla (que ahí bajó la franja de llegada).
+   * Se levanta un poco sobre la plataforma, que lo pisa en parte, y cuelga su costado donde no hay plataforma que lo tape.
+   */
+  private landing(h: number, p: RampPiece) {
+    const l = p.landing, y = h + LIFT;
+    const nx = Math.max(1, Math.ceil((l.maxX - l.minX) / 1)), nz = Math.max(1, Math.ceil((l.maxZ - l.minZ) / 1));
+    const col: THREE.Color[] = [];
+    for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) col.push(this.topColor(h, l.minX + ((l.maxX - l.minX) * i) / nx, l.minZ + ((l.maxZ - l.minZ) * j) / nz, 1));
+    const at = (i: number, j: number): [number, number] => [l.minX + ((l.maxX - l.minX) * i) / nx, l.minZ + ((l.maxZ - l.minZ) * j) / nz];
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const c00 = col[j * (nx + 1) + i], c10 = col[j * (nx + 1) + i + 1], c01 = col[(j + 1) * (nx + 1) + i], c11 = col[(j + 1) * (nx + 1) + i + 1];
+        this.topTri(y, at(i, j), c00, at(i + 1, j), c10, at(i + 1, j + 1), c11);
+        this.topTri(y, at(i, j), c00, at(i + 1, j + 1), c11, at(i, j + 1), c01);
+      }
+    }
+    // Costados: por cada lado del rectángulo, los tramos que no tapa ni la plataforma ni la cuña.
+    const sides: [number, number, number, number, number, number][] = [
+      [l.minX, l.minZ, l.maxX, l.minZ, 0, -1], [l.maxX, l.minZ, l.maxX, l.maxZ, 1, 0],
+      [l.maxX, l.maxZ, l.minX, l.maxZ, 0, 1], [l.minX, l.maxZ, l.minX, l.minZ, -1, 0],
+    ];
+    for (const [ax, az, bx, bz, snx, snz] of sides) {
+      const L = Math.hypot(bx - ax, bz - az), steps = Math.max(1, Math.round(L / STEP));
+      let rim: Rim[] = [];
+      const flush = () => { if (rim.length > 1) { this.side(h, rim, Cls.Void); this.trim(h, rim, false); } rim = []; };
+      for (let s = 0; s < steps; s++) {
+        const u0 = s / steps, u1 = (s + 1) / steps, um = (u0 + u1) / 2;
+        const exposed = !this.coveredAt(h, ax + (bx - ax) * um + snx * 0.15, az + (bz - az) * um + snz * 0.15);
+        if (!exposed) { flush(); continue; }
+        if (!rim.length) rim.push({ x: ax + (bx - ax) * u0, z: az + (bz - az) * u0, nx: snx, nz: snz, amp: 0 });
+        rim.push({ x: ax + (bx - ax) * u1, z: az + (bz - az) * u1, nx: snx, nz: snz, amp: 0 });
+      }
+      flush();
+    }
+  }
+
+  // ───────────── juntas ─────────────
+
+  /** Líneas finas sobre los lados entre dos celdas de la capa (las dos con su cara de arriba a la altura de la capa). */
+  private joints(h: number, inL: Uint8Array, cuts: Map<number, Cut[]>) {
+    const jp = this.look.joints!, m = this.m;
+    const col = new THREE.Color(jp.color), w = jp.width / 2, y = h + 0.011;
+    for (let q = 0; q < m.count; q++) {
+      if (!inL[q] || Math.abs(m.top[q] - h) > 1e-6) continue;
+      for (let k = 0; k < 4; k++) {
+        const nb = m.nbr[q * 4 + k];
+        if (nb <= q || !inL[nb] || Math.abs(m.top[nb] - h) > 1e-6) continue;
+        const a = m.quads[q * 4 + k], b = m.quads[q * 4 + ((k + 1) & 3)];
+        const ex = m.vx[b] - m.vx[a], ez = m.vz[b] - m.vz[a], l = Math.hypot(ex, ez) || 1;
+        const ox = (-ez / l) * w, oz = (ex / l) * w;
+        let poly: Pt[] = [
+          { x: m.vx[a] + ox, z: m.vz[a] + oz, ao: 1 }, { x: m.vx[b] + ox, z: m.vz[b] + oz, ao: 1 },
+          { x: m.vx[b] - ox, z: m.vz[b] - oz, ao: 1 }, { x: m.vx[a] - ox, z: m.vz[a] - oz, ao: 1 },
+        ];
+        const mx = (m.vx[a] + m.vx[b]) / 2, mz = (m.vz[a] + m.vz[b]) / 2;
+        if (this.hidden(mx, mz)) continue;
+        for (const v of [a, b]) {
+          const list = cuts.get(v);
+          if (!list) continue;
+          for (const c of list) {
+            if (!inWedge(c, mx, mz)) continue;
+            for (let j = 0; j < c.chord.length; j += 4) poly = clipHalf(poly, c.chord[j], c.chord[j + 1], c.chord[j + 2], c.chord[j + 3]);
+          }
+        }
+        if (poly.length < 3) continue;
+        for (let i = 1; i + 1 < poly.length; i++) {
+          const t3 = [poly[0], poly[i], poly[i + 1]];
+          const up = (t3[1].z - t3[0].z) * (t3[2].x - t3[0].x) - (t3[1].x - t3[0].x) * (t3[2].z - t3[0].z) > 0;
+          for (const p of up ? t3 : [t3[0], t3[2], t3[1]]) { this.paintPos.push(p.x, y, p.z); this.paintCol.push(col.r, col.g, col.b); }
+        }
+      }
+    }
+  }
+
+  // ───────────── costados ─────────────
 
   /** Costado que cuelga de un tramo del borde: acantilado si da al vacío, pared recta si da a una losa frágil, muro si es una capa de arriba. */
   private side(h: number, rim: Rim[], outCls: Cls) {
@@ -410,11 +664,18 @@ export class TerrainShaper {
     if (h > 0 && h < WALL_TOP - 1e-6) this.paint(h, rim, 0.2, (x, z) => this.topColor(h, x, z, 1).offsetHSL(0, -0.05, 0.09));
   }
 
+  /** ¿El punto queda debajo del descanso de una rampa de esta capa? */
+  private hidden(x: number, z: number) {
+    for (const r of this.under) if (inRect(r, x, z, -0.02)) return true;
+    return false;
+  }
+
   /** Franja pintada sobre el piso, del borde hacia adentro. */
   private paint(h: number, rim: Rim[], width: number, colorOf: (x: number, z: number) => THREE.Color) {
     const y = h + 0.012;
     for (let i = 0; i + 1 < rim.length; i++) {
       const a = rim[i], b = rim[i + 1];
+      if (this.hidden((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
       const q = [[a.x, a.z], [b.x, b.z], [b.x - b.nx * width, b.z - b.nz * width], [a.x - a.nx * width, a.z - a.nz * width]];
       const col = colorOf((a.x + b.x) / 2, (a.z + b.z) / 2);
       const up = (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]) - (q[1][0] - q[0][0]) * (q[2][1] - q[0][1]) > 0;
@@ -430,6 +691,7 @@ export class TerrainShaper {
     const W = 0.1, UP = 0.05;
     for (let i = 0; i + 1 < rim.length; i++) {
       const a = rim[i], b = rim[i + 1];
+      if (this.hidden((a.x + b.x) / 2, (a.z + b.z) / 2)) continue;
       const quad = (p: number[][]) => { for (const k of [0, 1, 2, 0, 2, 3]) this.neonPos.push(p[k][0], p[k][1], p[k][2]); };
       quad([[a.x, h + UP, a.z], [b.x, h + UP, b.z], [b.x - b.nx * W, h + UP, b.z - b.nz * W], [a.x - a.nx * W, h + UP, a.z - a.nz * W]]);
       quad([[a.x, h + UP, a.z], [b.x, h + UP, b.z], [b.x, h - 0.03, b.z], [a.x, h - 0.03, a.z]]);

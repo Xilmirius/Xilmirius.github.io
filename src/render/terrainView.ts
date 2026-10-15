@@ -1,51 +1,17 @@
-// Malla del terreno generada desde la grilla. El piso firme, las plataformas y los muros salen de las formas por
-// vecindario (terrainShape.ts): suelo continuo, costa redondeada y acantilados de roca. Las rampas y las losas
-// frágiles siguen siendo losas cuadradas con junta, una malla por losa frágil: así se leen como piezas aparte.
+// El terreno dibujado desde la malla (cuadrada u orgánica). El piso firme, las plataformas y los muros salen de las formas
+// de terrainShape.ts: suelo continuo, costa redondeada y acantilados de roca. Las rampas y las losas frágiles son piezas
+// con junta: una cuña por rampa (más su descanso, que dibuja terrainShape) y una malla por losa frágil (terrainPieces.ts),
+// así se leen como piezas aparte.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CELL, ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, Terrain, TILE_CRUMBLING, TILE_GONE } from '../core/terrain';
 import { GroundStyle } from './ground';
+import { AO_STEP, BEVEL_DROP, BEVEL_IN, GeoBuilder, buildSlab, slabCells } from './terrainPieces';
 import { DEFAULT_LOOK, TerrainShaper, type TerrainLook } from './terrainShape';
 import type { ThemeDef } from './themes';
 import { groundTexture, terrainAtlas, tileCracks, toonGradient } from './textures';
-
-/** Relieve de cada losa: el borde se mete BEVEL_IN y baja BEVEL_DROP, así las juntas tienen sombra propia. */
-const BEVEL_IN = 0.09;
-const BEVEL_DROP = 0.06;
-/** Un vecino más alto que esto oscurece el piso a su pie (sombra de contacto). */
-const AO_STEP = 0.6;
-
-class GeoBuilder {
-  pos: number[] = [];
-  nor: number[] = [];
-  uv: number[] = [];
-  col: number[] = [];
-  idx: number[] = [];
-
-  quad(p: number[][], n: number[], uv: number[][], c: THREE.Color[]) {
-    const b = this.pos.length / 3;
-    for (let i = 0; i < 4; i++) {
-      this.pos.push(...p[i]);
-      this.nor.push(...n);
-      this.uv.push(...uv[i]);
-      this.col.push(c[i].r, c[i].g, c[i].b);
-    }
-    this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-  }
-
-  build() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    g.setIndex(this.idx);
-    g.computeBoundingSphere();
-    return g;
-  }
-}
 
 interface TileView {
   mesh: THREE.Mesh;
@@ -79,10 +45,7 @@ export class TerrainView {
     this.group.add(rock);
     // Rampas: cuñas de losa apoyadas sobre el piso.
     const rampB = new GeoBuilder();
-    for (let i = 0; i < t.cells.length; i++) {
-      const c = t.cells[i];
-      if (c.type === CellType.Ramp && c.fragile < 0) this.addCell(rampB, i, true);
-    }
+    for (const p of t.mesh.ramps) this.addWedge(rampB, p.src);
     if (rampB.idx.length) {
       const ramps = new THREE.Mesh(rampB.build(), mat);
       ramps.receiveShadow = true;
@@ -93,18 +56,14 @@ export class TerrainView {
     for (let s = 0; s < 4; s++) {
       this.crackMats.push(new THREE.MeshBasicMaterial({ map: tileCracks(s), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
     }
+    const slabs = slabCells(t);
     for (let fi = 0; fi < t.fragile.length; fi++) {
-      const ci = t.fragile[fi];
       const b = new GeoBuilder();
-      this.addCell(b, ci, false);
+      const decal = buildSlab(t, style, fi, slabs[fi], this.loose(), b);
       const m = new THREE.Mesh(b.build(), mat);
       m.receiveShadow = true;
       m.castShadow = true;
-      const bb = t.cellBounds(ci);
-      const top = t.topAt(ci, (bb.minX + bb.maxX) / 2, (bb.minZ + bb.maxZ) / 2);
-      const crack = new THREE.Mesh(new THREE.PlaneGeometry(CELL, CELL), this.crackMats[this.loose() ? 1 : 0]);
-      crack.rotation.x = -Math.PI / 2;
-      crack.position.set((bb.minX + bb.maxX) / 2, top + 0.02, (bb.minZ + bb.maxZ) / 2);
+      const crack = new THREE.Mesh(decal, this.crackMats[this.loose() ? 1 : 0]);
       crack.renderOrder = 2;
       const g = new THREE.Group();
       g.add(m);
@@ -129,7 +88,8 @@ export class TerrainView {
   /** Piso flojo: en las pistas de Carrera el piso frágil ya se ve agrietado, porque se cae con solo pisarlo. */
   private loose() { return this.t.def.kind === 'race'; }
 
-  private addCell(b: GeoBuilder, i: number, isStatic: boolean) {
+  /** La cuña de una rampa (la celda del plano `i`): una losa con bisel apoyada sobre el piso. */
+  private addWedge(b: GeoBuilder, i: number) {
     const t = this.t;
     const c = t.cells[i];
     const bb = t.cellBounds(i);
@@ -144,14 +104,10 @@ export class TerrainView {
 
     // Color de la cara superior: damero suave + variación por losa
     const base = new THREE.Color((ix + iz) % 2 ? def.ground : def.ground2);
-    if (c.type === CellType.Wall) base.set(0x8b7b6c);
-    else if (c.level >= 1) base.lerp(new THREE.Color(0xffffff), 0.12);
-    if (c.type === CellType.Ramp) base.multiplyScalar(0.92);
-    // Piso frágil: un tono más claro. En la Carrera se cae al pisarlo, así que ahí se nota de lejos.
-    if (c.fragile >= 0) base.lerp(new THREE.Color(this.loose() ? 0xfff2c0 : 0xffe0a0), this.loose() ? 0.5 : 0.18);
+    if (c.level >= 1) base.lerp(new THREE.Color(0xffffff), 0.12);
+    base.multiplyScalar(0.92);
     base.offsetHSL(0, 0, this.style.jitter(ix, iz) * 0.022);
-    // Las losas firmes del piso llevan manchas de vegetación y senderos; muros y frágiles no (se leen por su color).
-    const organic = c.type !== CellType.Wall && c.fragile < 0;
+    // Las cuñas llevan manchas de vegetación y senderos, como el piso firme.
     const grass = base.clone().offsetHSL(0.075, 0.07, -0.07);
     const dirt = base.clone().offsetHSL(-0.015, -0.1, -0.12);
     // Sombra de contacto: las esquinas pegadas a algo más alto se oscurecen.
@@ -163,7 +119,7 @@ export class TerrainView {
     });
     const tint = (x: number, z: number, k: number) => {
       const col = base.clone();
-      if (organic) col.lerp(grass, this.style.patch(x, z) * 0.75).lerp(dirt, this.style.path(x, z) * 0.8);
+      col.lerp(grass, this.style.patch(x, z) * 0.75).lerp(dirt, this.style.path(x, z) * 0.8);
       return col.multiplyScalar(ao[k]);
     };
     const uvOf = (x: number, z: number) => [0.004 + ((x - bb.minX) / CELL) * 0.492, 0.996 - ((z - bb.minZ) / CELL) * 0.992];
@@ -207,9 +163,9 @@ export class TerrainView {
     }
     for (const s of sides) {
       const nx = ix + s.dx, nz = iz + s.dz;
-      // Una rampa apoya sobre el piso (que ya trae su acantilado); una losa frágil es una columna entera que se cae.
-      let n1 = isStatic ? -BEVEL_DROP : ISLAND_BOTTOM, n2 = n1;
-      if (isStatic && nx >= 0 && nz >= 0 && nx < t.w && nz < t.h) {
+      // Una rampa apoya sobre el piso, que ya trae su acantilado.
+      let n1 = -BEVEL_DROP, n2 = n1;
+      if (nx >= 0 && nz >= 0 && nx < t.w && nz < t.h) {
         const ni = nz * t.w + nx;
         const nc = t.cells[ni];
         if (nc.type !== CellType.Void && nc.fragile < 0) {

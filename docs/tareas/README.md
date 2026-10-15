@@ -62,7 +62,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [12](12-terreno-sobre-la-malla.md) | 07, 11 | El terreno consulta la malla (todavía cuadrada) y las rampas pasan a ser piezas |
 | [x] | [13](13-colision-contra-poligonos.md) | 12 | El movimiento choca contra polígonos y desliza con la normal real |
 | [x] | [14](14-malla-organica-en-el-nucleo.md) | 13 | La simulación corre sobre la malla orgánica, sembrada por partida |
-| [ ] | [15](15-dibujo-del-terreno.md) | 14 | El terreno se dibuja desde los polígonos: costa, acantilados, muros, losas |
+| [x] | [15](15-dibujo-del-terreno.md) | 14 | El terreno se dibuja desde los polígonos: costa, acantilados, muros, losas |
 | [ ] | [16](16-dibujo-del-resto.md) | 15 | Decoración, artefactos y minimapa siguen a la malla |
 | [ ] | [17](17-malla-encender-y-pulir.md) | 16 | La malla orgánica queda prendida en los cuatro juegos |
 | [ ] | [20](20-plano-con-alturas.md) | 17 | Mapas con más de dos niveles y rampas largas |
