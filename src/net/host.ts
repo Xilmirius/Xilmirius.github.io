@@ -345,7 +345,7 @@ export class HostSession {
     this.brains.clear();
     for (const ch of this.sim.chars) if (ch.bot) this.brains.set(ch.id, new BotBrain(s.botLevel, seed + ch.id));
     const rosterInfo: RosterInfo[] = this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: c.name, team: c.team, hero: c.hero, bot: c.bot, hat: c.hat }));
-    this.init = { settings: s, roster: rosterInfo, seed, tick: 0, matchId: uuid4(), match: ++this.matchNum };
+    this.init = { settings: s, roster: rosterInfo, seed, tick: 0, matchId: uuid4(), match: ++this.matchNum, mesh: this.sim.terrain.mesh.hash };
     if (this.cup) this.init.cup = { round: this.cup.round, maps: this.cup.maps, points: { ...this.cup.points } };
     this.lobby.inMatch = true;
     this.frames.clear();

@@ -234,6 +234,35 @@ Sobre el piso firme no se ven las celdas, como hoy. Cada ambientación puede ped
 - `MatchInit` lleva una huella de la malla del host. El cliente la compara con la suya al armarla y, si difieren,
   avisa: jugar con mallas distintas es caminar sobre piso que el host no ve.
 
+### Cómo quedó (tarea 14)
+
+- **El ajuste** es `MatchSettings.organic` (apagado por defecto, sin botón en la sala: se prende desde la consola con
+  `__rubble.session.setSettings({ organic: true })` o en un script con `settings: { ..., organic: true }`).
+- **Quién arma la malla.** `new Terrain(mapId, { organic, seed })`. La simulación (`Simulation`) usa la semilla de la
+  partida (`SimConfig.seed`, que es `MatchInit.seed`); la vista del host y la de cada cliente (`GameView`, con
+  `ViewOptions.organic` y `.seed`) usan la de `MatchInit`; la vitrina del menú, la suya. Arena y Asedio piden la malla
+  espejada (`isMirrored`). Si la orgánica no pasa su comprobación en cinco semillas, la partida usa la cuadrada y deja un
+  aviso en la consola (`Terrain.meshFellBack`).
+- **La huella** viaja en `MatchInit.mesh` (`TerrainMesh.hash`). El cliente la compara al armar su vista
+  (`MatchRunner.checkMesh`) y, si no coincide, lo dice en pantalla y en la consola. `PROTOCOL_VERSION` subió a 19.
+- **Lo que suponía que el piso termina donde termina la celda del plano**, revisado:
+  - *Puertas de la Carrera:* `Gate.cells` sigue siendo la franja real (reaparecer, medir el avance) y `Gate.detect` es la que
+    cuenta para saber si alguien la pasó; con la orgánica suma las celdas de vacío del plano pegadas a la puerta.
+  - *Carriles de bolas:* con la orgánica `GadgetSpawn.len` se mide caminando el piso real desde el lanzabolas (en pasos de
+    10 cm, afinando el borde al milímetro); con la cuadrada sigue contando celdas, así que no cambia nada.
+  - *Losa que se rearma:* "hay alguien encima" mira la caja de la losa real (`Terrain.slabBounds`: todas las celdas de la malla que
+    salieron de esa celda frágil) y no la de la celda del plano.
+  - *Salidas y reapariciones:* son centros de celda del plano, que la regla de §2 deja siempre sobre piso. La excepción eran los
+    héroes que no entran en los puntos de salida y aparecen 0,95 m al costado (`Simulation.spawnPoint`): con la orgánica, si ese
+    lugar no tiene un piso parejo con el del punto o está tapado, salen en el punto.
+  - *Bots y zombis:* caminan de centro a centro del plano y siguen sirviendo sin cambios (medido en la tarea).
+- **Costo.** En la orgánica `cellsNear` probaba la forma de todas las celdas de alrededor y se llevaba la mitad del tiempo de una
+  partida de Horda (3 veces más lenta que la cuadrada). Ahora `blockAt` y `contacts` le piden solo las celdas más altas que los
+  pies del cuerpo (`cellsNear(..., above)`), cada balde del índice recuerda la celda más alta que tiene (`bTop`) y los baldes pasaron
+  de 2 m a 1 m; las celdas llevan sus lados precalculados. Quedó en +15 % sobre la cuadrada.
+- **Cómo se mide:** `npm run tool:race`, `tool:horde` y `tool:stuck` aceptan `--organic`; `npm run tool:mesh [--organic]` corre Arena y
+  Asedio con bots, mide la simetría de la malla de cada mapa y imprime la huella de cada mapa con cinco semillas.
+
 ## 9. Lo que no entra
 
 - Un editor de mapas sobre la malla. Los mapas se siguen escribiendo como planos.

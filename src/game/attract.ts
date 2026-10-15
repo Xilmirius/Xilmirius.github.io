@@ -67,9 +67,10 @@ export class AttractMode {
       ...DEFAULT_SETTINGS, mode: g.id === 'arena' ? 'kills' : g.modes[0], map, theme: (g.demo.tour && themeOf(map)) || g.demo.theme,
       killTarget: 9999, timeLimit: 99999, lives: 5,
     });
-    this.sim = new Simulation({ settings, roster, seed: Date.now() % 100000 });
+    const seed = Date.now() % 100000;
+    this.sim = new Simulation({ settings, roster, seed });
     this.brains = this.sim.chars.map((c) => new BotBrain(2, c.id * 7));
-    this.view = new GameView(this.container, settings.map, this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: '', team: c.team, hero: c.hero, bot: true, hat: ['crown', 'party', 'halo', 'horns'][c.id % 4] })), '-', { shadows: false, pixelRatio: 1, post: false, theme: settings.theme });
+    this.view = new GameView(this.container, settings.map, this.sim.chars.map((c) => ({ id: c.id, pid: c.pid, name: '', team: c.team, hero: c.hero, bot: true, hat: ['crown', 'party', 'halo', 'horns'][c.id % 4] })), '-', { shadows: false, pixelRatio: 1, post: false, theme: settings.theme, organic: settings.organic, seed });
     this.view.renderer.domElement.classList.add('attract');
     this.frames = new FrameBuffer();
     this.endT = 0;

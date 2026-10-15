@@ -58,6 +58,9 @@ export interface ViewOptions {
   pickups?: 'materials' | 'ult' | 'none' | 'scrap';
   /** Reglas con vida (Horda): los nombres llevan una barra de vida en vez de las etapas del heat. */
   health?: boolean;
+  /** Terreno con la malla orgánica y su semilla: tienen que ser los de la simulación del host (docs/MALLA.md §8). */
+  organic?: boolean;
+  seed?: number;
 }
 
 /** Los textos grandes de peleas ajenas solo se muestran si pasan cerca tuyo (menos ruido). */
@@ -130,7 +133,7 @@ export class GameView {
   onLocalPickup: (sx: number, sy: number, mat: number) => void = () => {};
 
   constructor(private container: HTMLElement, mapId: string, private roster: RosterInfo[], localPid: string, opts: ViewOptions) {
-    this.terrain = new Terrain(mapId);
+    this.terrain = new Terrain(mapId, { organic: opts.organic, seed: opts.seed });
     this.cw = new CollisionWorld(this.terrain);
     const def = this.terrain.def;
     const theme = getTheme(opts.theme);

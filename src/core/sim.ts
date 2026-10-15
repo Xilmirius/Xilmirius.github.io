@@ -200,7 +200,7 @@ export class Simulation {
     this.coop = sidesOf(this.settings) === 'coop';
     this.rules = rulesFor(this.settings);
     this.rng = new Rng(cfg.seed);
-    this.terrain = new Terrain(this.settings.map);
+    this.terrain = new Terrain(this.settings.map, { organic: !!this.settings.organic, seed: cfg.seed });
     this.cw = new CollisionWorld(this.terrain);
     this.mode = createMode(this.settings.mode);
 
@@ -609,7 +609,13 @@ export class Simulation {
       // Si hay más héroes que puntos, los que sobran salen al lado (no encimados).
       const i = ch.id - 1, lap = Math.floor(i / pts.length);
       const p = pts[i % pts.length];
-      return { ...p, x: p.x + lap * 0.95 * (p.x < 0 ? 1 : -1) };
+      let x = p.x + lap * 0.95 * (p.x < 0 ? 1 : -1);
+      // Con la malla orgánica el piso del costado puede no estar: si no hay uno parejo con el del punto, sale en el punto.
+      if (lap > 0 && this.terrain.mesh.mode === 'organic') {
+        const g = this.terrain.groundAt(p.x, p.z);
+        if (this.terrain.groundAt(x, p.z) !== g || this.cw.blockAt(x, p.z, CHAR_RADIUS, g)) x = p.x;
+      }
+      return { ...p, x };
     }
     return { ...pts[idx % pts.length] };
   }
@@ -2077,7 +2083,7 @@ export class Simulation {
         // El piso se rearma solo (Asedio): las líneas no quedan cortadas para siempre.
         t.tileTimer[fi] += DT;
         if (t.tileTimer[fi] >= TILE_CRUMBLE + regen) {
-          const b = t.cellBounds(t.fragile[fi]);
+          const b = t.slabBounds(fi);
           const inside = this.bodies.some((c) => c.alive && c.pos.x > b.minX - 0.5 && c.pos.x < b.maxX + 0.5 && c.pos.z > b.minZ - 0.5 && c.pos.z < b.maxZ + 0.5 && c.pos.y < 0.2);
           if (inside) { t.tileTimer[fi] -= 1; continue; }
           t.tileHp[fi] = TILE_HP;

@@ -110,7 +110,8 @@ export class MatchRunner {
     this.heroId = me ? me.hero : null;
     this.teamColor = TEAM_COLORS[(me?.team ?? 0) % TEAM_COLORS.length];
     for (const r of init.roster) this.teams.set(r.id, r.team);
-    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups, health: this.rules.health });
+    this.view = new GameView(container, init.settings.map, init.roster, session.localPid, { shadows: prefs.shadows, pixelRatio: prefs.hiDpi ? 2 : 1, post: prefs.post, theme: init.settings.theme, pickups: this.rules.pickups, health: this.rules.health, organic: !!init.settings.organic, seed: init.seed });
+    this.checkMesh(init);
     this.cw = new CollisionWorld(this.view.terrain);
     this.hud = new Hud(container, init.roster, this.localId, this.rules, (c) => this.command(c), this.view.terrain);
     if (init.settings.mode === 'race') this.hud.introRace(init.cup);
@@ -146,6 +147,14 @@ export class MatchRunner {
       this.frame();
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /** El cliente predice contra su propia copia del terreno: si la huella de su malla no es la del host, hay pisos que el host no ve. */
+  private checkMesh(init: MatchInit) {
+    const mine = this.view.terrain.mesh.hash;
+    if (init.mesh === undefined || init.mesh === mine) return;
+    console.warn(`[terreno] la malla de esta partida no coincide con la del host (${mine} contra ${init.mesh}).`);
+    toast('El terreno de tu partida no coincide con el del host: podés ver pisos que él no ve. Volvé a entrar a la sala.', 'error', 9000);
   }
 
   private onResize = () => this.view.resize();

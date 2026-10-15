@@ -3,7 +3,7 @@
 import { CELL, ISLAND_BOTTOM, LEVEL_H, TILE_HP, WALL_TOP } from './constants';
 import { CONTACT_CELL, CONTACT_RAMP, rectContact, type ContactSink } from './contact';
 import { circleOverlapsBox, type V3 } from './math';
-import { buildSquareMesh, wedgeTop, type TerrainMesh } from './terrainMesh';
+import { buildOrganicMesh, buildSquareMesh, wedgeTop, type TerrainMesh } from './terrainMesh';
 import type { GadgetKind, GadgetSpawn } from './gadgets';
 import type { Family } from './types';
 import { MAPS, type MapDef } from './maps';
@@ -44,8 +44,15 @@ const GADGET_CHARS: Record<string, GadgetKind> = { p: 'bumper', r: 'rotor', y: '
 /** Lanzabolas: la letra dice hacia dónde ruedan las bolas [dx, dz] (el norte es arriba en el mapa). */
 const ROLLER_CHARS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 
-/** Puerta de la Carrera: una franja de celdas que hay que pisar (punto de control o meta). */
-export interface Gate { x: number; z: number; cells: Set<number> }
+/**
+ * Puerta de la Carrera: una franja de celdas que hay que pisar (punto de control o meta). `cells` son las celdas reales
+ * (sirven para reaparecer y para medir el avance); `detect` son las que cuentan para saber si alguien la pasó: con la malla
+ * orgánica el piso puede asomar hasta 1 m fuera de la celda del plano, así que suma las celdas de vacío que la rodean.
+ */
+export interface Gate { x: number; z: number; cells: Set<number>; detect: Set<number> }
+
+/** Cómo se arma el terreno: con la malla orgánica sembrada por `seed` (si no pasa su comprobación, con la cuadrada). */
+export interface TerrainOptions { organic?: boolean; seed?: number }
 
 export class Terrain {
   readonly def: MapDef;
@@ -79,10 +86,14 @@ export class Terrain {
    * (`cells`, `cellIndexAt`, `isWalkable`...) sigue siendo la capa lógica.
    */
   mesh!: TerrainMesh;
+  /** Se pidió la malla orgánica y ninguna semilla pasó la comprobación: el terreno quedó cuadrado. */
+  meshFellBack = false;
+  /** La caja que envuelve a cada losa frágil (4 números por losa: minX, maxX, minZ, maxZ). */
+  private slabBox!: Float64Array;
   private nearBuf: number[] = [];
   private sideBuf = new Float64Array(4);
 
-  constructor(mapId: string) {
+  constructor(mapId: string, opts: TerrainOptions = {}) {
     const def = MAPS[mapId] ?? MAPS.cantera;
     this.def = def;
     this.h = def.rows.length;
@@ -145,25 +156,14 @@ export class Terrain {
         this.cells.push(cell);
       }
     }
-    // Lanzabolas: las bolas ruedan hasta el borde de la última celda de piso llano que tengan por delante.
-    for (const g of this.gadgets) {
-      if (g.kind !== 'roller') continue;
-      let ix = Math.floor((g.x - this.originX) / CELL), iz = Math.floor((g.z - this.originZ) / CELL), n = 0;
-      for (;;) {
-        ix += g.dx!; iz += g.dz!;
-        const c = ix < 0 || iz < 0 || ix >= this.w || iz >= this.h ? null : this.cells[iz * this.w + ix];
-        if (!c || c.type !== CellType.Floor || c.level !== 0) break;
-        n++;
-      }
-      g.len = (n + 0.5) * CELL;
-    }
     this.zonePoints.push(...this.groupCells(zoneCells));
     this.lairs.push(...this.groupCells(lairCells));
     for (const n of [...gateCells.keys()].sort((a, b) => a - b)) {
       const cells = gateCells.get(n)!;
       let x = 0, z = 0;
       for (const ci of cells) { const c = this.cellCenter(ci % this.w, Math.floor(ci / this.w)); x += c.x; z += c.z; }
-      this.gates.push({ x: x / cells.length, z: z / cells.length, cells: new Set(cells) });
+      const set = new Set(cells);
+      this.gates.push({ x: x / cells.length, z: z / cells.length, cells: set, detect: set });
     }
     for (const lane of def.lanes ?? []) {
       this.lanes.push(lane.map(([ix, iz]) => { const c = this.cellCenter(ix, iz); return { x: c.x, y: 0, z: c.z }; }));
@@ -173,6 +173,93 @@ export class Terrain {
     this.tileHp = new Float32Array(n).fill(TILE_HP);
     this.tileTimer = new Float32Array(n);
     this.mesh = buildSquareMesh(this);
+    if (opts.organic) {
+      const r = buildOrganicMesh(this, opts.seed ?? 0);
+      if (r.mesh) this.mesh = r.mesh;
+      else {
+        this.meshFellBack = true;
+        console.warn(`[terreno] la malla orgánica de ${mapId} no pasó su comprobación en ${r.attempts} semillas; la partida usa la cuadrada.`, r.problems);
+      }
+    }
+    this.measureRollers();
+    this.widenGates();
+    this.measureSlabs();
+  }
+
+  /**
+   * Lanzabolas: las bolas ruedan hasta donde termina el piso llano que tienen por delante. En la malla cuadrada es el borde
+   * de la última celda de piso de nivel 0; en la orgánica se mide caminando el piso real (docs/MALLA.md §5).
+   */
+  private measureRollers() {
+    for (const g of this.gadgets) {
+      if (g.kind !== 'roller') continue;
+      if (this.mesh.mode === 'square') {
+        let ix = Math.floor((g.x - this.originX) / CELL), iz = Math.floor((g.z - this.originZ) / CELL), n = 0;
+        for (;;) {
+          ix += g.dx!; iz += g.dz!;
+          const c = ix < 0 || iz < 0 || ix >= this.w || iz >= this.h ? null : this.cells[iz * this.w + ix];
+          if (!c || c.type !== CellType.Floor || c.level !== 0) break;
+          n++;
+        }
+        g.len = (n + 0.5) * CELL;
+        continue;
+      }
+      const flat = (d: number) => this.groundAt(g.x + g.dx! * d, g.z + g.dz! * d) === 0;
+      const STEP = 0.1, MAX = (this.w + this.h) * CELL;
+      let good = 0;
+      while (good + STEP < MAX && flat(good + STEP)) good += STEP;
+      // El borde está entre `good` y `good + STEP`: se afina a la mitad hasta el milímetro.
+      let bad = good + STEP;
+      for (let i = 0; i < 12; i++) { const mid = (good + bad) / 2; if (flat(mid)) good = mid; else bad = mid; }
+      g.len = good;
+    }
+  }
+
+  /** Con la malla orgánica, una puerta detecta también en las celdas de vacío del plano que la rodean. */
+  private widenGates() {
+    if (this.mesh.mode !== 'organic') return;
+    for (const g of this.gates) {
+      const wide = new Set(g.cells);
+      for (const ci of g.cells) {
+        const cx = ci % this.w, cz = Math.floor(ci / this.w);
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = cx + dx, nz = cz + dz;
+            if (nx < 0 || nz < 0 || nx >= this.w || nz >= this.h) continue;
+            const ni = nz * this.w + nx;
+            if (this.cells[ni].type === CellType.Void) wide.add(ni);
+          }
+        }
+      }
+      g.detect = wide;
+    }
+  }
+
+  private measureSlabs() {
+    const n = this.fragile.length, m = this.mesh;
+    this.slabBox = new Float64Array(n * 4);
+    for (let fi = 0; fi < n; fi++) {
+      const b = this.cellBounds(this.fragile[fi]);
+      this.slabBox.set([b.minX, b.maxX, b.minZ, b.maxZ], fi * 4);
+    }
+    if (m.mode !== 'organic') return;
+    const seen = new Uint8Array(n);
+    for (let q = 0; q < m.count; q++) {
+      const fi = m.slab[q];
+      if (fi < 0) continue;
+      const k = fi * 4;
+      if (!seen[fi]) { seen[fi] = 1; this.slabBox[k] = m.minX[q]; this.slabBox[k + 1] = m.maxX[q]; this.slabBox[k + 2] = m.minZ[q]; this.slabBox[k + 3] = m.maxZ[q]; continue; }
+      if (m.minX[q] < this.slabBox[k]) this.slabBox[k] = m.minX[q];
+      if (m.maxX[q] > this.slabBox[k + 1]) this.slabBox[k + 1] = m.maxX[q];
+      if (m.minZ[q] < this.slabBox[k + 2]) this.slabBox[k + 2] = m.minZ[q];
+      if (m.maxZ[q] > this.slabBox[k + 3]) this.slabBox[k + 3] = m.maxZ[q];
+    }
+  }
+
+  /** La caja que envuelve a la losa frágil `fi`: la celda del plano en la cuadrada; en la orgánica, todo lo que cubren sus celdas de la malla. */
+  slabBounds(fi: number) {
+    const k = fi * 4;
+    return { minX: this.slabBox[k], maxX: this.slabBox[k + 1], minZ: this.slabBox[k + 2], maxZ: this.slabBox[k + 3] };
   }
 
   /** Agrupa celdas marcadas contiguas en un solo punto (el promedio). */
@@ -290,8 +377,8 @@ export class Terrain {
    */
   blockAt(x: number, z: number, r: number, feetY: number, stepUp: number): TerrainBlock | null {
     const m = this.mesh;
-    const near = m.cellsNear(x, z, r, this.nearBuf);
     const lim = feetY + stepUp;
+    const near = m.cellsNear(x, z, r, this.nearBuf, lim);
     let hit = false, bsrc = Infinity, btop = 0, x0 = 0, x1 = 0, z0 = 0, z1 = 0;
     for (let k = 0; k < near.length; k++) {
       const q = near[k];
@@ -323,8 +410,8 @@ export class Terrain {
    */
   contacts(x: number, z: number, r: number, feetY: number, stepUp: number, sink: ContactSink) {
     const m = this.mesh;
-    const near = m.cellsNear(x, z, r, this.nearBuf);
     const lim = feetY + stepUp;
+    const near = m.cellsNear(x, z, r, this.nearBuf, lim);
     for (let k = 0; k < near.length; k++) {
       const q = near[k];
       if (m.top[q] > lim && this.meshSolid(q)) this.cellContacts(q, x, z, r, lim, sink);

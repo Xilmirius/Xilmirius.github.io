@@ -66,7 +66,7 @@ export interface OrganicResult {
 export const ORGANIC_ATTEMPTS = 5;
 const SEED_STEP = 65537;
 /** Lado de los baldes del índice espacial. */
-const BUCKET = 2;
+const BUCKET = 1;
 const EPS = 1e-9;
 
 /** ¿Las dos mitades del plano son espejo una de la otra? Arena y Asedio se arman así y la malla se espeja. */
@@ -109,6 +109,12 @@ export class TerrainMesh {
   readonly minZ: Float64Array;
   readonly maxZ: Float64Array;
   /** Solo en la cuadrada: la celda de la malla de cada celda del plano (o -1), para responder sin buscar. */
+  /** Cada lado k de cada celda q (índice q·4+k): su vértice inicial, su vector y el inverso de su largo al cuadrado (para las consultas). */
+  private readonly edgeAx: Float64Array;
+  private readonly edgeAz: Float64Array;
+  private readonly edgeEx: Float64Array;
+  private readonly edgeEz: Float64Array;
+  private readonly edgeIl: Float64Array;
   private readonly grid: Int32Array | null;
   private readonly gw: number;
   private readonly gh: number;
@@ -120,6 +126,8 @@ export class TerrainMesh {
   private readonly nbz: number;
   private readonly bStart: Int32Array;
   private readonly bItems: Int32Array;
+  /** La altura de la celda más alta de cada balde: un balde de puro piso bajo se salta entero en `cellsNear`. */
+  private readonly bTop: Float64Array;
   private readonly mark: Int32Array;
   private gen = 0;
 
@@ -156,6 +164,17 @@ export class TerrainMesh {
       }
       this.minX[q] = x0; this.maxX[q] = x1; this.minZ[q] = z0; this.maxZ[q] = z1;
     }
+    this.edgeAx = new Float64Array(this.count * 4); this.edgeAz = new Float64Array(this.count * 4);
+    this.edgeEx = new Float64Array(this.count * 4); this.edgeEz = new Float64Array(this.count * 4);
+    this.edgeIl = new Float64Array(this.count * 4);
+    for (let q = 0; q < this.count; q++) {
+      for (let k = 0; k < 4; k++) {
+        const a = d.quads[q * 4 + k], b = d.quads[q * 4 + ((k + 1) & 3)], e = q * 4 + k;
+        const ex = d.vx[b] - d.vx[a], ez = d.vz[b] - d.vz[a], l2 = ex * ex + ez * ez;
+        this.edgeAx[e] = d.vx[a]; this.edgeAz[e] = d.vz[a]; this.edgeEx[e] = ex; this.edgeEz[e] = ez;
+        this.edgeIl[e] = l2 > 0 ? 1 / l2 : 0;
+      }
+    }
     // Índice por baldes: cada celda en todos los baldes que toca su caja.
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < d.vx.length; i++) {
@@ -188,6 +207,10 @@ export class TerrainMesh {
     this.bItems = new Int32Array(counts[this.nbx * this.nbz]);
     const fill = counts.slice(0, this.nbx * this.nbz);
     for (let q = 0; q < this.count; q++) range(q, (b) => { this.bItems[fill[b]++] = q; });
+    this.bTop = new Float64Array(this.nbx * this.nbz).fill(-Infinity);
+    for (let b = 0; b < this.nbx * this.nbz; b++) {
+      for (let n = counts[b]; n < counts[b + 1]; n++) if (this.top[this.bItems[n]] > this.bTop[b]) this.bTop[b] = this.top[this.bItems[n]];
+    }
     this.mark = new Int32Array(this.count);
     // Huella: vértices (en 1/256 m) y clases de cada celda.
     let h = 2166136261;
@@ -205,9 +228,8 @@ export class TerrainMesh {
 
   /** ¿El punto está dentro de la celda q (el borde cuenta)? Los cuadriláteros giran con área positiva. */
   contains(q: number, x: number, z: number): boolean {
-    for (let k = 0; k < 4; k++) {
-      const a = this.quads[q * 4 + k], b = this.quads[q * 4 + ((k + 1) & 3)];
-      if ((this.vx[b] - this.vx[a]) * (z - this.vz[a]) - (this.vz[b] - this.vz[a]) * (x - this.vx[a]) < -EPS) return false;
+    for (let e = q * 4; e < q * 4 + 4; e++) {
+      if (this.edgeEx[e] * (z - this.edgeAz[e]) - this.edgeEz[e] * (x - this.edgeAx[e]) < -EPS) return false;
     }
     return true;
   }
@@ -223,17 +245,16 @@ export class TerrainMesh {
     const b = j * this.nbx + i;
     for (let n = this.bStart[b]; n < this.bStart[b + 1]; n++) {
       const q = this.bItems[n];
+      if (x < this.minX[q] || x > this.maxX[q] || z < this.minZ[q] || z > this.maxZ[q]) continue;
       if (this.contains(q, x, z)) return q;
     }
     return -1;
   }
 
-  /** Distancia al cuadrado del punto al lado k de la celda q. */
-  private edgeDist2(q: number, k: number, x: number, z: number): number {
-    const a = this.quads[q * 4 + k], b = this.quads[q * 4 + ((k + 1) & 3)];
-    const ax = this.vx[a], az = this.vz[a], ex = this.vx[b] - ax, ez = this.vz[b] - az;
-    const len2 = ex * ex + ez * ez;
-    let u = len2 > 0 ? ((x - ax) * ex + (z - az) * ez) / len2 : 0;
+  /** Distancia al cuadrado del punto al lado `e` (= celda·4 + lado). */
+  private edgeDist2(e: number, x: number, z: number): number {
+    const ax = this.edgeAx[e], az = this.edgeAz[e], ex = this.edgeEx[e], ez = this.edgeEz[e];
+    let u = ((x - ax) * ex + (z - az) * ez) * this.edgeIl[e];
     u = u < 0 ? 0 : u > 1 ? 1 : u;
     const dx = x - (ax + ex * u), dz = z - (az + ez * u);
     return dx * dx + dz * dz;
@@ -242,15 +263,16 @@ export class TerrainMesh {
   /**
    * Las celdas que puede tocar un círculo (para la colisión). Llena `out` y lo devuelve. En la cuadrada son las de la caja
    * del círculo, en orden de fila (puede traer alguna que el círculo no toca: quien pregunta lo verifica); en la orgánica,
-   * las que el círculo toca de verdad.
+   * las que el círculo toca de verdad. Solo trae las celdas más altas que `above` (quien pregunta suele descartar las de piso
+   * por el que ya camina antes de mirarlas, y así ni se prueba su forma).
    */
-  cellsNear(x: number, z: number, r: number, out: number[] = []): number[] {
+  cellsNear(x: number, z: number, r: number, out: number[] = [], above = -Infinity): number[] {
     out.length = 0;
     if (this.grid) {
       const i0 = Math.max(0, Math.floor((x - r - this.gx0) / CELL)), i1 = Math.min(this.gw - 1, Math.floor((x + r - this.gx0) / CELL));
       const j0 = Math.max(0, Math.floor((z - r - this.gz0) / CELL)), j1 = Math.min(this.gh - 1, Math.floor((z + r - this.gz0) / CELL));
       for (let j = j0; j <= j1; j++) {
-        for (let i = i0; i <= i1; i++) { const q = this.grid[j * this.gw + i]; if (q >= 0) out.push(q); }
+        for (let i = i0; i <= i1; i++) { const q = this.grid[j * this.gw + i]; if (q >= 0 && this.top[q] > above) out.push(q); }
       }
       return out;
     }
@@ -261,12 +283,15 @@ export class TerrainMesh {
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const b = j * this.nbx + i;
+        if (this.bTop[b] <= above) continue;
         for (let n = this.bStart[b]; n < this.bStart[b + 1]; n++) {
           const q = this.bItems[n];
-          if (this.mark[q] === g) continue;
+          if (this.mark[q] === g || this.top[q] <= above) continue;
           this.mark[q] = g;
-          if (this.contains(q, x, z) || this.edgeDist2(q, 0, x, z) <= r2 || this.edgeDist2(q, 1, x, z) <= r2
-            || this.edgeDist2(q, 2, x, z) <= r2 || this.edgeDist2(q, 3, x, z) <= r2) out.push(q);
+          if (this.maxX[q] < x - r || this.minX[q] > x + r || this.maxZ[q] < z - r || this.minZ[q] > z + r) continue;
+          const e = q * 4;
+          if (this.contains(q, x, z) || this.edgeDist2(e, x, z) <= r2 || this.edgeDist2(e + 1, x, z) <= r2
+            || this.edgeDist2(e + 2, x, z) <= r2 || this.edgeDist2(e + 3, x, z) <= r2) out.push(q);
         }
       }
     }

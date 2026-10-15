@@ -178,7 +178,7 @@ export class RaceMode implements GameMode {
       if (!c.alive) continue;
       const i = this.next.get(c.id) ?? 0;
       if (i >= n) continue;
-      if (!t.gates[i].cells.has(t.cellIndexAt(c.pos.x, c.pos.z)) || c.pos.y > 4) continue;
+      if (!t.gates[i].detect.has(t.cellIndexAt(c.pos.x, c.pos.z)) || c.pos.y > 4) continue;
       this.next.set(c.id, i + 1);
       this.frac.set(c.id, 0);
       const last = i + 1 >= n;

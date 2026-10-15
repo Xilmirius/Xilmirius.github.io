@@ -42,6 +42,8 @@ export interface MatchInit {
   matchId: string;
   /** Número de partida: lo sube el host en cada `startMatch` para que inputs y snapshots no se mezclen entre una partida y la siguiente (p. ej. al continuar una copa). */
   match: number;
+  /** Huella de la malla del terreno del host (`TerrainMesh.hash`): el cliente la compara con la suya al armarla. */
+  mesh?: number;
   /** Copa en curso: qué carrera es esta y cómo viene la tabla. */
   cup?: CupInfo;
 }

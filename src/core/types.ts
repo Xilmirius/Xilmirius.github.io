@@ -50,6 +50,11 @@ export interface MatchSettings {
   difficulty: 1 | 2 | 3;
   /** Carrera: cuántas pistas seguidas se corren sumando puntos (1 = una carrera suelta). Ver core/cup.ts. */
   cup: number;
+  /**
+   * Terreno con la malla orgánica (docs/MALLA.md), sembrada con la semilla de la partida. Apagado por defecto: sin él
+   * el terreno usa la malla cuadrada, que es el plano tal cual. Todavía no tiene botón en la sala.
+   */
+  organic: boolean;
 }
 
 export const DEFAULT_SETTINGS: MatchSettings = {
@@ -66,6 +71,7 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   theme: 'neon',
   difficulty: 2,
   cup: 1,
+  organic: false,
 };
 
 export interface RosterEntry {
