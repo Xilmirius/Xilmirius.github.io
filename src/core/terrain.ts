@@ -1,6 +1,7 @@
 // Terreno como grilla de alturas (heightfield por celdas). Simple, barato de sincronizar y
 // suficiente para "desniveles limitados de 1-2 niveles" (GDD §7).
 import { CELL, ISLAND_BOTTOM, LEVEL_H, TILE_HP, WALL_TOP } from './constants';
+import { CONTACT_CELL, CONTACT_RAMP, rectContact, type ContactSink } from './contact';
 import { circleOverlapsBox, type V3 } from './math';
 import { buildSquareMesh, wedgeTop, type TerrainMesh } from './terrainMesh';
 import type { GadgetKind, GadgetSpawn } from './gadgets';
@@ -79,6 +80,7 @@ export class Terrain {
    */
   mesh!: TerrainMesh;
   private nearBuf: number[] = [];
+  private sideBuf = new Float64Array(4);
 
   constructor(mapId: string) {
     const def = MAPS[mapId] ?? MAPS.cantera;
@@ -312,6 +314,76 @@ export class Terrain {
       }
     }
     return hit ? { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: btop, cell: bsrc } : null;
+  }
+
+  /**
+   * Los contactos de un círculo (x,z,r) con los pies en feetY contra lo que no puede subir (docs/MALLA.md §6): de las
+   * celdas de la malla solo cuentan los lados expuestos (los que dan a una celda que no bloquea, o a nada), y las
+   * cuñas y los descansos de las rampas son rectángulos. Los entrega a `sink`; la lista de qué bloquea es la de `blockAt`.
+   */
+  contacts(x: number, z: number, r: number, feetY: number, stepUp: number, sink: ContactSink) {
+    const m = this.mesh;
+    const near = m.cellsNear(x, z, r, this.nearBuf);
+    const lim = feetY + stepUp;
+    for (let k = 0; k < near.length; k++) {
+      const q = near[k];
+      if (m.top[q] > lim && this.meshSolid(q)) this.cellContacts(q, x, z, r, lim, sink);
+    }
+    const rs = m.ramps;
+    for (let i = 0; i < rs.length; i++) {
+      const p = rs[i], w = p.wedge;
+      if (circleOverlapsBox(x, z, r, w.minX, w.maxX, w.minZ, w.maxZ)) {
+        const top = wedgeTop(p, x, z);
+        if (top > lim) rectContact(sink, x, z, r, w.minX, w.maxX, w.minZ, w.maxZ, top, CONTACT_RAMP, p.src, null);
+      }
+      if (m.mode === 'organic') {
+        const l = p.landing, top = (p.level + 1) * LEVEL_H;
+        if (top > lim) rectContact(sink, x, z, r, l.minX, l.maxX, l.minZ, l.maxZ, top, CONTACT_RAMP, p.src, null);
+      }
+    }
+  }
+
+  /**
+   * Contactos de un círculo con una celda de la malla que bloquea. Un lado es expuesto si la vecina de ese lado no bloquea.
+   * Si el centro está afuera, cuenta cada lado expuesto por delante del cual está (de frente, o por su vértice de salida:
+   * cada vértice del contorno lo da el lado que sale de él) y la normal sale del punto más cercano. Si el centro está
+   * adentro, se lo saca por el lado expuesto más cercano.
+   */
+  private cellContacts(q: number, x: number, z: number, r: number, lim: number, sink: ContactSink) {
+    const m = this.mesh, base = q * 4, top = m.top[q], src = m.src[q];
+    const s = this.sideBuf;
+    let inside = true;
+    for (let k = 0; k < 4; k++) {
+      const a = m.quads[base + k], b = m.quads[base + ((k + 1) & 3)];
+      const ex = m.vx[b] - m.vx[a], ez = m.vz[b] - m.vz[a];
+      s[k] = ((x - m.vx[a]) * ez - (z - m.vz[a]) * ex) / Math.sqrt(ex * ex + ez * ez);
+      if (s[k] > 1e-9) inside = false;
+    }
+    let best = -1;
+    for (let k = 0; k < 4; k++) {
+      const nb = m.nbr[base + k];
+      if (nb >= 0 && m.top[nb] > lim && this.meshSolid(nb)) continue; // pared interna: lo de atrás también bloquea
+      const a = m.quads[base + k], b = m.quads[base + ((k + 1) & 3)];
+      const ex = m.vx[b] - m.vx[a], ez = m.vz[b] - m.vz[a];
+      const len2 = ex * ex + ez * ez, len = Math.sqrt(len2);
+      if (inside) {
+        if (best < 0 || s[k] > s[best]) best = k;
+        continue;
+      }
+      if (s[k] <= 0 || s[k] >= r) continue;
+      const t = ((x - m.vx[a]) * ex + (z - m.vz[a]) * ez) / len2;
+      if (t >= 1) continue;
+      if (t > 0) { sink.add(ez / len, -ex / len, r - s[k], top, CONTACT_CELL, src, null); continue; }
+      const dx = x - m.vx[a], dz = z - m.vz[a], d2 = dx * dx + dz * dz;
+      if (d2 >= r * r) continue;
+      const d = Math.sqrt(d2);
+      sink.add(dx / d, dz / d, r - d, top, CONTACT_CELL, src, null);
+    }
+    if (best >= 0) {
+      const a = m.quads[base + best], b = m.quads[base + ((best + 1) & 3)];
+      const ex = m.vx[b] - m.vx[a], ez = m.vz[b] - m.vz[a], len = Math.sqrt(ex * ex + ez * ez);
+      sink.add(ez / len, -ex / len, r - s[best], top, CONTACT_CELL, src, null);
+    }
   }
 
   bottom() { return ISLAND_BOTTOM; }

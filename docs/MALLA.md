@@ -167,8 +167,8 @@ Una puerta de la Carrera incluye también las celdas de vacío del plano pegadas
 
 ## 6. Colisión
 
-Hoy el movimiento prueba un eje por vez contra cajas alineadas (`moveAxis` en `src/core/movement.ts`). Con paredes
-en cualquier ángulo eso se traba. Pasa a **mover y deslizar**:
+Antes el movimiento probaba un eje por vez contra cajas alineadas (`moveAxis` en `src/core/movement.ts`). Con paredes
+en cualquier ángulo eso se traba. Pasó a **mover y deslizar** (tarea 13, abajo está cómo quedó):
 
 - Se avanza el paso completo y se busca contra qué quedó encimado el círculo del cuerpo: celdas de la malla más
   altas de lo que puede subir, rampas y obstáculos.
@@ -180,6 +180,32 @@ en cualquier ángulo eso se traba. Pasa a **mover y deslizar**:
   rebote de Gloop, atravesar una cobertura rota, trepar un borde.
 
 Mejora de paso algo de hoy: contra la esquina de una caja el cuerpo ahora la rodea en vez de frenarse.
+
+### Cómo quedó (tarea 13)
+
+`CollisionWorld.contacts(x, z, r, feetY)` devuelve la lista de `Contact` de un círculo: `nx, nz` (unitaria, **de la superficie hacia el
+cuerpo**), `depth`, `top` (la cara de arriba), `kind` (`CONTACT_CELL`, `CONTACT_RAMP` o `CONTACT_OBSTACLE`), `cell` (la celda del
+plano de la que salió, -1 en un obstáculo) y `obstacle`. Bloquea lo mismo que `blockAt`, que sigue para las preguntas de sí o no
+(bots, salidas, separación entre cuerpos). Los objetos de la lista se reusan en la próxima pregunta. La geometría vive en
+`Terrain.contacts` (celdas y rampas) y en `src/core/contact.ts` (un círculo contra un rectángulo).
+
+- **Celdas de la malla.** Un lado es *expuesto* si la vecina de ese lado no bloquea para esa altura de pies. De cada lado expuesto
+  que el cuerpo tiene por delante sale un contacto: de frente si el centro cae en su tramo, y si cae más allá del principio, por el
+  vértice (cada vértice del contorno lo da el lado que sale de él, así que la esquina cuenta una sola vez). Es lo que hace que el
+  cuerpo rodee una esquina. Si el centro está *adentro* de la celda, un solo contacto: el lado expuesto más cercano.
+- **Rampas y obstáculos** son rectángulos. La cuña bloquea según su altura en el punto de la caja más cercano al centro (como antes);
+  el descanso, en la orgánica, con su altura fija.
+- **`stepMove`.** En cada subpaso (los de siempre: hasta 0,3 m) el cuerpo avanza entero y `slide` mira los contactos hasta tres veces.
+  Cada vuelta saca al cuerpo por la normal del más profundo (más 1 mm, para que no quede justo sobre el borde), quita de la velocidad
+  lo que iba contra esa normal y, si era un cuerpo lanzado, la rebota con su restitución. Cada contacto contra el que el cuerpo
+  venía (más de 1 mm/s) deja un `WallHit` con la normal real y la velocidad contra ella. Si pasadas las vueltas sigue metido más de
+  2 cm (un hueco más angosto que el cuerpo), no avanza: vuelve a donde estaba antes del subpaso.
+- **Trepar un borde** es lo mismo de antes con "empujando contra la normal" (`-(wx·nx + wz·nz) > 0,3`) en lugar de "empujando en el
+  eje", y salta 0,6 m más allá en la dirección de la normal.
+- **`depenetrate`** (salir de adentro de un obstáculo que apareció encima) no cambió: los obstáculos siguen siendo cajas, así que
+  sus cuatro salidas ya son las normales de la caja, y además elige la que tiene piso firme.
+- **Quien usaba "chocó en X o en Z"** ahora lee la normal: el rebote de Gloop refleja su dirección contra ella, y el cuerpo que atraviesa
+  una cobertura rota sigue de largo contra la normal a 0,6 de la velocidad del golpe.
 
 ## 7. Dibujo
 

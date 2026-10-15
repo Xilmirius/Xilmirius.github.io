@@ -46,6 +46,7 @@ export interface MoveParams {
 }
 
 export interface WallHit {
+  /** Normal de la superficie (unitaria, hacia el cuerpo) y la velocidad con la que el cuerpo venía contra ella. */
   nx: number; nz: number; speed: number;
   obstacle: Obstacle | null;
   x: number; y: number; z: number;
@@ -189,13 +190,16 @@ export function stepMove(s: MoveState, inp: InputFrame, p: MoveParams, cw: Colli
   // si no, cada paso seguiría chocando y el personaje quedaría trabado.
   depenetrate(s, cw);
 
-  // Horizontal, con subpasos para que los cuerpos rápidos no atraviesen cosas.
-  const dx = s.vel.x * dt, dz = s.vel.z * dt;
-  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz)) / MAX_SUBSTEP));
-  let blockX = false, blockZ = false;
-  for (let i = 0; i < n; i++) {
-    if (!blockX && dx !== 0) blockX = moveAxis(s, true, dx / n, p, cw, out, wx, wz);
-    if (!blockZ && dz !== 0) blockZ = moveAxis(s, false, dz / n, p, cw, out, wx, wz);
+  // Horizontal: se avanza el paso entero y se sacan los contactos por su normal (mover y deslizar, MALLA.md §6), con
+  // subpasos para que los cuerpos rápidos no atraviesen cosas. La velocidad se lee en cada subpaso: un contacto la cambia.
+  if (s.vel.x !== 0 || s.vel.z !== 0) {
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(s.vel.x), Math.abs(s.vel.z)) * dt / MAX_SUBSTEP));
+    for (let i = 0; i < n; i++) {
+      const px = s.pos.x, pz = s.pos.z;
+      s.pos.x += (s.vel.x * dt) / n;
+      s.pos.z += (s.vel.z * dt) / n;
+      slide(s, p, cw, out, wx, wz, px, pz);
+    }
   }
 
   // Vertical
@@ -276,34 +280,37 @@ export function depenetrate(s: MoveState, cw: CollisionWorld) {
   }
 }
 
-function moveAxis(s: MoveState, isX: boolean, d: number, p: MoveParams, cw: CollisionWorld, out: MoveOut, wx: number, wz: number): boolean {
-  const nx = isX ? s.pos.x + d : s.pos.x;
-  const nz = isX ? s.pos.z : s.pos.z + d;
-  const b = cw.blockAt(nx, nz, CHAR_RADIUS, s.pos.y);
-  if (!b) {
-    s.pos.x = nx;
-    s.pos.z = nz;
-    return false;
-  }
-  // Ya encimado con una pared (cayó pegado a una rampa o a una plataforma): alejarse no puede estar prohibido, o queda trabado para siempre.
-  if (cw.blockAt(s.pos.x, s.pos.z, CHAR_RADIUS, s.pos.y)) {
-    const here = Math.hypot(s.pos.x < b.minX ? b.minX - s.pos.x : s.pos.x > b.maxX ? s.pos.x - b.maxX : 0, s.pos.z < b.minZ ? b.minZ - s.pos.z : s.pos.z > b.maxZ ? s.pos.z - b.maxZ : 0);
-    const there = Math.hypot(nx < b.minX ? b.minX - nx : nx > b.maxX ? nx - b.maxX : 0, nz < b.minZ ? b.minZ - nz : nz > b.maxZ ? nz - b.maxZ : 0);
-    if (there > here + 1e-6) {
-      s.pos.x = nx;
-      s.pos.z = nz;
-      return false;
+/** Cuántas veces se vuelve a mirar los contactos en un subpaso (una esquina de dos paredes necesita dos). */
+const SLIDE_PASSES = 3;
+/** Cuánto sobra al sacar al cuerpo de una pared, para que no quede justo sobre el borde. */
+const SKIN = 0.001;
+/** Una penetración que quedó después de todas las vueltas y es más chica que esto se tolera. */
+const FIT_TOL = 0.02;
+/** Una velocidad contra la pared menor que esto no es un golpe. */
+const HIT_MIN = 1e-3;
+
+/**
+ * Mover y deslizar (docs/MALLA.md §6). El cuerpo ya avanzó su paso: se miran los contactos del círculo, se saca al cuerpo
+ * por la normal del más profundo, se le quita a la velocidad lo que iba contra esa normal (un cuerpo lanzado rebota con su
+ * restitución) y se repite hasta `SLIDE_PASSES` veces. Cada contacto contra el que venía el cuerpo es un golpe. Si después de todo
+ * sigue metido (un hueco más angosto que el cuerpo), no avanza: vuelve a `(px, pz)`, donde estaba antes del subpaso.
+ */
+function slide(s: MoveState, p: MoveParams, cw: CollisionWorld, out: MoveOut, wx: number, wz: number, px: number, pz: number) {
+  for (let pass = 0; ; pass++) {
+    const list = cw.contacts(s.pos.x, s.pos.z, CHAR_RADIUS, s.pos.y);
+    if (list.length === 0) return;
+    let c = list[0];
+    for (let i = 1; i < list.length; i++) if (list[i].depth > c.depth) c = list[i];
+    if (pass === SLIDE_PASSES) {
+      if (c.depth > FIT_TOL) { s.pos.x = px; s.pos.z = pz; }
+      return;
     }
-  }
-  // Trepar un borde (recuperación): en el aire, empujando contra una cornisa baja.
-  const rise = b.top - s.pos.y;
-  if (!s.grounded && canAct(s) && !p.lock && rise > 0 && rise <= MANTLE_H && s.vel.y < 5) {
-    const into = (isX ? wx : wz) * Math.sign(d);
-    if (into > 0.3) {
-      const mx = isX ? nx + Math.sign(d) * 0.6 : nx;
-      const mz = isX ? nz : nz + Math.sign(d) * 0.6;
-      const g = cw.groundAt(mx, mz, b.top + 0.05);
-      if (g > -Infinity && g >= b.top - 0.1 && !cw.blockAt(mx, mz, CHAR_RADIUS, g)) {
+    // Trepar un borde (recuperación): en el aire, empujando contra una cornisa baja.
+    const rise = c.top - s.pos.y;
+    if (!s.grounded && canAct(s) && !p.lock && rise > 0 && rise <= MANTLE_H && s.vel.y < 5 && -(wx * c.nx + wz * c.nz) > 0.3) {
+      const mx = s.pos.x - c.nx * 0.6, mz = s.pos.z - c.nz * 0.6;
+      const g = cw.groundAt(mx, mz, c.top + 0.05);
+      if (g > -Infinity && g >= c.top - 0.1 && !cw.blockAt(mx, mz, CHAR_RADIUS, g)) {
         s.pos.x = mx;
         s.pos.z = mz;
         s.pos.y = g;
@@ -313,19 +320,17 @@ function moveAxis(s: MoveState, isX: boolean, d: number, p: MoveParams, cw: Coll
         s.airDashes = AIR_DASHES;
         s.tumble = 0;
         out.mantled = true;
-        return false;
+        return;
       }
     }
+    s.pos.x += c.nx * (c.depth + SKIN);
+    s.pos.z += c.nz * (c.depth + SKIN);
+    const vn = s.vel.x * c.nx + s.vel.z * c.nz;
+    if (vn < -HIT_MIN) {
+      out.wallHits.push({ nx: c.nx, nz: c.nz, speed: -vn, obstacle: c.obstacle, x: s.pos.x, y: s.pos.y, z: s.pos.z });
+      const k = (s.tumble > 0 ? 1 + p.restitution : 1) * -vn;
+      s.vel.x += c.nx * k;
+      s.vel.z += c.nz * k;
+    }
   }
-  const v = isX ? s.vel.x : s.vel.z;
-  out.wallHits.push({
-    nx: isX ? -Math.sign(d) : 0,
-    nz: isX ? 0 : -Math.sign(d),
-    speed: Math.abs(v),
-    obstacle: b.obstacle,
-    x: s.pos.x, y: s.pos.y, z: s.pos.z,
-  });
-  const nv = s.tumble > 0 ? -v * p.restitution : 0;
-  if (isX) s.vel.x = nv; else s.vel.z = nv;
-  return true;
 }

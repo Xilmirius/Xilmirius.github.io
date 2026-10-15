@@ -1,10 +1,12 @@
 // Mundo de colisión: terreno (grilla) + obstáculos (destructibles y estructuras, AABB con altura).
 // Lo usan el host (simulación completa) y el cliente (predicción de su propio movimiento).
 import { CHAR_HEIGHT, ISLAND_BOTTOM, STEP_UP } from './constants';
+import { CONTACT_OBSTACLE, rectContact, type ContactSink } from './contact';
 import { circleOverlapsBox } from './math';
 import { Terrain } from './terrain';
 
 export { circleOverlapsBox };
+export { CONTACT_CELL, CONTACT_OBSTACLE, CONTACT_RAMP } from './contact';
 
 export interface Obstacle {
   id: number;
@@ -20,9 +22,54 @@ export interface BlockHit {
   cell: number;
 }
 
+/**
+ * Un contacto de un círculo con algo que bloquea (docs/MALLA.md §6): la normal unitaria va de la superficie hacia el
+ * cuerpo; `depth` es cuánto se mete el círculo; `top`, la altura de la cara de arriba de lo tocado; `kind`, qué es
+ * (`CONTACT_*`); `cell`, la celda del plano de la que salió (-1 si es un obstáculo).
+ */
+export interface Contact {
+  nx: number; nz: number;
+  depth: number;
+  top: number;
+  kind: number;
+  cell: number;
+  obstacle: Obstacle | null;
+}
+
+/** La lista de contactos de la última pregunta. Los objetos se reusan: no se guardan de una pregunta a otra. */
+class ContactList implements ContactSink {
+  readonly list: Contact[] = [];
+  private pool: Contact[] = [];
+
+  add(nx: number, nz: number, depth: number, top: number, kind: number, cell: number, ob: unknown) {
+    if (depth <= 0) return;
+    const n = this.list.length;
+    const c = this.pool[n] ?? (this.pool[n] = { nx: 0, nz: 0, depth: 0, top: 0, kind: 0, cell: -1, obstacle: null });
+    c.nx = nx; c.nz = nz; c.depth = depth; c.top = top; c.kind = kind; c.cell = cell; c.obstacle = ob as Obstacle | null;
+    this.list.push(c);
+  }
+}
+
 export class CollisionWorld {
   obstacles: Obstacle[] = [];
+  private found = new ContactList();
   constructor(public terrain: Terrain) {}
+
+  /**
+   * Contra qué está encimado un círculo en (x,z) de radio r con los pies en feetY: las celdas de la malla, las rampas y
+   * los obstáculos que no puede subir. Es la misma lista que `blockAt`, pero con la normal y la profundidad de cada
+   * contacto. La lista es de este mundo y se pisa en la próxima pregunta.
+   */
+  contacts(x: number, z: number, r: number, feetY: number, stepUp = STEP_UP): readonly Contact[] {
+    const f = this.found;
+    f.list.length = 0;
+    if (feetY + CHAR_HEIGHT > ISLAND_BOTTOM) this.terrain.contacts(x, z, r, feetY, stepUp, f);
+    for (const o of this.obstacles) {
+      if (o.top <= feetY + stepUp || o.base >= feetY + CHAR_HEIGHT) continue;
+      rectContact(f, x, z, r, o.minX, o.maxX, o.minZ, o.maxZ, o.top, CONTACT_OBSTACLE, -1, o);
+    }
+    return f.list;
+  }
 
   /** Superficie más alta bajo (x,z) cuyo tope sea <= maxY. -Infinity si no hay nada (vacío). */
   groundAt(x: number, z: number, maxY: number): number {

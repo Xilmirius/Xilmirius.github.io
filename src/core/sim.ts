@@ -970,10 +970,10 @@ export class Simulation {
 
   private onWallHit(ch: Character, speed: number, ob: Obstacle | null, x: number, y: number, z: number, nx: number, nz: number, wasTumble: boolean) {
     if (ch.action && ch.action.kind === 'roll') {
-      // Rebote de Gloop: refleja la dirección.
+      // Rebote de Gloop: refleja la dirección contra la normal.
       const d = ch.action.data;
-      if (nx !== 0) d.dx = Math.abs(d.dx) * Math.sign(nx);
-      if (nz !== 0) d.dz = Math.abs(d.dz) * Math.sign(nz);
+      const into = d.dx * nx + d.dz * nz;
+      if (into < 0) { d.dx -= 2 * into * nx; d.dz -= 2 * into * nz; }
       if (ob) this.damageObstacle(ob, 15, ch);
       this.emit({ k: 'bounce', id: ch.id });
       return;
@@ -988,9 +988,10 @@ export class Simulation {
     if (ob) {
       const destroyed = this.damageObstacle(ob, speed * 2.2, launcher);
       if (destroyed) {
-        // Atravesó la cobertura: sigue volando (billar contra el mapa).
-        if (nx !== 0) ch.vel.x = -Math.sign(nx) * speed * 0.6;
-        if (nz !== 0) ch.vel.z = -Math.sign(nz) * speed * 0.6;
+        // Atravesó la cobertura: sigue volando contra la normal (billar contra el mapa).
+        const k = -speed * 0.6 - (ch.vel.x * nx + ch.vel.z * nz);
+        ch.vel.x += k * nx;
+        ch.vel.z += k * nz;
         this.emit({ k: 'body', id: ch.id, x, y: y + 0.7, z, a: launcher ? launcher.id : -1 });
         return;
       }
