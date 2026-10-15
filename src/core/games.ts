@@ -15,7 +15,7 @@ export const GAME_IDS: GameId[] = ['arena', 'siege', 'race', 'horde'];
 export type Sides = 'choice' | 'teams' | 'ffa' | 'coop';
 
 /** Opciones de la partida que el host puede tocar en la sala. */
-export type LobbyOption = 'lives' | 'killTarget' | 'kothTarget' | 'timeLimit' | 'difficulty' | 'cup';
+export type LobbyOption = 'lives' | 'killTarget' | 'kothTarget' | 'timeLimit' | 'difficulty' | 'cup' | 'organic';
 /** names: cómo se muestra cada valor, si no alcanza con el número. */
 export const LOBBY_OPTIONS: Record<LobbyOption, { label: string; values: number[]; names?: string[] }> = {
   difficulty: { label: 'Dificultad', values: [1, 2, 3], names: ['Fácil', 'Normal', 'Difícil'] },
@@ -24,6 +24,8 @@ export const LOBBY_OPTIONS: Record<LobbyOption, { label: string; values: number[
   killTarget: { label: 'Ring-outs para ganar', values: [5, 10, 15, 20] },
   kothTarget: { label: 'Puntos para ganar', values: [60, 100, 150] },
   timeLimit: { label: 'Tiempo límite', values: [300, 480, 600, 900, 1200] },
+  // Es un sí o no (`MatchSettings.organic`): 1 es la malla orgánica y 0 la cuadrada.
+  organic: { label: 'Terreno', values: [1, 0], names: ['Orgánico', 'Cuadrado'] },
 };
 
 export interface GameDef {
@@ -116,29 +118,29 @@ export const GAMES: Record<GameId, GameDef> = {
 
 export const MODE_INFO: Record<ModeId, ModeInfo> = {
   stock: {
-    name: 'Vidas', game: 'arena', options: ['lives', 'timeLimit'], stat: { label: 'Vidas', key: 'lives' },
+    name: 'Vidas', game: 'arena', options: ['lives', 'timeLimit', 'organic'], stat: { label: 'Vidas', key: 'lives' },
     desc: 'Cada uno tiene vidas. Gana el último equipo con alguien en pie.',
   },
   kills: {
-    name: 'Ring-outs', game: 'arena', options: ['killTarget', 'timeLimit'],
+    name: 'Ring-outs', game: 'arena', options: ['killTarget', 'timeLimit', 'organic'],
     desc: 'Sumá puntos sacando rivales del mapa. Gana quien llega primero al objetivo.',
   },
   koth: {
-    name: 'Control de zona', game: 'arena', options: ['kothTarget', 'timeLimit'],
+    name: 'Control de zona', game: 'arena', options: ['kothTarget', 'timeLimit', 'organic'],
     desc: 'Pará en la zona sin rivales para sumar puntos. La zona se mueve.',
   },
   moba: {
-    name: 'Asedio (MOBA)', game: 'siege', options: ['timeLimit'], labels: { timeLimit: 'Tiempo (después: muerte súbita)' },
+    name: 'Asedio (MOBA)', game: 'siege', options: ['timeLimit', 'organic'], labels: { timeLimit: 'Tiempo (después: muerte súbita)' },
     stat: { label: 'Esbirros', key: 'cs' },
     desc: 'Dos bases, torres y oleadas de esbirros. Empujá las líneas y destruí el núcleo rival. 1 línea hasta 2v2, 2 líneas en 3v3.',
   },
   horde: {
-    name: 'Horda (zombis)', game: 'horde', options: ['difficulty', 'lives'], labels: { lives: 'Vidas de cada uno' },
+    name: 'Horda (zombis)', game: 'horde', options: ['difficulty', 'lives', 'organic'], labels: { lives: 'Vidas de cada uno' },
     stat: { label: 'Zombis', key: 'cs' },
     desc: 'Cooperativo con armas: las oleadas de zombis no paran de crecer. Cumplí las misiones del mapa y llegá a la extracción antes de quedarte sin vidas.',
   },
   race: {
-    name: 'Carrera de obstáculos', game: 'race', options: ['cup', 'timeLimit'], labels: { timeLimit: 'Tiempo límite por pista' },
+    name: 'Carrera de obstáculos', game: 'race', options: ['cup', 'timeLimit', 'organic'], labels: { timeLimit: 'Tiempo límite por pista' },
     desc: 'Todos contra todos hasta la meta. Sin habilidades: golpes, empujón, dash y los ítems de las cajas. En copa se corren varias pistas seguidas y gana quien suma más puntos.',
   },
 };

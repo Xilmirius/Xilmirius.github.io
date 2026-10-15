@@ -105,17 +105,17 @@ El registro de assets ([ASSETS_CATALOGO.md](ASSETS_CATALOGO.md), menú → 🧩 
 ## 6. Límites técnicos a tener en cuenta
 
 - **Jugadores por partida:** el host P2P aguanta 6 cómodo. MOBA 5v5 o battle royale de 10+ piden **servidor dedicado**. La simulación (`src/core`) ya es TS puro sin DOM: se muda a Node/Bun cambiando solo `src/net` (ver [arquitectura.md §6](arquitectura.md)).
-- **Mapas grandes:** el terreno es una grilla de 2 m; mapas grandes necesitan partir el render en trozos y culling (hoy es una sola malla).
+- **Mapas grandes:** el mapa es un plano de celdas de 2 m y el terreno que se juega es una malla de cuadriláteros de ~1 m generada en cada partida ([MALLA.md](MALLA.md): hoy de 600 a 3.400 cuadriláteros por mapa, y generarla cuesta unos 3 a 5 ms por cada 1.000 m², o sea 2 a 22 ms en los mapas de hoy; crece con el área). Un mapa grande necesita medir ese costo en el navegador (se arma al empezar y en cada pista de una copa), partir el dibujo en trozos y hacer culling (hoy todo el terreno es una sola malla de three.js) y partir también el índice de la malla.
 - **Cinemáticos:** la colisión (`collision.ts`) hoy es estática + obstáculos AABB. Las plataformas móviles necesitan velocidad propia y "arrastrar" a quien está encima; hay que predecirlas igual en host y cliente (son deterministas por tiempo, así que se puede).
 
 ## 7. Editor de mapas (anotado para el futuro)
 
 La idea: un editor **en el mismo juego** (web), para que armar un mapa sea tan fácil como jugarlo.
 
-- **Formato:** hoy los mapas son ASCII (`src/core/maps/index.ts`). El editor debería exportar el mismo formato (o un JSON equivalente) para no tocar la simulación.
+- **Formato:** hoy los mapas son ASCII (`src/core/maps/index.ts`). El editor debería exportar el mismo formato (o un JSON equivalente) para no tocar la simulación. Edita el **plano**: la malla orgánica se genera sola al jugarlo y no se edita ([MALLA.md](MALLA.md) §9). Lo que el editor tendría que avisar son las reglas para dibujar planos de la leyenda de `maps/index.ts` (una rampa embutida en una plataforma, una franja de una celda donde el ancho importa).
 - **Qué se edita:** celdas (piso, alto, rampa, frágil, vacío), coberturas por familia, spawns por equipo, zonas de control; más adelante obstáculos cinemáticos y carriles.
 - **Flujo:** pintar con el mouse sobre la grilla en vista isométrica → **"Probar"** abre una práctica con bots en ese mapa al instante → **"Compartir"** lo sube a Supabase (Storage o una tabla `maps`) y genera un link.
-- **Validación:** reutilizar el test `mapas` (spawns, zonas, frágiles) para avisar en vivo si al mapa le falta algo.
+- **Validación:** avisar en vivo si al mapa le falta algo (spawns, zonas, frágiles) y probar el plano contra la malla: `buildOrganicMesh` ya devuelve los `problems` de la comprobación de [MALLA.md](MALLA.md) §4, y un editor puede correrla con unas semillas y decir qué garantía no se cumple. El repo no tiene tests; esto sería una herramienta del editor.
 - **Por qué vale la pena:** convierte a los jugadores en creadores de contenido (el efecto Roblox) y es la herramienta que después usamos nosotros para los mapas de MOBA, battle royale y obstáculos.
 
 ## 8. Cómo se agrega un juego o un modo (receta)

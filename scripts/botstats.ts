@@ -3,7 +3,8 @@
 // `npm run tool:stuck [mapa] [partidas]`: trabados de los zombis (tarea 07): zombis que salieron, reubicados, segundos-zombi sin avanzar y caídas solas.
 // `npm run tool:horde [mapa] [partidas]`: partidas de Horda con tres bots por dificultad (tarea 04: victorias, vidas perdidas, duración).
 // `npm run tool:mesh`: Arena (todos sus mapas) y Asedio (todos los suyos) con bots, más la huella de la malla de cada mapa y semilla (tarea 14).
-// La bandera `--organic` (en cualquiera de los de arriba) arma el terreno con la malla orgánica, sembrada con la semilla de cada partida.
+// El terreno es la malla orgánica, sembrada con la semilla de cada partida (tareas 14 y 17). La bandera `--square` (en cualquiera de los de arriba)
+// lo arma con la malla cuadrada, para comparar; `--organic` se acepta y no cambia nada.
 import { BotBrain } from '../src/core/bots';
 import { DT } from '../src/core/constants';
 import { ZOMBIES, type HordeMode, type ZombieKind } from '../src/core/horde';
@@ -15,8 +16,8 @@ import { Terrain } from '../src/core/terrain';
 import type { TerrainMesh } from '../src/core/terrainMesh';
 import { DEFAULT_SETTINGS, HERO_IDS } from '../src/core/types';
 
-/** `--organic`: el terreno con la malla orgánica (tarea 14). Los argumentos de posición se leen sin las banderas. */
-const ORGANIC = process.argv.includes('--organic');
+/** El terreno con la malla orgánica, salvo con `--square` (tarea 17). Los argumentos de posición se leen sin las banderas. */
+const ORGANIC = !process.argv.includes('--square');
 const ARGS = process.argv.filter((a, i) => i >= 2 && !a.startsWith('--'));
 
 /**

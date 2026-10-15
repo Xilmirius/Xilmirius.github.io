@@ -1,4 +1,4 @@
-// Mundo de colisión: terreno (grilla) + obstáculos (destructibles y estructuras, AABB con altura).
+// Mundo de colisión: terreno (la malla, ver terrain.ts) + obstáculos (destructibles y estructuras, AABB con altura).
 // Lo usan el host (simulación completa) y el cliente (predicción de su propio movimiento).
 import { CHAR_HEIGHT, ISLAND_BOTTOM, STEP_UP } from './constants';
 import { CONTACT_OBSTACLE, rectContact, type ContactSink } from './contact';

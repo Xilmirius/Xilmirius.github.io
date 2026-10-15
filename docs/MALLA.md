@@ -1,8 +1,9 @@
 # Malla irregular: diseño
 
-> Estado: **plan**, con lo ya hecho anotado en los "Cómo quedó" (tareas 10 a 16). Es la referencia de las tareas 10 a 17 de
-> [docs/tareas](tareas/README.md). Reemplaza la nota "quedó afuera a propósito" de [TERRENO.md](TERRENO.md) §6. Cuando la
-> tarea 17 termine, este documento pasa a describir lo que hay.
+> Estado: **hecho** (tareas 10 a 17 de [docs/tareas](tareas/README.md)). La malla orgánica es el terreno de los cuatro juegos; la
+> cuadrada queda como opción de la sala ("Terreno: Cuadrado") y como respaldo si una semilla no pasa su comprobación. Este
+> documento dice cómo está hecho: el diseño, lo que cambió al construirlo ("Cómo quedó" de cada tarea) y, en el §10, los números
+> reales. Reemplazó la nota "quedó afuera a propósito" de [TERRENO.md](TERRENO.md) §6.
 
 ## 1. La idea: dos capas
 
@@ -18,6 +19,10 @@ hoy está pegado:
 Cada celda de la malla toma su clase (vacío, piso de tal nivel, muro) de la celda del plano que tiene debajo de su
 centro, y recuerda de cuál salió (`src`). El borde de cada región sigue las aristas de la malla: por eso sale
 irregular y distinto en cada partida, sin que nadie redibuje el mapa.
+
+La malla orgánica es lo que se juega: una partida nueva de cualquiera de los cuatro juegos la arma con la semilla de la
+partida (`MatchSettings.organic` viene prendido y la sala tiene la opción "Terreno: Orgánico / Cuadrado"). La cuadrada es el
+mismo código por un camino trivial (§4, "Modo cuadrado") y sigue sirviendo para comparar y de salida si algo anda mal.
 
 ## 2. La regla que sostiene todo
 
@@ -119,8 +124,9 @@ la línea alta: ahí la cuña ya está a menos de un escalón del nivel de arrib
 ### Modo cuadrado
 
 No se genera nada: la malla es un cuadrado por celda del plano, y las rampas no bajan ninguna franja porque el
-borde de la plataforma ya coincide con la línea alta. Es el mismo código por un camino trivial, y es lo que el
-juego usa hasta que la orgánica esté validada.
+borde de la plataforma ya coincide con la línea alta. Es el mismo código por un camino trivial. Se usa si el host
+elige "Terreno: Cuadrado" en la sala, en los scripts sin pantalla con `--square` y cuando una malla orgánica no pasa su
+comprobación en cinco semillas (`Terrain.meshFellBack`; en 1.000 semillas al azar no pasó nunca, §10).
 
 ### Cómo quedó en `src/core/terrainMesh.ts` (tarea 11)
 
@@ -273,12 +279,12 @@ dibujo con un solo camino de código. Es solo dibujo: la física no cambió.
   frágil y es de altura h o más (en la capa 0, todas). El contorno de la capa son sus lados expuestos; cada tramo sabe qué hay del otro
   lado (nada, una losa frágil o piso más bajo) y si la cara de arriba que lo toca es de la altura de la capa (de eso depende el neón y
   la pintura del borde).
-- **Esquinas.** En cada vértice del contorno se mira cuánto gira. Menos de unos 11°: sigue derecho. Si no, y el vértice no es de los que
+- **Esquinas.** En cada vértice del contorno se mira cuánto gira. Menos de unos 11° (17° en la orgánica, desde la tarea 17): sigue derecho. Si no, y el vértice no es de los que
   no se cortan, una **saliente** (gira hacia adentro) se corta con un arco tangente de 0,31 del lado más corto (tope `R_OUT`) y una
   **entrante** se rellena con un arco de 0,2 (tope `R_IN`). Una esquina viva parte el borde en dos y apaga el relieve del acantilado
   a 0,8 m de ella. En la cuadrada (lados de 2 m) los radios son los de siempre; en la orgánica (lados de 1 m) las esquinas salen de
   unos 0,3 m y el relleno de 0,2 m.
-- **Cara de arriba.** Cada celda de la capa es un abanico desde su centro. A la celda que toca una esquina saliente cortada se le recorta
+- **Cara de arriba.** Cada celda de la capa es un abanico desde su centro (desde la tarea 17, con la orgánica, una celda sin recortes ni puntos de más son dos triángulos). A la celda que toca una esquina saliente cortada se le recorta
   el polígono con las cuerdas del arco (solo a las celdas del cono de adentro de esa esquina); a las entrantes se les suma el abanico del
   relleno. Los lados de más de 1,5 m se parten cada metro para que el color del suelo se tome como siempre.
 - **Descanso de rampa** (solo orgánica). Una losa llana al nivel de arriba, levantada 6 mm sobre la plataforma (que la pisa en parte) para
@@ -310,8 +316,8 @@ dibujo con un solo camino de código. Es solo dibujo: la física no cambió.
 
 ### Cómo quedó (tarea 14)
 
-- **El ajuste** es `MatchSettings.organic` (apagado por defecto, sin botón en la sala: se prende desde la consola con
-  `__rubble.session.setSettings({ organic: true })` o en un script con `settings: { ..., organic: true }`).
+- **El ajuste** es `MatchSettings.organic`. La tarea 14 lo dejó apagado y sin botón; desde la tarea 17 viene prendido y la sala tiene la
+  opción "Terreno: Orgánico / Cuadrado" (`LOBBY_OPTIONS.organic`, la toca el host). Una copa arma una malla nueva en cada pista.
 - **Quién arma la malla.** `new Terrain(mapId, { organic, seed })`. La simulación (`Simulation`) usa la semilla de la
   partida (`SimConfig.seed`, que es `MatchInit.seed`); la vista del host y la de cada cliente (`GameView`, con
   `ViewOptions.organic` y `.seed`) usan la de `MatchInit`; la vitrina del menú, la suya. Arena y Asedio piden la malla
@@ -334,11 +340,116 @@ dibujo con un solo camino de código. Es solo dibujo: la física no cambió.
   partida de Horda (3 veces más lenta que la cuadrada). Ahora `blockAt` y `contacts` le piden solo las celdas más altas que los
   pies del cuerpo (`cellsNear(..., above)`), cada balde del índice recuerda la celda más alta que tiene (`bTop`) y los baldes pasaron
   de 2 m a 1 m; las celdas llevan sus lados precalculados. Quedó en +15 % sobre la cuadrada.
-- **Cómo se mide:** `npm run tool:race`, `tool:horde` y `tool:stuck` aceptan `--organic`; `npm run tool:mesh [--organic]` corre Arena y
-  Asedio con bots, mide la simetría de la malla de cada mapa y imprime la huella de cada mapa con cinco semillas.
+- **Cómo se mide:** `npm run tool:race`, `tool:horde`, `tool:stuck` y `tool:mesh` arman la malla orgánica (desde la tarea 17; con `--square` arman
+  la cuadrada, para comparar). `tool:mesh` corre Arena y Asedio con bots, mide la simetría de la malla de cada mapa y imprime la huella de
+  cada mapa con cinco semillas.
 
 ## 9. Lo que no entra
 
 - Un editor de mapas sobre la malla. Los mapas se siguen escribiendo como planos.
 - Generadores de mapas por juego: son las tareas 24 y 25.
 - Celdas de la malla con cara inclinada. Las pendientes son piezas (rampas).
+
+## 10. Cómo salió: los números (tarea 17)
+
+Medido con herramientas sin pantalla (`npm run tool:*`) y scripts descartables sobre los diez mapas; ya no hay tests que lo vuelvan a comprobar.
+
+### Armarla
+
+Cien semillas al azar por mapa, en Node (`new Terrain(mapa, { organic: true, seed })`, que incluye generar, estampar y comprobar):
+
+| Mapa | Plano | Celdas de la malla (cuadrada → orgánica) | Armarla: mediana · p95 · máx |
+|---|---|---|---|
+| La Cantera | 44×30 m | 298 → 1.416–1.478 | 4 · 8 · 26 ms |
+| El Islote | 28×22 m | 126 → 590–636 | 2 · 3 · 3 ms |
+| El Flipper | 48×26 m | 264 → 1.248–1.312 | 3 · 6 · 12 ms |
+| El Refugio | 60×30 m | 398 → 1.918–1.969 | 7 · 10 · 12 ms |
+| La Pista | 164×18 m | 362 → 1.724–1.785 | 10 · 17 · 19 ms |
+| El Serpentín | 88×50 m | 682 → 3.272–3.358 | 20 · 29 · 42 ms |
+| La Bolera | 100×64 m | 445 → 2.137–2.201 | 22 · 30 · 46 ms |
+| El Derrumbe | 72×58 m | 567 → 2.719–2.789 | 16 · 20 · 34 ms |
+| El Puente | 120×42 m | 486 → 2.326–2.408 | 13 · 15 · 31 ms |
+| Las Dos Cornisas | 120×58 m | 694 → 3.318–3.446 | 18 · 21 · 29 ms |
+
+La malla cuadrada tarda 0 a 2 ms. El costo es de unos 3 a 5 ms por cada 1.000 m². De 1.000 semillas, **ninguna cayó a la cuadrada**: la comprobación del estampado pasó al primer intento todas las veces. En 32 el generador (`mesh.ts`) tuvo que pasar a la semilla siguiente (La Bolera 7 de 100, El Refugio 5, Las Cornisas 4, El Derrumbe 4, El Puente 6, el resto 0 a 2), así que dos semillas contiguas pueden dar la misma malla (a una partida real con semilla al azar no le pasa).
+
+### Los pasos angostos
+
+Ciento veinte semillas por mapa. Para cada par de celdas vecinas de piso o rampa del mismo nivel se camina el segmento entre sus centros y se mide el piso de lado a lado, perpendicular al segmento (hasta 2 m a cada lado). Se cuentan los pasos que alguna vez midieron menos de 3,9 m:
+
+| Mapa | Ancho de piso: más angosto · p1 · p5 · mediana (m) | Dónde |
+|---|---|---|
+| La Cantera | 0,96 · 1,60 · 2,00 · 2,68 | los pasos de la primera y la última fila de plataformas (columnas 1-2 y 19-20) |
+| El Islote | 0,92 · 1,48 · 2,00 · 2,76 | las puntas de la isla (columnas 3-4 y 9-10, filas 0 y 10) |
+| El Flipper | 2,00 · 2,00 · 2,32 · 2,72 | – |
+| El Refugio | 2,00 · 2,00 · 2,36 · 2,68 | – |
+| La Pista | 1,04 · 1,36 · 2,36 · 2,64 | el recodo de la columna 40 |
+| El Serpentín | 0,96 · 1,64 · 2,36 · 2,60 | la bajada de la columna 30 (filas 5 a 10) |
+| La Bolera | 0,92 · 1,36 · 2,32 · 2,60 | el callejón de las columnas 5 a 7 (filas 26 a 30) |
+| El Derrumbe | 0,96 · 1,88 · 2,36 · 2,60 | la columna 6 (filas 7 a 12) |
+| El Puente | 1,12 · 1,92 · 2,40 · 2,64 | – |
+| Las Dos Cornisas | 0,88 · 1,08 · 1,64 · 2,60 | las líneas de afuera (fila 14, columnas 16 a 41) |
+
+**Ningún paso quedó angosto de verdad**: en las 120 semillas de los diez mapas el piso más angosto fue de 0,88 m (el cuerpo mide 1 m, pero lo que tiene que estar sobre el piso es su centro), y el que baja de 1,2 m lo hace en una de cada tres semillas como mucho. Por eso **no se ensanchó ningún puente del plano**. Una zanja de una celda mide entre 1,0 y 3,1 m de vacío (en La Bolera, El Derrumbe y El Puente, que son los que tienen), y un salto de la Carrera cubre unos 4,4 m corriendo. Las reglas para quien dibuja un plano están en la leyenda de `src/core/maps/index.ts`.
+
+### Partidas de bots
+
+Las mismas mediciones de la tarea 14, con el terreno orgánico de entrada (`npm run tool:*`; cada partida es otra malla):
+
+| | Cuadrada | Orgánica |
+|---|---|---|
+| Carrera: llegan todos, de 30 carreras por pista (pista / serpentín / bolera / derrumbe) | 29 / 28 / 30 / 30 | 30 / 27 / 28 / 30 |
+| Carrera, 60 carreras más (nivel 2) en serpentín / bolera | 58 / 60 y 60 / 60 | 56 / 60 y 59 / 60 |
+| Carrera: puertas que alguien cruzó sin que se le contara | 0 | **0** |
+| Horda, 20 partidas por dificultad: victorias (Fácil / Normal / Difícil) | 19 / 13 / 5 | 16 / 11 / 3 |
+| Horda, 10 partidas por dificultad, tres veces: ms por segundo simulado (Fácil / Normal / Difícil) | 2,44 / 2,86 / 3,06 | 3,18 / 3,34 / 3,53 (+31 % / +17 % / +15 %; **+20 %** en total) |
+| Horda, `tool:stuck` (20 partidas): zombis reubicados por trabados / segundos sin avanzar | 0 / 0,57 % | 10 (0,10 %) / 0,41 % |
+| Arena (3 mapas) y Asedio (2), 5 semillas: terminan | 25 / 25 | 25 / 25 |
+| Asedio: el esbirro que más se acercó a una torre rival | – | 0,0 a 0,7 m |
+| Mapa simétrico: celdas de la malla sin gemela, 5 mapas × 5 semillas | – | **0** |
+| Héroes que caen al vacío donde aparecieron en los 3 s siguientes | 0 | **0** (de unas 2.200 apariciones) |
+| Mallas que cayeron a la cuadrada por fallar la comprobación | – | 0 |
+
+El costo de la orgánica en la Horda es el de probar celdas de 1 m en vez de una caja de 2 m por cada cuerpo (en la tarea 14 quedó en +15 %; el borde de lo que pedía, +25 %, lo pasa Fácil, que tiene menos zombis y por eso pesa más lo fijo). En números absolutos, el simulador entero cuesta unos 0,055 ms por tick de 16,7 ms: no se nota.
+
+Los bots que no llegan en El Serpentín y La Bolera (1 a 4 de 60) son de dos clases, las dos también con la cuadrada: se quedan dando vueltas sin trabarse, o caen una y otra vez en el mismo lugar (el mismo bot, junto a un paragolpes de la segunda recta del Serpentín). La orgánica no los multiplica de forma que se note con esta muestra (56 contra 58 de 60 en El Serpentín). En la Horda la orgánica gana algo menos en Fácil y Difícil y más en Normal que la cuadrada, dentro de la banda de la tarea 04 en Normal y en el borde en Fácil (16 de 20 con la orgánica): con 20 partidas por dificultad no se distingue de ruido.
+
+### Dibujar
+
+Triángulos del terreno solo (sin decoración, personajes ni fondo), con una semilla:
+
+| | Cuadrada | Orgánica de la tarea 15 | Orgánica de la tarea 17 |
+|---|---|---|---|
+| La Cantera | 14.520 | 32.912 | 17.046 |
+| El Refugio | 16.768 | 38.705 | 19.590 |
+| La Pista | 18.244 | 49.875 | 24.779 |
+| El Puente | 26.892 | 75.764 | 35.778 |
+
+La orgánica de la tarea 15 llevaba 2,3 a 2,8 veces los triángulos de la cuadrada y, en un teléfono emulado (844×390, render por software
+en Edge, bots, sin otra cosa corriendo), entre 12 y 21 % menos cuadros por segundo y la calidad automática bajaba sola. Una esquina cada metro
+hacía que el borde llevara el doble de puntos por metro, y cada celda de 1 m era un abanico de cuatro triángulos. La tarea 17 lo bajó a
+1,2 a 1,4 veces con dos cambios en `terrainShape.ts` que casi no se ven y que solo valen para la orgánica:
+
+- **El borde lleva menos puntos.** Un quiebre de menos de 0,3 rad (17°) sigue derecho y un arco no tiene tramos de menos de 0,3 m
+  (`MIN_TURN_ORG` y `ARC_LEN_ORG`). El borde queda un poco más anguloso.
+- **Una celda sin recortes ni puntos de más son dos triángulos** y no el abanico de cuatro desde el centro.
+
+El dibujo no se aparta más del piso real que antes (los vértices más lejanos siguen a la misma distancia, y ningún centro de celda quedó sin su cara
+dibujada: 0 de 59.901 en los diez mapas con tres semillas). Con la cuadrada no cambia nada.
+
+Cuadros por segundo en el teléfono emulado (844×390, tres partidas por mapa y por malla, intercaladas; con una malla y con la otra):
+
+| | Cuadrada | Orgánica (tarea 15) | Orgánica (tarea 17) | Triángulos de toda la escena (cuadrada → orgánica) |
+|---|---|---|---|---|
+| La Cantera | 33,3 | 28,3 | 33,2 | 40.0 mil → 42,3 mil |
+| El Refugio | 31,9 | 27,2 | 31,0 | 47,5 mil → 50,8 mil |
+| La Pista | 46,8 | 36,0 | 44,6 | 41,7 mil → 48,5 mil |
+| El Puente | 30,1 | 23,2 | 29,1 | 67,8 mil → 74,2 mil |
+
+La calidad automática (baja un escalón si pasa unos segundos por debajo de 28 cuadros) no bajó en ninguna de las 12 partidas de cada malla; con la
+orgánica de la tarea 15 bajaba en las dos partidas de El Puente, que es el mapa que más cerca anda del límite, y en una de El Refugio. (La columna de la
+tarea 15 es de otra tanda de mediciones, con la cuadrada en 33,5, 30,8, 45,5 y 29,1.)
+
+### Red
+
+Host y cliente en dos pestañas, copa de tres pistas (La Pista, El Serpentín, La Bolera), una malla nueva en cada pista, seis corridas (18 pistas): la huella de la malla de la simulación del host, la de su vista, la de `MatchInit` y la de la vista del cliente es la misma en todas, el cliente no avisa y las tres huellas de cada copa son distintas entre sí. En las dos últimas corridas (con el recorrido ya ajustado para no salirse del piso) el cliente corre unos 13 m junto a la costa en cada pista, a 0,05 a 1 m del vacío, sin caerse, y su predicción lo corrige como mucho 0,013 m por cuadro. Las únicas correcciones de más de 0,3 m (0,35 m por cuadro) son las de El Serpentín a menos de 8 m de un acelerador: el envión lo pone el host y el cliente no lo predice. Pasa igual con la cuadrada (no es de la malla).

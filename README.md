@@ -32,6 +32,7 @@ Cada juego se declara en un solo lugar ([src/core/games.ts](src/core/games.ts)):
 - **Espectáculo de feedback sin marear**: cámara fija que solo te sigue, efectos de color (nunca blancos, nunca pantalla lavada), puños que golpean en arco como boxeadores, números de heat, pilares de color en cada ring-out, combos con sonido ascendente, anuncios de rachas con locutor, confeti y premios al final de cada partida.
 - **Gamificación**: nivel de cuenta, 17 logros y sombreros cosméticos que se desbloquean jugando (se guardan en tu navegador).
 - **Temas visuales** del mapa: Neón, Cantera, Atardecer y Noche (lo elige el host en el lobby). Cada uno trae su fondo (mar de nubes, islas flotantes, grilla de neón, reflejo del sol o de la luna) y su vegetación sobre el terreno.
+- **Terreno orgánico**: el mapa se dibuja como un plano simple, pero lo que se pisa es una malla irregular de cuadriláteros de ~1 m, distinta en cada partida (y en cada pista de una copa): la costa, los acantilados y los muros no son rectos. El host puede elegir "Terreno: Cuadrado" en la sala. Diseño y números en [docs/MALLA.md](docs/MALLA.md).
 
 > **¿Qué tengo que hacer yo para dejarlo online?** → [PASOS_PARA_VOS.md](PASOS_PARA_VOS.md)
 > **¿Cómo lo mejoro con modelos, sonidos o arte reales?** → [docs/MEJORAS_CON_ASSETS.md](docs/MEJORAS_CON_ASSETS.md)
@@ -168,7 +169,10 @@ src/
     rules.ts       Reglas: qué sistemas están prendidos (Brawler, Completo, Asedio, Carrera, Horda)
     moba/          Asedio (MOBA): números (defs.ts), oleadas, IA de esbirros y torres, base, Coloso (mode.ts)
     movement.ts    Movimiento compartido (host y predicción del cliente usan el mismo código, dash incluido)
-    terrain.ts     Terreno como grilla de alturas; baldosas frágiles
+    terrain.ts     Terreno: el plano del mapa (celdas de 2 m, niveles, rampas, baldosas frágiles, puertas) y su malla
+    terrainMesh.ts La malla del terreno (dónde hay piso, a qué altura y contra qué se choca): cuadrada u orgánica, sembrada por partida
+    mesh.ts        Generador de la malla irregular (trama de triángulos → cuadriláteros de 1 m, relajada)
+    contact.ts     Choque de un círculo contra polígonos (el cuerpo desliza por la normal)
     collision.ts   Colisión terreno + obstáculos
     heroes/        Un archivo por héroe (kit de 4 habilidades + básico)
     gadgets.ts     Artefactos del mapa: resortes, paragolpes, rotores, géiseres, barriles, cajas de ítems, aceleradores y lanzabolas
@@ -180,7 +184,7 @@ src/
     items.ts       Ítems pasivos/activos
     mutations.ts   Rutas de mutación (Tanque/Carry/Support)
     modes.ts       Modos de juego (interfaz agnóstica)
-    bots.ts        IA (A* sobre la grilla, recuperación, crafteo; en Asedio: línea, remate, torres, volver a la base)
+    bots.ts        IA (A* sobre el plano, recuperación, crafteo; en Asedio: línea, remate, torres, volver a la base)
     snapshot.ts    Frames de mundo, codificación de red e interpolación
     maps/          Mapas en ASCII
   net/           Signaling (Supabase / local), WebRTC, sesiones host y cliente
@@ -199,7 +203,7 @@ scripts/               Herramientas: generador del catálogo de assets y de bala
 
 - **Juego o modo nuevo:** receta completa en [docs/PLATAFORMA_Y_MODOS.md §8](docs/PLATAFORMA_Y_MODOS.md) (entrada en `games.ts` + victoria en `modes.ts` + reglas en `rules.ts` + mapa).
 - **Héroe nuevo:** copiá `src/core/heroes/canto.ts`, cambiá números, la forma del indicador (`shape`) y `cast()` usando la API de `Simulation` (`meleeArc`, `fireProjectile`, `lob`, `blast`, `dash`, `leap`, `roll`, `zip`, `addZone`, `buildWall`...). Registralo en `heroes/index.ts` y en `HERO_IDS` (`core/types.ts`). Hereda las 3 rutas de mutación de su familia gratis. El modelo 3D es el mismo bean con la piel de su familia; si querés accesorios propios, agregalos en `render/beanView.ts → buildExtras`.
-- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. Hay que revisar que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; revisá que las líneas sean transitables y que el mapa esté espejado.
+- **Mapa nuevo:** agregá un bloque ASCII en `src/core/maps/index.ts` (leyenda en el archivo, artefactos incluidos, y las reglas para dibujar un plano: el terreno que se juega es la malla orgánica, que le corre el borde hasta 1 m, así que donde el ancho importa van dos celdas; ver [docs/MALLA.md](docs/MALLA.md)). Las pistas de Carrera llevan `kind: 'race'`, puertas numeradas y la meta. Hay que revisar que tenga spawns, zonas y frágiles. Los mapas de Asedio (`kind: 'moba'`) llevan torres, núcleos y el recorrido de cada línea; revisá que las líneas sean transitables y que el mapa esté espejado.
 - **Ambientación:** cómo se dibuja el terreno y qué piezas pone cada juego según la forma del mapa está en [docs/TERRENO.md](docs/TERRENO.md). Un mapa nuevo se decora solo.
 - **Ítem nuevo:** entrada en `core/items.ts` + efecto en `Simulation.recalcStats` (pasivo) o `tryItem` (activo).
 - **Sistema nuevo:** agregalo como flag en `Ruleset` (`core/rules.ts`) y preguntá por el flag en la simulación, nunca por el modo.
@@ -216,9 +220,9 @@ npm run test:e2e         # Chromium: menú, práctica vs bots, y host+cliente po
 node tests/e2e/moba.mjs  # Chromium: Asedio 2v2 y 3v3 (lanzar con clic, cancelar, B, forja en base, fin de partida)
 node tests/e2e/showcase.mjs   # screenshots de cada héroe usando sus habilidades
 npm run test:touch       # Chromium con táctil emulado: palanca, botones, apuntado y habilidades en los cuatro juegos
-node tests/e2e/maps.mjs  # capturas de cada mapa (entero, costa, muros) para revisar terreno y ambientación
+node tests/e2e/maps.mjs  # capturas de cada mapa (entero, costa, muros) para revisar terreno y ambientación; SQUARE=1 con la malla cuadrada, SEED=n fija la semilla
 npm run tool:kb         # herramienta de balance: tabla de knockback
-npm run tool:bots       # herramienta de balance: estadísticas de partidas de bots
+npm run tool:bots       # herramienta de balance: estadísticas de partidas de bots (tool:race, tool:horde, tool:stuck, tool:mesh: con --square arman la malla cuadrada)
 npm run tool:clearings  # claros que se decoran en cada mapa
 ```
 

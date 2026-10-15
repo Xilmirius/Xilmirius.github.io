@@ -12,16 +12,8 @@ export type Region = (x: number, z: number) => boolean;
 /** Un punto del borde real que da al vacío, con su normal hacia afuera (unitaria) y la altura del piso ahí. */
 export interface EdgePoint { x: number; z: number; nx: number; nz: number; y: number }
 
-/**
- * Lo que una pieza ocupa en el piso: un disco (su radio) o una caja con sus medios anchos en x y en z antes de girar, y el
- * giro sobre Y (el de `Pieces`: x' = x·cos + z·sin).
- */
-export type Foot = number | [number, number] | [number, number, number];
-
 /** Paso con el que se camina buscando un borde: más fino que lo más angosto que se decora. */
 const STEP = 0.05;
-/** Lo que una pieza puede asomar del borde sin que se note, en metros. */
-export const OVERHANG = 0.06;
 /** Cuánto más allá del borde tiene que haber vacío para que ese borde sea una costa y no el límite entre dos clases. */
 const BEYOND = 0.12;
 
@@ -126,39 +118,4 @@ export class Support {
     }
     return { x: px, z: pz, nx: bx, nz: bz, y: m.top[q] };
   }
-
-  /** Los puntos que representan lo que ocupa una pieza en (x, z), con los bordes metidos `tol`. */
-  footPoints(x: number, z: number, foot: Foot, tol: number): [number, number][] {
-    if (typeof foot === 'number') {
-      const r = Math.max(0, foot - tol);
-      const pts: [number, number][] = [[x, z]];
-      if (r > 0) for (let i = 0; i < 8; i++) pts.push([x + r * DIAG[i][0], z + r * DIAG[i][1]]);
-      return pts;
-    }
-    const hx = Math.max(0, foot[0] - tol), hz = Math.max(0, foot[1] - tol), rot = foot[2] ?? 0;
-    const c = Math.cos(rot), s = Math.sin(rot);
-    const at = (lx: number, lz: number): [number, number] => [x + lx * c + lz * s, z - lx * s + lz * c];
-    return [at(0, 0), at(hx, hz), at(-hx, hz), at(hx, -hz), at(-hx, -hz), at(hx, 0), at(-hx, 0), at(0, hz), at(0, -hz)];
-  }
-
-  /** ¿Lo que ocupa una pieza en (x, z) cae entero en `inside` (con `tol` metros de margen hacia afuera)? */
-  fits(x: number, z: number, foot: Foot, inside: Region, tol = OVERHANG): boolean {
-    for (const [px, pz] of this.footPoints(x, z, foot, tol)) if (!inside(px, pz)) return false;
-    return true;
-  }
-
-  /** Cuánto asoma la pieza fuera de `inside`: el menor margen con el que entra, en metros (0 si entra entera). Para medir. */
-  overhang(x: number, z: number, foot: Foot, inside: Region): number {
-    let lo = 0, hi = 1;
-    if (this.fits(x, z, foot, inside, lo)) return 0;
-    if (!this.fits(x, z, foot, inside, hi)) return Infinity;
-    for (let i = 0; i < 10; i++) {
-      const mid = (lo + hi) / 2;
-      if (this.fits(x, z, foot, inside, mid)) hi = mid; else lo = mid;
-    }
-    return hi;
-  }
 }
-
-const D = Math.SQRT1_2;
-const DIAG: [number, number][] = [[1, 0], [D, D], [0, 1], [-D, D], [-1, 0], [-D, -D], [0, -1], [D, -D]];

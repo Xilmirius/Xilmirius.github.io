@@ -3,7 +3,7 @@
 // frágil (y, con FALL=1, con esa losa ya caída: el hueco que deja). En las pistas de Carrera, una toma desde arriba de cada
 // puerta; en los mapas de Asedio, el minimapa (y cuánto coincide con el terreno).
 // Uso: npm run build && node tests/e2e/maps.mjs [mapa,mapa|all] [tema]   (OUT=carpeta, BASE=servidor ya levantado)
-// El terreno es la malla cuadrada. Con ORGANIC=1 es la orgánica, y con SEED=n la de esa semilla (si no, una al azar: se imprime).
+// El terreno es la malla orgánica, con la semilla de la partida. Con SQUARE=1 es la cuadrada, y con SEED=n la orgánica de esa semilla (si no, una al azar: se imprime).
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -22,7 +22,7 @@ const arg = process.argv[2] ?? 'all';
 const maps = arg === 'all' ? Object.keys(GAME_OF) : arg.split(',');
 const theme = process.argv[3];
 const tag = process.env.TAG ? process.env.TAG + '-' : '';
-const ORGANIC = process.env.ORGANIC === '1';
+const SQUARE = process.env.SQUARE === '1';
 const SEED = process.env.SEED ? Number(process.env.SEED) : null;
 const FALL = process.env.FALL === '1';
 
@@ -42,7 +42,7 @@ for (const map of maps) {
     await wait(0.3);
     await p.locator('.gb-actions .btn.big').nth(1).click();
     await p.waitForSelector('.lobby');
-    await p.evaluate(([m, th, o]) => { const s = window.__rubble.session; s.setSettings({ ...(s.lobby.settings.cup ? { cup: 1 } : {}), map: m, bots: m === 'cornisas' ? 5 : 1, ...(th ? { theme: th } : {}), organic: o }); }, [map, theme, ORGANIC]);
+    await p.evaluate(([m, th, sq]) => { const s = window.__rubble.session; s.setSettings({ ...(s.lobby.settings.cup ? { cup: 1 } : {}), map: m, bots: m === 'cornisas' ? 5 : 1, ...(th ? { theme: th } : {}), ...(sq ? { organic: false } : {}) }); }, [map, theme, SQUARE]);
     await wait(0.3);
     // La semilla de la partida sale de Math.random al empezar: con SEED se fija solo para ese momento.
     if (SEED !== null) await p.evaluate((sd) => { window.__rnd = Math.random; Math.random = () => (sd + 0.5) / 1e9; }, SEED);

@@ -442,7 +442,7 @@ export class App {
       game.sides === 'choice' ? [h('label', null, 'Formato'), select(st.teams, [['teams', 'Equipos (2)'], ['ffa', 'Todos contra todos']], (v) => set({ teams: v as 'teams' | 'ffa' }))] : null,
       info.options.flatMap((o) => [
         h('label', null, info.labels?.[o] ?? LOBBY_OPTIONS[o].label),
-        select(String(st[o]), LOBBY_OPTIONS[o].values.map((n, i) => [String(n), LOBBY_OPTIONS[o].names?.[i] ?? (o === 'timeLimit' ? fmtTime(n) : String(n))]), (v) => set({ [o]: +v })),
+        select(String(+st[o]), LOBBY_OPTIONS[o].values.map((n, i) => [String(n), LOBBY_OPTIONS[o].names?.[i] ?? (o === 'timeLimit' ? fmtTime(n) : String(n))]), (v) => set({ [o]: o === 'organic' ? v === '1' : +v })),
       ]),
       h('label', null, `Bots (máx ${MAX_PLAYERS - humansN})`), select(String(st.bots), Array.from({ length: MAX_PLAYERS - humansN + 1 }, (_, i) => [String(i), String(i)]), (v) => set({ bots: +v })),
       h('label', null, 'Dificultad de bots'), select(String(st.botLevel), [['1', 'Fácil'], ['2', 'Normal'], ['3', 'Difícil']], (v) => set({ botLevel: +v as 1 | 2 | 3 })),

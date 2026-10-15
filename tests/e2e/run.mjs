@@ -167,8 +167,9 @@ try {
   await b.screenshot({ path: `${OUT}/13-mp-client.png` });
   const clientNet = await b.$eval('.hud-net', (e) => e.textContent);
   step('cliente red: ' + clientNet);
-  const clientHasChars = await b.$$eval('.nametag', (els) => els.filter((e) => e.style.display !== 'none').length);
-  step('cliente ve personajes: ' + clientHasChars);
+  // Personajes en el último snapshot que recibió (los carteles con nombre dependen de que el otro quede a la vista de su cámara).
+  const clientHasChars = await b.evaluate(() => window.__rubble.match.latestWorld?.chars.length ?? 0);
+  step('cliente recibe personajes: ' + clientHasChars);
   if (clientHasChars < 2) throw new Error('El cliente no está recibiendo snapshots');
   void bTeam;
 

@@ -3,7 +3,9 @@
 Cómo se dibuja el mapa. La idea viene de Townscaper: **la entrada es simple** (qué hay en cada celda) y **un
 algoritmo decide la forma** mirando a las vecinas. Desde la tarea 15 la entrada son las celdas de la **malla** del
 terreno (cuadrada u orgánica, ver [MALLA.md](MALLA.md)) y no las de la grilla del plano: es el mismo código para las dos.
-Todo lo que describe este documento es solo visual: la colisión, los bots, la red y el formato de los mapas no cambiaron.
+Desde la tarea 17 lo que se juega es la orgánica (la cuadrada es una opción de la sala), así que el borde de cada región es
+irregular y distinto en cada partida. Todo lo que describe este documento es solo visual: la colisión, los bots, la red y el
+formato de los mapas no dependen de él.
 
 ## 1. Las tres capas
 
@@ -29,17 +31,20 @@ decide lo que cuelga: un acantilado, una pared recta o una pared de muro. En cad
 - **Esquina saliente** (el contorno gira hacia adentro): se corta con un arco de 0,31 del lado más corto de los dos que la
   forman, con tope en `R_OUT` (0,62 m). La cara de arriba de las celdas que tocan ese vértice se recorta con las cuerdas del arco.
 - **Esquina entrante** (gira hacia afuera): lleva un relleno curvo de 0,2 del lado más corto, con tope en `R_IN` (0,4 m).
-- **Quiebre chico** (menos de unos 11°): no es esquina, el borde sigue derecho.
+- **Quiebre chico** (menos de unos 11°; de 17° en la orgánica): no es esquina, el borde sigue derecho.
 - **Esquina viva:** donde hay una losa frágil o una rampa, o muy cerrada, no se corta nada.
 - **Borde que da al vacío:** cuelga un acantilado de roca, con una franja de tierra arriba.
 
 En la malla cuadrada (lados de 2 m) todo eso da los radios de siempre; en la orgánica (lados de 1 m) las esquinas salen más
-chicas y siguen la forma irregular. El contorno de cada capa, con la normal de cada punto, queda en `TerrainShape.contours`
+chicas y siguen la forma irregular, y para no cargar de triángulos el borde (que llevaba el doble de puntos por metro) un arco no tiene
+tramos de menos de 0,3 m (`MIN_TURN_ORG` y `ARC_LEN_ORG`) y una celda sin recortes se dibuja con dos triángulos y no cuatro ([MALLA.md](MALLA.md) §10). El contorno de cada capa, con la normal de cada punto, queda en `TerrainShape.contours`
 (la decoración no lo usa: mide el borde real directamente sobre la malla, ver §3).
 
 El piso firme no tiene juntas de losa: sobre él no se ven las celdas. Cada ambientación puede pedir **juntas**
-(`TerrainLook.joints`: una línea fina pintada sobre los lados entre celdas de la misma capa, un empedrado irregular); por
-defecto están apagadas. Las losas quedan para lo que se rompe y para las rampas, que así se leen como piezas aparte:
+(`TerrainLook.joints`: una línea fina pintada sobre los lados entre celdas de la misma capa, un empedrado irregular).
+El usuario las vio prendidas en la Carrera, el Refugio, la Cantera y el Puente (octubre 2026) y las dejó **apagadas en los cuatro
+juegos**: el piso queda liso y lo pintado encima (flechas, puertas, claros) se lee sin fondo. La opción sigue ahí para quien
+quiera probarla. Las losas quedan para lo que se rompe y para las rampas, que así se leen como piezas aparte:
 
 - **Losa frágil** (`terrainPieces.ts`): una pieza por celda frágil del plano, que puede ser varias celdas de la malla. Su cara
   de arriba se mete un bisel desde el contorno, el borde baja hacia la junta y los costados llegan al fondo de la isla (es una
@@ -124,17 +129,18 @@ Cada juego entra con el tema que le queda (`defaults.theme` en `core/games.ts`, 
   lectura todavía no distingue, se suma a `topology.ts`.
 - **Revisar cómo quedó:** `npm run build && node tests/e2e/maps.mjs [mapa,mapa|all] [tema]` saca capturas de
   cada mapa (entero, en juego, costa, muro, rampa y piso frágil) en `tests/e2e/out`; en las pistas de Carrera suma una toma de
-  cada puerta, y en los mapas de Asedio el minimapa (e imprime cuánto coincide con el terreno). Con `ORGANIC=1` arma el terreno
-  con la malla orgánica, con `SEED=n` fija su semilla y con `FALL=1` suma las capturas de una losa frágil cayendo y caída.
+  cada puerta, y en los mapas de Asedio el minimapa (e imprime cuánto coincide con el terreno). El terreno es el orgánico: con
+  `SEED=n` se fija su semilla, con `SQUARE=1` se arma la malla cuadrada y con `FALL=1` suma las capturas de una losa frágil cayendo y caída.
 - **Qué detecta en cada mapa:** `npm run tool:clearings`.
 
 ## 6. Lo que falta
 
 - **Probarlo jugando.** Está revisado con capturas, no en partidas con gente. Lo primero a mirar: si el borde
   redondeado se lee bien con el personaje en movimiento y si alguna pieza distrae en plena pelea.
-- **Malla irregular** (lo que hace Townscaper completo): el terreno y todo lo que se apoya en él (decoración, artefactos,
-  minimapa) ya siguen la malla orgánica cuando el ajuste de la partida la pide (tareas 15 y 16). Falta prenderla en los cuatro
-  juegos (tarea 17). El diseño está en [MALLA.md](MALLA.md) y el trabajo, en las tareas 10 a 17 de [docs/tareas](tareas/README.md).
+- **Mirar la malla orgánica en movimiento.** Está medida y revisada con capturas ([MALLA.md](MALLA.md) §10), no jugada con gente: si la
+  costa irregular se lee bien corriendo, si los pasos angostos son justos y si alguna pista quedó más difícil de lo que era.
+- **Las piezas del borde de un muro siguen alineadas con los ejes del plano** aunque el borde real se tuerza (hasta unos 30°); se
+  corren o se achican para caer sobre el muro real, pero no giran con él.
 - Los mapas de Arena sin muros (El Islote, El Flipper) muestran poco de su ambientación: casi todo lo vistoso
   va sobre los muros.
 - Las piezas son estáticas: banderas y guirnaldas no flamean.

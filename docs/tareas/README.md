@@ -64,7 +64,7 @@ nadie). Desde la 12 todo va en fila, en el orden de la tabla, porque toca los mi
 | [x] | [14](14-malla-organica-en-el-nucleo.md) | 13 | La simulación corre sobre la malla orgánica, sembrada por partida |
 | [x] | [15](15-dibujo-del-terreno.md) | 14 | El terreno se dibuja desde los polígonos: costa, acantilados, muros, losas |
 | [x] | [16](16-dibujo-del-resto.md) | 15 | Decoración, artefactos y minimapa siguen a la malla |
-| [ ] | [17](17-malla-encender-y-pulir.md) | 16 | La malla orgánica queda prendida en los cuatro juegos |
+| [x] | [17](17-malla-encender-y-pulir.md) | 16 | La malla orgánica queda prendida en los cuatro juegos |
 | [ ] | [20](20-plano-con-alturas.md) | 17 | Mapas con más de dos niveles y rampas largas |
 | [ ] | [21](21-carrera-obstaculos-nuevos.md) | 03, 20 | Obstáculos nuevos de Carrera que no dependen de saltar |
 | [ ] | [22](22-carrera-pistas-largas.md) | 17, 21 | Pistas más largas, con altura y más obstáculos |

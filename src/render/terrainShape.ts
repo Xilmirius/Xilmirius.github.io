@@ -31,6 +31,12 @@ const MAX_TURN = 2.8;
 /** Tramos de un arco de 90° y largo de los tramos rectos del acantilado. */
 const ARC = 4;
 const STEP = 0.5;
+/**
+ * Con la malla orgánica (lados de 1 m) hay una esquina cada metro, y con los arcos de siempre el borde llevaba 2,5 veces los triángulos
+ * de la cuadrada (tarea 17). Ahí un quiebre de menos de 0,3 rad (17°) sigue derecho y un arco no tiene tramos de menos de 0,3 m.
+ */
+const MIN_TURN_ORG = 0.3;
+const ARC_LEN_ORG = 0.3;
 /** Distancia en la que el relieve del acantilado se apaga al llegar a una esquina viva. */
 const TAPER = 0.8;
 /** Un vecino más alto que esto oscurece el piso a su pie (sombra de contacto). */
@@ -253,6 +259,7 @@ export class TerrainShaper {
    */
   private contour(h: number, loop: Seg[], cuts: Map<number, Cut[]>) {
     const m = this.m, adj = this.adj, n = loop.length;
+    const minTurn = m.mode === 'organic' ? MIN_TURN_ORG : MIN_TURN;
     const ux = new Float64Array(n), uz = new Float64Array(n), len = new Float64Array(n);
     const cls: Cls[] = new Array(n), mine: boolean[] = new Array(n);
     for (let i = 0; i < n; i++) {
@@ -273,7 +280,7 @@ export class TerrainShaper {
       const phi = Math.atan2(Math.abs(cross), dot);
       turn[i] = phi;
       const blocked = adj.vBlocked[loop[i].a] === 1;
-      if (phi < MIN_TURN) { kind[i] = 0; taper[i] = cls[p] !== cls[i] ? 1 : 0; continue; }
+      if (phi < minTurn) { kind[i] = 0; taper[i] = cls[p] !== cls[i] ? 1 : 0; continue; }
       if (blocked || phi > MAX_TURN) { kind[i] = 3; taper[i] = 1; continue; }
       kind[i] = cross > 0 ? 1 : 2;
       const short = Math.min(len[p], len[i]);
@@ -371,7 +378,8 @@ export class TerrainShaper {
    */
   private arcPoints(h: number, v: number, vx: number, vz: number, ix: number, iz: number, ox: number, oz: number, phi: number, d: number, salient: boolean, cuts: Map<number, Cut[]>): number[] {
     const r = d / Math.tan(phi / 2);
-    const segs = Math.max(1, Math.ceil(phi / (Math.PI / 2 / ARC) - 1e-6));
+    let segs = Math.max(1, Math.ceil(phi / (Math.PI / 2 / ARC) - 1e-6));
+    if (this.m.mode === 'organic') segs = Math.min(segs, Math.max(1, Math.round((r * phi) / ARC_LEN_ORG)));
     const lx = -iz, lz = ix; // a la izquierda de la entrada: de ese lado está la capa
     const p1x = vx - ix * d, p1z = vz - iz * d;
     const sgn = salient ? 1 : -1;
@@ -446,6 +454,13 @@ export class TerrainShaper {
           ring.push({ x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, ao });
         }
       }
+    }
+    // Una celda de la malla orgánica sin recortes ni puntos de más (lo común: 1 m de lado) son dos triángulos y no cuatro.
+    if (m.mode === 'organic' && ring.length === 4) {
+      const c = ring.map((p) => this.pointColor(h, p));
+      this.topTri(h, [ring[0].x, ring[0].z], c[0], [ring[1].x, ring[1].z], c[1], [ring[2].x, ring[2].z], c[2]);
+      this.topTri(h, [ring[0].x, ring[0].z], c[0], [ring[2].x, ring[2].z], c[2], [ring[3].x, ring[3].z], c[3]);
+      return;
     }
     // El abanico sale del centro de la celda (si el recorte no se lo llevó) y si no, del promedio de sus puntos.
     let cx = m.cx[q], cz = m.cz[q];

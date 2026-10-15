@@ -1,5 +1,6 @@
 // Jugar con los dedos (táctil emulado por CDP, multitáctil de verdad): palanca, botones, apuntado, habilidades.
 // Uso: npm run build && npm run test:touch [race|arena|horde|moba|all] [ancho] [alto]   (OUT=carpeta para capturas)
+// El terreno es el orgánico; con SQUARE=1 es el cuadrado, para comparar. Al terminar cada juego dice cuántas veces la calidad automática bajó un escalón.
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -53,10 +54,12 @@ async function start(game, settings = {}) {
   await wait(0.3);
   await p.locator('.gb-actions .btn.big').nth(1).tap();
   await p.waitForSelector('.lobby');
-  await p.evaluate((st) => { const s = window.__rubble.session; s.setSettings({ ...(s.lobby.settings.cup ? { cup: 1 } : {}), ...st }); }, settings);
+  await p.evaluate((st) => { const s = window.__rubble.session; s.setSettings({ ...(s.lobby.settings.cup ? { cup: 1 } : {}), ...st }); }, { ...settings, ...(process.env.SQUARE === '1' ? { organic: false } : {}) });
   await wait(0.3);
   await p.locator('text=Empezar partida').tap();
   await p.waitForFunction(() => window.__rubble?.session?.sim?.phase === 'play', null, { timeout: 90000 });
+  // Cuenta las veces que la calidad automática baja un escalón (match.ts: `lowerQuality`).
+  await p.evaluate(() => { const m = window.__rubble.match, o = m.lowerQuality.bind(m); window.__lowered = 0; m.lowerQuality = () => { window.__lowered++; return o(); }; });
   await wait(0.6);
 }
 // Deja al personaje quieto en un lugar despejado y a los demás lejos (o donde se pida).
@@ -86,6 +89,9 @@ async function race() {
   const c2 = await me();
   ok('el salto se suelta al levantar ese dedo', (c2.b & 1) === 0, `b ${c2.b}`);
   await wait(0.6);
+  // Hasta acá la palanca llegó al primer rotor de la pista, que empuja a quien pasa a su alcance y depende del momento: la prueba de frenado se hace de vuelta en la salida, lejos de él.
+  await place(() => { const a = window.__rubble, s = a.session.sim, c = s.chars.find((x) => x.pid === a.session.localPid), sp = s.terrain.spawns.ffa[0]; c.pos = { x: sp.x, y: sp.y, z: sp.z }; c.vel = { x: 0, y: 0, z: 0 }; });
+  await wait(0.5);
   await up(1); await wait(0.5);
   const s0 = await me(); await wait(0.3); const s1 = await me();
   ok('soltar la palanca → se frena', Math.abs(s1.x - s0.x) < 0.3 && s1.mx === 0, `x ${s0.x} → ${s1.x}`);
@@ -258,7 +264,7 @@ async function moba() {
 
 const run = { race, arena, horde, moba };
 for (const g of which === 'all' ? Object.keys(run) : which.split(',')) {
-  try { await run[g](); } catch (e) { errors.push(`[${g}] ${e.message}`); console.log('✘ se cortó:', e.message.split('\n')[0]); for (const id of [...pts.keys()]) await up(id).catch(() => {}); }
+  try { await run[g](); const q = await p.evaluate(() => ({ n: window.__lowered, t: window.__rubble.match.view.terrain.mesh.mode, fps: window.__rubble.match.fps })); console.log(`  terreno ${q.t} · ${q.fps.toFixed(0)} fps · la calidad automática bajó ${q.n} veces`); } catch (e) { errors.push(`[${g}] ${e.message}`); console.log('✘ se cortó:', e.message.split('\n')[0]); for (const id of [...pts.keys()]) await up(id).catch(() => {}); }
 }
 console.log(errors.length ? '\nERRORES:\n' + [...new Set(errors)].slice(0, 20).join('\n') : '\nsin errores');
 await browser.close();

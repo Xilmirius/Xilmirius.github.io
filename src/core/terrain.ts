@@ -1,5 +1,7 @@
-// Terreno como grilla de alturas (heightfield por celdas). Simple, barato de sincronizar y
-// suficiente para "desniveles limitados de 1-2 niveles" (GDD §7).
+// Terreno: el plano del mapa (la grilla de celdas de 2 m, con niveles, rampas, losas frágiles y puertas: la capa lógica) y la malla
+// que lo estampa (`mesh`: la capa física y visual, cuadrada u orgánica, ver docs/MALLA.md). El plano dice qué hay y dónde; la malla
+// dice dónde hay piso, a qué altura y contra qué se choca. Simple, barato de sincronizar (la malla sale de la semilla de la partida)
+// y suficiente para "desniveles limitados de 1-2 niveles" (GDD §7).
 import { CELL, ISLAND_BOTTOM, LEVEL_H, TILE_HP, WALL_TOP } from './constants';
 import { CONTACT_CELL, CONTACT_RAMP, rectContact, type ContactSink } from './contact';
 import { circleOverlapsBox, type V3 } from './math';

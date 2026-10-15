@@ -20,6 +20,18 @@
 //  'X' 'x' torre del equipo A / B    'K' 'k' núcleo del equipo A / B
 //  'n' campamento neutral            '@' guarida del Coloso (celdas contiguas se promedian)
 // Los mapas de Asedio se diseñan de la mitad izquierda y se espejan: son justos por construcción.
+//
+// Cómo se dibuja un plano. Lo que se juega no es esta grilla sino la malla orgánica (docs/MALLA.md): el plano dice qué hay y dónde,
+// y la malla le da el borde, distinto en cada partida. Lo que de ahí sale para quien dibuja:
+//  - El centro de cada celda siempre cae sobre piso o muro de su clase: salidas, coberturas, torres y artefactos van donde se pusieron,
+//    y caminar en línea recta entre los centros de dos celdas vecinas de la misma clase es siempre posible.
+//  - El borde entre dos clases (piso y vacío, piso y muro, piso y plataforma) se corre hasta 1 m de la línea de la celda. Una franja
+//    de una celda de ancho (un puente, un pasillo entre muros) queda de un poco menos de 1 m a más de 2 m. Donde el ancho importa
+//    (por ahí tienen que pasar dos a la par, o se pelea), van dos celdas.
+//  - Una zanja de una celda sigue separando sus dos lados (mide de 1 a 3 m): no hace falta ensancharla para que se pueda cruzar.
+//  - Una rampa no va embutida en una plataforma: a sus costados hay piso del nivel de abajo, vacío u otra rampa. Y conviene que la
+//    plataforma siga a los costados de la celda de llegada: con la rampa pegada al borde lateral de la plataforma, el borde irregular
+//    se mete hasta 0,7 m en su descanso.
 
 /** Para qué clase de juego está armado un mapa (ver core/games.ts). */
 export type MapKind = 'arena' | 'moba' | 'race' | 'horde';
