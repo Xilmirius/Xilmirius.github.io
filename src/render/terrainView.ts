@@ -18,7 +18,8 @@ interface TileView {
   crack: THREE.Mesh;
   state: number;
   fall: number;
-  baseY: number;
+  /** El punto de la losa sobre el que se mueve y gira: el centro de su caja, a la altura de su cara de arriba. */
+  base: THREE.Vector3;
   vr: THREE.Vector3;
 }
 
@@ -60,16 +61,21 @@ export class TerrainView {
     for (let fi = 0; fi < t.fragile.length; fi++) {
       const b = new GeoBuilder();
       const decal = buildSlab(t, style, fi, slabs[fi], this.loose(), b);
-      const m = new THREE.Mesh(b.build(), mat);
+      // La geometría de la losa queda alrededor de su centro y el Mesh se pone ahí: así gira sobre sí misma al caer, y no
+      // alrededor del origen del mundo.
+      const bb = t.slabBounds(fi);
+      const base = new THREE.Vector3((bb.minX + bb.maxX) / 2, t.mesh.top[slabs[fi][0]], (bb.minZ + bb.maxZ) / 2);
+      const geo = b.build();
+      geo.translate(-base.x, -base.y, -base.z);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(base);
       m.receiveShadow = true;
       m.castShadow = true;
       const crack = new THREE.Mesh(decal, this.crackMats[this.loose() ? 1 : 0]);
       crack.renderOrder = 2;
-      const g = new THREE.Group();
-      g.add(m);
-      this.group.add(g);
+      this.group.add(m);
       this.group.add(crack);
-      this.tiles.push({ mesh: m, crack, state: 0, fall: 0, baseY: 0, vr: new THREE.Vector3() });
+      this.tiles.push({ mesh: m, crack, state: 0, fall: 0, base, vr: new THREE.Vector3() });
     }
     this.group.add(this.buildUnderside());
     this.crumbleMat = new THREE.MeshBasicMaterial({ map: tileCracks(3), color: new THREE.Color(0xff3020).multiplyScalar(3), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, toneMapped: false });
@@ -271,7 +277,7 @@ export class TerrainView {
           tv.crack.material = s === TILE_CRUMBLING ? this.crumbleMat : this.crackMats[Math.min(3, s + (this.loose() ? 1 : 0))];
           tv.mesh.visible = true;
           tv.crack.visible = true;
-          tv.mesh.position.set(0, 0, 0);
+          tv.mesh.position.copy(tv.base);
           tv.mesh.rotation.set(0, 0, 0);
           tv.fall = 0;
         } else {
@@ -282,11 +288,11 @@ export class TerrainView {
       }
       if (s === TILE_CRUMBLING) {
         const k = 0.06;
-        tv.mesh.position.set((Math.random() - 0.5) * k, -t.tileTimer[fi] * 0.1, (Math.random() - 0.5) * k);
+        tv.mesh.position.set(tv.base.x + (Math.random() - 0.5) * k, tv.base.y - t.tileTimer[fi] * 0.1, tv.base.z + (Math.random() - 0.5) * k);
       }
       if (tv.fall > 0 && tv.mesh.visible) {
         tv.fall += dt;
-        tv.mesh.position.y = -9 * tv.fall * tv.fall;
+        tv.mesh.position.y = tv.base.y - 9 * tv.fall * tv.fall;
         tv.mesh.rotation.x += tv.vr.x * dt;
         tv.mesh.rotation.z += tv.vr.z * dt;
         if (tv.fall > 1.6) tv.mesh.visible = false;

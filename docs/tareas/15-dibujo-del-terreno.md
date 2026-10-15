@@ -106,6 +106,6 @@ Se prende desde la consola antes de empezar la partida: `__rubble.session.setSet
 
 **Lo que conviene saber**
 
-- **La losa que cae gira alrededor del origen del mundo**, no de su centro (la geometría de cada losa está en coordenadas del mundo y `TerrainView.update` rota el `Mesh`): una losa lejos del centro describe un arco raro los primeros 0,5 s de la caída. Es de antes de esta tarea y no se tocó (la tarea dice "se sigue cayendo y volviendo como hoy"); arreglarlo es dejar la geometría de cada losa alrededor de su centro y poner el `Mesh` ahí.
+- **La losa que cae giraba alrededor del origen del mundo** (la geometría de cada losa estaba en coordenadas del mundo y `TerrainView.update` rotaba el `Mesh`): una losa lejos del centro describía un arco raro los primeros 0,5 s de la caída. Era de antes de esta tarea; se arregló después, en un commit aparte: la geometría de cada losa queda alrededor del centro de su caja (a la altura de su cara de arriba) y el `Mesh` se pone ahí, así que cae y gira sobre su lugar. Comprobado en `derrumbe` con la losa más lejana del origen (x = 33 m): la posición en x y z no se mueve durante la caída.
 - **Triángulos.** Casi todo el aumento es roca (el acantilado muestrea cada 0,5 m del contorno, que en la orgánica es más largo y más quebrado). Si hiciera falta bajarlo, la perilla es `STEP` en `terrainShape.ts`.
 - **Cada capa dibuja todas sus celdas**, también las que quedan tapadas por una capa de arriba (como antes); no se descartó ninguna.
