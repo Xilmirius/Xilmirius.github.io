@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { painted } from './geo';
+import type { Support } from './support';
 import { toonGradient } from './textures';
 
 export type Bucket = 'solid' | 'cloth' | 'decal' | 'glow';
@@ -11,18 +12,96 @@ type Col = number | THREE.Color;
 
 /** Los calcos van apenas levantados del piso (además del polygonOffset) para no titilar. */
 const DECAL_Y = 0.015;
+/** Un calco que tiene que achicarse a menos de esta fracción de su tamaño no se pone. */
+const DECAL_MIN = 0.4;
 
 export class Pieces {
   private parts: Record<Bucket, THREE.BufferGeometry[]> = { solid: [], cloth: [], decal: [], glow: [] };
+  /** Lo que se está armando dentro de `framed`: las piezas se achican alrededor de (ax, ay, az) y se corren (dx, dz). */
+  private frame: { ax: number; ay: number; az: number; s: number; dx: number; dz: number } | null = null;
+  /** Mientras vale, `add` no pone nada: junta los puntos de abajo de lo que se arma (ver `base`). */
+  private probe: { y: number; out: number[] } | null = null;
+
+  /**
+   * Con `support`, los calcos (pintura sobre el piso) se achican hasta quedar enteros sobre piso real y los que no entran
+   * ni achicados no se ponen. Sin él se ponen como vienen.
+   */
+  constructor(private support: Support | null = null) {}
+
+  /**
+   * Arma con `draw` un grupo de piezas achicado `s` veces alrededor de (ax, ay, az) y corrido (dx, dz): una pieza que no entra
+   * entera en su apoyo se achica y se corre en vez de asomar. `draw` usa las coordenadas de siempre. Con s = 1 y sin corrimiento
+   * no cambia nada.
+   */
+  framed(ax: number, ay: number, az: number, s: number, dx: number, dz: number, draw: () => void) {
+    if (s === 1 && !dx && !dz) { draw(); return; }
+    const prev = this.frame;
+    this.frame = { ax, ay, az, s, dx, dz };
+    try { draw(); } finally { this.frame = prev; }
+  }
+
+  /**
+   * Corre `draw` sin poner nada y devuelve los puntos (x, z de a pares) de lo que toca la superficie a altura `y`: la base de las
+   * piezas que arma. Sirve para saber dónde se apoyaría un grupo antes de ponerlo.
+   */
+  base(y: number, draw: () => void): number[] {
+    const out: number[] = [];
+    this.probe = { y, out };
+    try { draw(); } finally { this.probe = null; }
+    return out;
+  }
 
   /** Suma una geometría ya armada en el origen: la gira sobre Y, la lleva a su lugar y la pinta. */
   add(bucket: Bucket, g: THREE.BufferGeometry, x: number, y: number, z: number, color: Col, rotY = 0) {
+    if (this.probe) {
+      if (rotY) g.rotateY(rotY);
+      g.translate(x, y, z);
+      const pos = g.attributes.position;
+      for (let i = 0; i < pos.count; i++) if (pos.getY(i) <= this.probe.y + 0.03) this.probe.out.push(pos.getX(i), pos.getZ(i));
+      return;
+    }
+    const f = this.frame;
+    if (f) {
+      if (f.s !== 1) g.scale(f.s, f.s, f.s);
+      x = f.ax + (x - f.ax) * f.s + f.dx;
+      y = f.ay + (y - f.ay) * f.s;
+      z = f.az + (z - f.az) * f.s + f.dz;
+    }
     if (rotY) g.rotateY(rotY);
+    if (bucket === 'decal' && this.support && !this.fitDecal(g, x, z)) return;
     g.translate(x, y, z);
     const ni = painted(g, color);
     ni.computeVertexNormals();
     if (!ni.attributes.uv) ni.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(ni.attributes.position.count * 2), 2));
     this.parts[bucket].push(ni);
+  }
+
+  /**
+   * Un calco ya girado y todavía en el origen, que va a ir centrado en (x, z): lo achica alrededor de su centro hasta que
+   * todos sus vértices y el centro de cada triángulo caen sobre piso real. false si no entra ni al `DECAL_MIN` de su tamaño.
+   */
+  private fitDecal(g: THREE.BufferGeometry, x: number, z: number): boolean {
+    const sup = this.support!, pos = g.attributes.position, idx = g.index;
+    const pts: number[] = [];
+    for (let i = 0; i < pos.count; i++) pts.push(pos.getX(i), pos.getZ(i));
+    const tris = idx ? idx.count / 3 : pos.count / 3;
+    for (let t = 0; t < tris; t++) {
+      const a = idx ? idx.getX(t * 3) : t * 3, b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      pts.push((pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3);
+    }
+    const ok = (k: number) => {
+      for (let i = 0; i < pts.length; i += 2) if (!sup.paint(x + pts[i] * k, z + pts[i + 1] * k)) return false;
+      return true;
+    };
+    if (ok(1)) return true;
+    if (!ok(DECAL_MIN)) return false;
+    let lo = DECAL_MIN, hi = 1;
+    for (let i = 0; i < 7; i++) {
+      const mid = (lo + hi) / 2;
+      if (ok(mid)) lo = mid; else hi = mid;
+    }
+    g.scale(lo, 1, lo);
+    return true;
   }
 
   /** Caja apoyada en y. w a lo largo de x, d a lo largo de z (antes de girar). */

@@ -1,9 +1,10 @@
 // Minimapa del Asedio: el mapa entero desde arriba con líneas, torres, núcleos, esbirros, neutrales y
 // héroes. La capa del terreno se dibuja una vez; lo que se mueve se redibuja ~15 veces por segundo.
-import { BASE_RADIUS, CELL, TEAM_COLORS } from '../core/constants';
+import { BASE_RADIUS, TEAM_COLORS } from '../core/constants';
 import { UNIT_KINDS } from '../core/entities';
 import { F_DEAD, S_INVULN, type WorldFrame } from '../core/snapshot';
-import { CellType, Terrain, TILE_GONE } from '../core/terrain';
+import { Terrain, TILE_GONE } from '../core/terrain';
+import { MESH_WALL } from '../core/terrainMesh';
 import { colorHex } from './dom';
 
 const NEUTRAL = '#ffc629';
@@ -48,16 +49,28 @@ export class Minimap {
     const c = this.base.getContext('2d')!;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.clearRect(0, 0, this.w, this.h);
-    const s = CELL * this.k;
-    for (let iz = 0; iz < t.h; iz++) {
-      for (let ix = 0; ix < t.w; ix++) {
-        const i = iz * t.w + ix;
-        const cell = t.cells[i];
-        if (cell.type === CellType.Void) continue;
-        if (cell.fragile >= 0 && t.tileState[cell.fragile] === TILE_GONE) continue;
-        c.fillStyle = cell.type === CellType.Wall ? '#4c4458' : cell.fragile >= 0 ? '#7a6a58' : cell.level > 0 ? '#9c8a74' : '#8a7a66';
-        c.fillRect(ix * s, iz * s, s + 0.5, s + 0.5);
+    // El terreno son las celdas de la malla (cuadrada u orgánica): un trazo por color, así las vecinas del mismo color se unen
+    // sin costuras. Las losas frágiles caídas no se dibujan.
+    const m = t.mesh, paths = new Map<string, Path2D>();
+    for (let q = 0; q < m.count; q++) {
+      const slab = m.slab[q];
+      if (slab >= 0 && t.tileState[slab] === TILE_GONE) continue;
+      const color = m.cls[q] === MESH_WALL ? '#4c4458' : slab >= 0 ? '#7a6a58' : m.level[q] > 0 ? '#9c8a74' : '#8a7a66';
+      let path = paths.get(color);
+      if (!path) paths.set(color, (path = new Path2D()));
+      for (let k = 0; k < 4; k++) {
+        const v = m.quads[q * 4 + k];
+        if (k) path.lineTo(this.px(m.vx[v]), this.pz(m.vz[v])); else path.moveTo(this.px(m.vx[v]), this.pz(m.vz[v]));
       }
+      path.closePath();
+    }
+    c.lineWidth = 0.6;
+    c.lineJoin = 'round';
+    for (const [color, path] of paths) {
+      c.fillStyle = color;
+      c.strokeStyle = color;
+      c.fill(path);
+      c.stroke(path);
     }
     // Líneas: un trazo tenue por el recorrido de los esbirros.
     c.strokeStyle = 'rgba(255, 225, 150, 0.35)';

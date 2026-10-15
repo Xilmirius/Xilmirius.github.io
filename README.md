@@ -184,7 +184,7 @@ src/
     snapshot.ts    Frames de mundo, codificación de red e interpolación
     maps/          Mapas en ASCII
   net/           Signaling (Supabase / local), WebRTC, sesiones host y cliente
-  render/        Three.js: terreno dibujado desde la malla (terrainShape.ts, terrainPieces.ts, contour.ts), decoración contextual y ambientación de cada juego (topology.ts, ambience.ts), beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), Asedio (mobaView.ts), temas
+  render/        Three.js: terreno dibujado desde la malla (terrainShape.ts, terrainPieces.ts, contour.ts), decoración contextual y ambientación de cada juego (topology.ts, ambience.ts, support.ts), beans, efectos, cámara, postproceso (post.ts), juice (juice.ts), indicador de apuntado (indicator.ts), Asedio (mobaView.ts), temas
   assets/        Catálogo de piezas reemplazables (catalog.ts) y cargador con fallback a lo procedural (registry.ts)
   audio/         Síntesis de sonido y música generativa (WebAudio)
   ui/            Menú, lobby, HUD, forja, minimapa, tooltips (tooltip.ts, tips.ts), galería de assets, estilos

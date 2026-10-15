@@ -10,11 +10,13 @@ Todo lo que describe este documento es solo visual: la colisión, los bots, la r
 | Capa | Archivo | Qué hace |
 |---|---|---|
 | Formas | `src/render/terrainShape.ts` (con `contour.ts` y `terrainPieces.ts`) | Arma el dibujo del terreno desde los polígonos de la malla: costa cortada en las esquinas, acantilados, muros y plataformas; las losas frágiles como piezas |
-| Lectura del mapa | `src/render/topology.ts` | Dice qué hay en cada lugar: hilera de muros, muro suelto, macizo, puente, claro, borde al vacío |
+| Lectura del mapa | `src/render/topology.ts` | Dice qué hay en cada lugar: hilera de muros, muro suelto, macizo, puente, claro, borde al vacío (siempre desde el plano) |
+| Apoyo | `src/render/support.ts` | Dice si en un punto hay de verdad muro, piso firme o borde sobre la malla, para que las piezas se apoyen donde hay con qué |
 | Ambientación | `src/render/ambience.ts` | Una por juego: colores de la roca, piezas para cada cosa que la lectura encuentra y fondo |
 
 `terrainView.ts` dibuja las formas (y las cuñas de las rampas), `decorView.ts` siembra el pasto y coloca las piezas, y
-`backdrop.ts` arma el fondo. `pieces.ts` es la caja de formas simples con la que se construyen las piezas.
+`backdrop.ts` arma el fondo. `pieces.ts` es la caja de formas simples con la que se construyen las piezas (y, con un `Support`,
+achica la pintura hasta que entra en piso real).
 
 ## 2. Formas desde el contorno
 
@@ -33,7 +35,7 @@ decide lo que cuelga: un acantilado, una pared recta o una pared de muro. En cad
 
 En la malla cuadrada (lados de 2 m) todo eso da los radios de siempre; en la orgánica (lados de 1 m) las esquinas salen más
 chicas y siguen la forma irregular. El contorno de cada capa, con la normal de cada punto, queda en `TerrainShape.contours`
-para la decoración (tarea 16).
+(la decoración no lo usa: mide el borde real directamente sobre la malla, ver §3).
 
 El piso firme no tiene juntas de losa: sobre él no se ven las celdas. Cada ambientación puede pedir **juntas**
 (`TerrainLook.joints`: una línea fina pintada sobre los lados entre celdas de la misma capa, un empedrado irregular); por
@@ -77,6 +79,26 @@ descartable; ya no hay test que lo vuelva a comprobar).
 En el Asedio los techos, banderas y estandartes toman el color del equipo de ese lado del mapa. En la Carrera
 las flechas salen de un campo de distancias a la meta, así que siguen la pista aunque dé vueltas.
 
+### De dónde sale cada cosa: plano o malla
+
+La regla de [MALLA.md](MALLA.md) §5: **qué va y dónde lo decide el plano; sobre qué se apoya lo decide la malla.** La lectura
+(`topology.ts`) sigue mirando el plano, que es donde están las intenciones del mapa; lo que mide el apoyo real es `support.ts`
+(`Support`), que le pregunta a la malla (`surfaceAt`) si en un punto hay muro, piso firme, piso llano o vacío. Con la malla cuadrada el
+borde real es el lado de la celda del plano y todo queda donde estaba; con la orgánica, el contorno irregular.
+
+| Cosa | La decide el plano | Se apoya en la malla |
+|---|---|---|
+| Hileras de muros, codos, muros sueltos, macizos | cuál es cada uno y qué pieza lleva (`WallSpot`) | cada pieza de arriba de un muro se prueba en seco (`Pieces.base`: los puntos de su base). Si no cae entera sobre el muro real se corre hacia el centro de la celda y, si todavía no, se achica (hasta el 60 %). Si no entra, no se pone |
+| Pintura sobre el piso (claros, galones, flechas, rejillas) | dónde va (`Clearing`, `BridgeSpot`) | `Pieces` achica cada calco alrededor de su centro hasta que todos sus vértices y el centro de cada triángulo caen sobre piso llano y firme del nivel de abajo. Bajo el 40 % de su tamaño no se pone |
+| Puentes: tablones, rejilla, ménsulas, caños, postes de la guirnalda | cuáles celdas son puente y hacia dónde van | el ancho de piso a cada lado del centro de la celda (`Support.span`): los tablones llegan de borde a borde y lo que cuelga va pegado al borde real |
+| Costa: cristales, enredaderas, estandartes, carteles, cadenas, caños, y las rocas del acantilado | cada lado de celda que da al vacío (`CoastSpot`) | el borde real que da al vacío (`Support.edgeAt`): desde el centro de la celda se avanza hacia afuera hasta salir del muro o del piso, con la altura y la normal del lado de la malla que lo forma. Cada pieza suelta se pega al borde donde le toca |
+| Pasto, piedritas, flores | cuántas hay por celda y de qué color | solo si el punto cae sobre piso firme (o rampa); la altura es la de la malla |
+| Franja de cada puerta de la Carrera | cuáles celdas son la puerta | las celdas de la malla que caen en su grosor, recortadas a él: llega de borde a borde del piso real, también el que asoma |
+| Carril de las bolas y su punto de caída | dónde está el lanzabolas y hacia dónde rueda | el largo real (`GadgetSpawn.len`, tarea 14) y una cinta que se angosta donde el piso es más angosto |
+| Resorte | en qué celda está | la altura del piso real en el centro de la celda |
+| Minimapa | – | los polígonos de la malla (piso, plataformas, muros, losas frágiles; los huecos de las caídas no se dibujan) |
+| Fondo e islas lejanas, suelo (`ground.ts`) | – | solo dependen de los límites del mapa y de las líneas del Asedio, no de las celdas |
+
 ### Nada parece un obstáculo que no es
 
 Las piezas no colisionan, así que **sobre el piso que se pisa solo va pintura** (y el pasto chico de siempre).
@@ -101,18 +123,18 @@ Cada juego entra con el tema que le queda (`defaults.theme` en `core/games.ts`, 
 - **Una pieza nueva:** se arma con `Pieces` (cajas, cilindros, telas, calcos). Si necesita una situación que la
   lectura todavía no distingue, se suma a `topology.ts`.
 - **Revisar cómo quedó:** `npm run build && node tests/e2e/maps.mjs [mapa,mapa|all] [tema]` saca capturas de
-  cada mapa (entero, en juego, costa, muro, rampa y piso frágil) en `tests/e2e/out`. Con `ORGANIC=1` arma el terreno con la
-  malla orgánica, con `SEED=n` fija su semilla y con `FALL=1` suma las capturas de una losa frágil cayendo y caída.
+  cada mapa (entero, en juego, costa, muro, rampa y piso frágil) en `tests/e2e/out`; en las pistas de Carrera suma una toma de
+  cada puerta, y en los mapas de Asedio el minimapa (e imprime cuánto coincide con el terreno). Con `ORGANIC=1` arma el terreno
+  con la malla orgánica, con `SEED=n` fija su semilla y con `FALL=1` suma las capturas de una losa frágil cayendo y caída.
 - **Qué detecta en cada mapa:** `npm run tool:clearings`.
 
 ## 6. Lo que falta
 
 - **Probarlo jugando.** Está revisado con capturas, no en partidas con gente. Lo primero a mirar: si el borde
   redondeado se lee bien con el personaje en movimiento y si alguna pieza distrae en plena pelea.
-- **Malla irregular** (lo que hace Townscaper completo): el terreno ya se dibuja desde la malla orgánica cuando el ajuste
-  de la partida la pide (tarea 15). Falta que la decoración, los artefactos y el minimapa la sigan (tarea 16) y prenderla
-  en los cuatro juegos (tarea 17). El diseño está en [MALLA.md](MALLA.md) y el trabajo, en las tareas 10 a 17 de
-  [docs/tareas](tareas/README.md).
+- **Malla irregular** (lo que hace Townscaper completo): el terreno y todo lo que se apoya en él (decoración, artefactos,
+  minimapa) ya siguen la malla orgánica cuando el ajuste de la partida la pide (tareas 15 y 16). Falta prenderla en los cuatro
+  juegos (tarea 17). El diseño está en [MALLA.md](MALLA.md) y el trabajo, en las tareas 10 a 17 de [docs/tareas](tareas/README.md).
 - Los mapas de Arena sin muros (El Islote, El Flipper) muestran poco de su ambientación: casi todo lo vistoso
   va sobre los muros.
 - Las piezas son estáticas: banderas y guirnaldas no flamean.

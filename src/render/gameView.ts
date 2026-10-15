@@ -911,7 +911,7 @@ export class GameView {
       case 'tile': {
         const ci = this.terrain.fragile[e.i];
         if (ci === undefined) break;
-        const b = this.terrain.cellBounds(ci);
+        const b = this.terrain.slabBounds(e.i);
         const x = (b.minX + b.maxX) / 2, z = (b.minZ + b.maxZ) / 2;
         const y = this.terrain.cells[ci].level * 1.5;
         if (e.s === 0) {

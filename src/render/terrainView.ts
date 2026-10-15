@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CELL, ISLAND_BOTTOM, LEVEL_H, WALL_TOP } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, Terrain, TILE_CRUMBLING, TILE_GONE } from '../core/terrain';
+import { SURF_NONE } from '../core/terrainMesh';
 import { GroundStyle } from './ground';
 import { AO_STEP, BEVEL_DROP, BEVEL_IN, GeoBuilder, buildSlab, slabCells } from './terrainPieces';
 import { DEFAULT_LOOK, TerrainShaper, type TerrainLook } from './terrainShape';
@@ -220,7 +221,10 @@ export class TerrainView {
       const g = new THREE.ConeGeometry(r.range(0.7, 1.25), hgt, 5);
       g.rotateX(Math.PI);
       g.rotateY(r.range(0, 6));
-      g.translate(c.x + r.range(-0.4, 0.4), ISLAND_BOTTOM - hgt / 2 + 0.2, c.z + r.range(-0.4, 0.4));
+      let cx = c.x + r.range(-0.4, 0.4), cz = c.z + r.range(-0.4, 0.4);
+      // Cuelga de piso real: con la malla orgánica el borde no es el de la celda del plano, y su centro (que siempre es piso) sirve de apoyo.
+      if (t.mesh.surfaceAt(cx, cz) === SURF_NONE) { cx = c.x; cz = c.z; }
+      g.translate(cx, ISLAND_BOTTOM - hgt / 2 + 0.2, cz);
       const ni = g.toNonIndexed();
       ni.computeVertexNormals();
       geos.push(ni);
@@ -246,6 +250,8 @@ export class TerrainView {
         const out = nx < 0 || nz < 0 || nx >= t.w || nz >= t.h || t.cells[nz * t.w + nx].type === CellType.Void;
         if (!out) continue;
         const ex = cx + dx * (CELL / 2 - 0.05), ez = cz + dz * (CELL / 2 - 0.05);
+        // Solo donde de verdad no hay nada más allá de la cuña: con la malla orgánica el piso de abajo puede seguir y ya trae su neón.
+        if (t.mesh.surfaceAt(ex + dx * 0.15, ez + dz * 0.15) !== SURF_NONE) continue;
         const top = t.topAt(i, ex - dx * 0.1, ez - dz * 0.1);
         const g = new THREE.BoxGeometry(dx ? 0.1 : CELL, 0.1, dz ? 0.1 : CELL);
         g.translate(ex, top + 0.04, ez);

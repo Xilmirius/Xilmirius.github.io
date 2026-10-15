@@ -4,7 +4,9 @@
 import * as THREE from 'three';
 import { CELL, TICK_RATE } from '../core/constants';
 import { BOOST, BUMPER, GEYSER, geyserPhase, geyserTime, ROLLER, ROTOR, rotorAngle } from '../core/gadgets';
-import type { Terrain } from '../core/terrain';
+import type { Gate, Terrain } from '../core/terrain';
+import { MESH_FLOOR } from '../core/terrainMesh';
+import { Support } from './support';
 import { hazardStripes, ringTexture, softDisc, toonGradient } from './textures';
 
 /** Colores de cada artefacto (también los usa la vista para sus efectos). */
@@ -70,7 +72,105 @@ function checkerTexture(): THREE.Texture {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.magFilter = THREE.NearestFilter;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
+}
+
+/** Cuánto asoma el piso real de la malla orgánica fuera de las celdas del plano de una puerta (docs/MALLA.md §5). */
+const GATE_ALERO = 1;
+/** Altura sobre el piso de la franja de una puerta. */
+const GATE_LIFT = 0.03;
+
+/** Recorta un polígono convexo contra el rectángulo [x0, x1] × [z0, z1] (Sutherland–Hodgman). */
+function clipRect(poly: [number, number][], x0: number, x1: number, z0: number, z1: number): [number, number][] {
+  const planes: [number, number, number][] = [[1, 0, -x0], [-1, 0, x1], [0, 1, -z0], [0, -1, z1]]; // a·x + b·z + c >= 0
+  let out = poly;
+  for (const [a, b, c] of planes) {
+    const inp = out;
+    out = [];
+    for (let i = 0; i < inp.length; i++) {
+      const p = inp[i], q = inp[(i + 1) % inp.length];
+      const dp = a * p[0] + b * p[1] + c, dq = a * q[0] + b * q[1] + c;
+      if (dp >= 0) out.push(p);
+      if ((dp >= 0) !== (dq >= 0)) { const k = dp / (dp - dq); out.push([p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k]); }
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
+/**
+ * La franja de una puerta: el piso real de lado a lado en el grosor de sus celdas del plano (el piso que asoma de la malla
+ * orgánica incluido), a la altura de cada celda de la malla. Con la malla cuadrada son las mismas celdas de siempre. El UV sigue
+ * la grilla del plano (una vuelta de la textura por celda).
+ */
+function gateGeometry(t: Terrain, gate: Gate): { geo: THREE.BufferGeometry; y: number } {
+  const m = t.mesh;
+  let ix0 = Infinity, ix1 = -Infinity, iz0 = Infinity, iz1 = -Infinity;
+  for (const ci of gate.cells) {
+    const ix = ci % t.w, iz = Math.floor(ci / t.w);
+    ix0 = Math.min(ix0, ix); ix1 = Math.max(ix1, ix); iz0 = Math.min(iz0, iz); iz1 = Math.max(iz1, iz);
+  }
+  const bx0 = t.originX + ix0 * CELL, bx1 = t.originX + (ix1 + 1) * CELL, bz0 = t.originZ + iz0 * CELL, bz1 = t.originZ + (iz1 + 1) * CELL;
+  // La franja es recta en el sentido de su grosor y llega hasta donde llega el piso en el otro.
+  const alongX = bx1 - bx0 >= bz1 - bz0;
+  const x0 = alongX ? bx0 - GATE_ALERO : bx0, x1 = alongX ? bx1 + GATE_ALERO : bx1;
+  const z0 = alongX ? bz0 : bz0 - GATE_ALERO, z1 = alongX ? bz1 : bz1 + GATE_ALERO;
+  const pos: number[] = [], uv: number[] = [];
+  let y = 0;
+  for (let q = 0; q < m.count; q++) {
+    if (m.cls[q] !== MESH_FLOOR || m.maxX[q] <= x0 || m.minX[q] >= x1 || m.maxZ[q] <= z0 || m.minZ[q] >= z1) continue;
+    const poly: [number, number][] = [];
+    for (let k = 0; k < 4; k++) { const v = m.quads[q * 4 + k]; poly.push([m.vx[v], m.vz[v]]); }
+    const clipped = clipRect(poly, x0, x1, z0, z1);
+    if (clipped.length < 3) continue;
+    y = m.top[q] + GATE_LIFT;
+    for (let i = 1; i + 1 < clipped.length; i++) {
+      for (const [px, pz] of [clipped[0], clipped[i + 1], clipped[i]]) {
+        pos.push(px, y, pz);
+        uv.push((px - t.originX) / CELL, -(pz - t.originZ) / CELL);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return { geo, y: y - GATE_LIFT };
+}
+
+/** Ancho del carril pintado de las bolas. */
+const LANE_W = 1.25;
+/** Largo de cada tramo con el que el carril se recorta al piso. */
+const LANE_STEP = 0.25;
+
+/**
+ * El carril de un lanzabolas, en las coordenadas del lanzabolas (z a lo largo del carril): una cinta de `LANE_W` de ancho que se
+ * angosta donde el piso real es más angosto, para no pintar sobre el vacío.
+ */
+function laneGeometry(sup: Support, x: number, z: number, dx: number, dz: number, len: number): THREE.BufferGeometry {
+  const n = Math.max(1, Math.ceil(len / LANE_STEP));
+  const pos: number[] = [], idx: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const d = Math.min(len, i * (len / n));
+    // El último tramo termina justo en el borde del piso: se mide un poco antes, donde todavía hay piso.
+    const dm = Math.min(d, len - 0.05), cx = x + dx * dm, cz = z + dz * dm;
+    // En el lanzabolas, +x del carril es (dz, -dx) en el mundo.
+    const [lo, hi] = sup.span(cx, cz, dz, -dx, LANE_W, sup.ground);
+    // Cada borde de la cinta se angosta hasta que su vértice cae sobre piso (el fin del piso no siempre es recto).
+    const ex = x + dx * Math.min(d, len - 0.01), ez = z + dz * Math.min(d, len - 0.01);
+    const edge = (w: number, sgn: number) => {
+      let k = Math.min(LANE_W / 2, w - 0.02);
+      while (k > 0.02 && !sup.ground(ex + sgn * dz * (k + 0.03), ez - sgn * dx * (k + 0.03))) k *= 0.85;
+      return Math.max(0, k);
+    };
+    const a = edge(lo, -1), b = edge(hi, 1);
+    pos.push(-a, 0, d, b, 0, d);
+    if (i) { const k = (i - 1) * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  return geo;
 }
 
 function boxTexture(): THREE.Texture {
@@ -108,10 +208,12 @@ export class GadgetsView {
   private arrow: THREE.Mesh | null = null;
 
   constructor(t: Terrain) {
+    const sup = new Support(t);
     for (let i = 0; i < t.cells.length; i++) {
       if (!t.cells[i].pad) continue;
       const c = t.cellCenter(i % t.w, Math.floor(i / t.w));
-      this.addPad(c.x, t.topAt(i, c.x, c.z), c.z);
+      const y = t.groundAt(c.x, c.z);
+      this.addPad(c.x, Number.isFinite(y) ? y : t.topAt(i, c.x, c.z), c.z);
     }
     t.gadgets.forEach((g, idx) => {
       const y = Math.max(0, t.groundAt(g.x, g.z));
@@ -119,7 +221,7 @@ export class GadgetsView {
       else if (g.kind === 'rotor') this.addRotor(idx, g.x, y, g.z);
       else if (g.kind === 'geyser') this.addGeyser(idx, g.x, y, g.z);
       else if (g.kind === 'boost') this.addBoost(idx, g.x, y, g.z);
-      else if (g.kind === 'roller') this.addRoller(idx, g.x, y, g.z, g.dx ?? 0, g.dz ?? 0, g.len ?? 0);
+      else if (g.kind === 'roller') this.addRoller(sup, idx, g.x, y, g.z, g.dx ?? 0, g.dz ?? 0, g.len ?? 0);
       else this.addBox(idx, g.x, y, g.z);
     });
     t.gates.forEach((gate, i) => {
@@ -127,16 +229,11 @@ export class GadgetsView {
       const mat = new THREE.MeshBasicMaterial(goal
         ? { map: checkerTexture(), transparent: true, opacity: 0.85, depthWrite: false }
         : { color: 0xffd23f, transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false });
-      let y = 0;
-      for (const ci of gate.cells) {
-        const c = t.cellCenter(ci % t.w, Math.floor(ci / t.w));
-        y = t.topAt(ci, c.x, c.z);
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(CELL * 0.96, CELL * 0.96), mat);
-        m.rotation.x = -Math.PI / 2;
-        m.position.set(c.x, y + 0.03, c.z);
-        m.renderOrder = 1;
-        this.group.add(m);
-      }
+      const strip = gateGeometry(t, gate);
+      const mesh = new THREE.Mesh(strip.geo, mat);
+      mesh.renderOrder = 1;
+      this.group.add(mesh);
+      const y = strip.y;
       this.gates.push({ mat, x: gate.x, y, z: gate.z });
     });
     if (this.gates.length) {
@@ -267,7 +364,7 @@ export class GadgetsView {
     this.boosts.set(idx, { bolt: boltMat, ring, idx, pulse: 0 });
   }
 
-  private addRoller(idx: number, x: number, y: number, z: number, dx: number, dz: number, len: number) {
+  private addRoller(sup: Support, idx: number, x: number, y: number, z: number, dx: number, dz: number, len: number) {
     const g = new THREE.Group();
     g.position.set(x, y, z);
     g.rotation.y = Math.atan2(dx, dz);
@@ -278,10 +375,9 @@ export class GadgetsView {
     const lip = new THREE.Mesh(new THREE.TorusGeometry(ROLLER.r + 0.22, 0.07, 6, 18, Math.PI), glow(GADGET_COLORS.roller, 1.3));
     lip.position.z = 0.18;
     g.add(lip);
-    // El carril, pintado en el piso, para que se vea por dónde vienen.
-    const lane = new THREE.Mesh(new THREE.PlaneGeometry(1.25, len), new THREE.MeshBasicMaterial({ color: GADGET_COLORS.roller, transparent: true, opacity: 0.2, depthWrite: false, toneMapped: false }));
-    lane.rotation.x = -Math.PI / 2;
-    lane.position.set(0, 0.025, len / 2);
+    // El carril, pintado en el piso, para que se vea por dónde vienen: de 1,25 m de ancho, o menos donde el piso real es más angosto.
+    const lane = new THREE.Mesh(laneGeometry(sup, x, z, dx, dz, len), new THREE.MeshBasicMaterial({ color: GADGET_COLORS.roller, transparent: true, opacity: 0.2, depthWrite: false, toneMapped: false }));
+    lane.position.y = 0.025;
     lane.renderOrder = 1;
     g.add(lane);
     this.group.add(g);

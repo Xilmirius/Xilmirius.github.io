@@ -1,6 +1,7 @@
 // Capturas de los mapas para revisar el terreno y la ambientación: cada mapa visto desde arriba (entero) y a la
 // altura de la cámara del juego en la salida, en un borde que da al vacío, al pie de un muro, en una rampa y sobre piso
-// frágil (y, con FALL=1, con esa losa ya caída: el hueco que deja).
+// frágil (y, con FALL=1, con esa losa ya caída: el hueco que deja). En las pistas de Carrera, una toma desde arriba de cada
+// puerta; en los mapas de Asedio, el minimapa (y cuánto coincide con el terreno).
 // Uso: npm run build && node tests/e2e/maps.mjs [mapa,mapa|all] [tema]   (OUT=carpeta, BASE=servidor ya levantado)
 // El terreno es la malla cuadrada. Con ORGANIC=1 es la orgánica, y con SEED=n la de esa semilla (si no, una al azar: se imprime).
 import { spawn } from 'node:child_process';
@@ -82,7 +83,7 @@ for (const map of maps) {
       const ramps = near(cells.filter((q) => q.c.type === 3));
       const frags = near(cells.filter((q) => q.c.fragile >= 0));
       const rampSpot = ramps.length ? ctr(ramps[0].q) : null, fragSpot = frags.length ? ctr(frags[0].q) : null;
-      return { mid, span: Math.max(b.maxX - b.minX, (b.maxZ - b.minZ) * 1.6), coast: pick(coast, 0.5), coast2: pick(coast, 0.05), wall: pick(walls, 0.1), ramp: rampSpot, frag: fragSpot, fragIndex: frags.length ? frags[0].q.c.fragile : -1 };
+      return { gates: t.gates.map((g) => ({ x: g.x, z: g.z })), mid, span: Math.max(b.maxX - b.minX, (b.maxZ - b.minZ) * 1.6), coast: pick(coast, 0.5), coast2: pick(coast, 0.05), wall: pick(walls, 0.1), ramp: rampSpot, frag: fragSpot, fragIndex: frags.length ? frags[0].q.c.fragile : -1 };
     });
     const shot = async (name, cam) => {
       await p.evaluate((c) => { window.__cam = c; }, cam);
@@ -96,6 +97,32 @@ for (const map of maps) {
     if (spots.wall) await shot('5-muro', { x: spots.wall.x, z: spots.wall.z, d: 0.62 });
     if (spots.ramp) await shot('6-rampa', { x: spots.ramp.x, z: spots.ramp.z, d: 0.5 });
     if (spots.frag) await shot('7-fragil', { x: spots.frag.x, z: spots.frag.z, d: 0.5 });
+    // Carrera: cada puerta (punto de control o meta) desde la cámara de siempre, para ver que la franja llega de borde a borde.
+    for (const [i, g] of (spots.gates ?? []).entries()) await shot(`10-puerta-${i + 1}`, { x: g.x, z: g.z, d: 0.7 });
+    // Asedio: el minimapa. Se saca el recuadro, y se compara una muestra de puntos del mapa con lo que dibujó.
+    const mini = await p.evaluate(() => {
+      const cv = document.querySelector('canvas.minimap');
+      if (!cv) return null;
+      const t = window.__rubble.match.view.terrain, b = t.bounds(), dpr = cv.width / parseFloat(cv.style.width);
+      const k = parseFloat(cv.style.width) / (b.maxX - b.minX), g = cv.getContext('2d');
+      let same = 0, n = 0, s = 12345;
+      const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+      // Puntos al azar, tomados en el centro del píxel que los contiene (el minimapa no resuelve menos que un píxel).
+      for (let i = 0; i < 2000; i++) {
+        const px = Math.floor(rnd() * cv.width), pz = Math.floor(rnd() * cv.height);
+        const x = t.originX + (px + 0.5) / (k * dpr), z = t.originZ + (pz + 0.5) / (k * dpr);
+        const drawn = g.getImageData(px, pz, 1, 1).data[3] >= 200;
+        n++;
+        if (drawn === (t.groundAt(x, z) > -Infinity)) same++;
+      }
+      return { same, n };
+    });
+    if (mini) {
+      console.log(map, `minimapa: coincide ${mini.same} de ${mini.n} (${((100 * mini.same) / mini.n).toFixed(1)} %)`);
+      await p.evaluate(() => document.querySelector('.hud')?.style.setProperty('opacity', '1'));
+      await p.locator('canvas.minimap').screenshot({ path: `${OUT}/map-${tag}${map}-11-minimapa.png` });
+      await p.evaluate(() => document.querySelector('.hud')?.style.setProperty('opacity', '0'));
+    }
     if (FALL && spots.frag) {
       // La losa cae (solo en la vista): pasada la caída queda el hueco.
       await p.evaluate((fi) => { window.__rubble.match.view.terrain.setTileState(fi, 4); }, spots.fragIndex);

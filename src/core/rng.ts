@@ -2,6 +2,9 @@
 export class Rng {
   private s: number;
   constructor(seed: number) { this.s = seed >>> 0 || 1; }
+  /** El estado interno: guardarlo y devolverlo hace que se repita lo que se saque después (para probar sin gastar números). */
+  get state(): number { return this.s; }
+  set state(v: number) { this.s = v; }
   next(): number {
     let t = (this.s += 0x6d2b79f5);
     t = Math.imul(t ^ (t >>> 15), t | 1);

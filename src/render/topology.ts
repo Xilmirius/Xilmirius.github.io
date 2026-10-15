@@ -30,8 +30,11 @@ export interface WallSpot {
 /** Piso de una celda de ancho con vacío a los dos lados. axis: 'x' si el puente corre de este a oeste. */
 export interface BridgeSpot { ix: number; iz: number; x: number; z: number; axis: 'x' | 'z'; /** Largo del puente (celdas). */ run: number; /** Posición dentro del puente, 0..run-1. */ at: number }
 
-/** Lado de una celda que da al vacío. */
-export interface CoastSpot { ix: number; iz: number; side: number; x: number; z: number; nx: number; nz: number; /** Altura del borde. */ y: number }
+/**
+ * Lado de una celda del plano que da al vacío: dónde cae el borde si el terreno fuera el plano (x, z, normal nx, nz y altura y).
+ * El borde real lo da la malla: con `cx`, `cz` (el centro de la celda) y `wall` se lo busca desde adentro (`Support.edgeAt`).
+ */
+export interface CoastSpot { ix: number; iz: number; side: number; x: number; z: number; nx: number; nz: number; /** Altura del borde. */ y: number; cx: number; cz: number; wall: boolean }
 
 /** Claro: piso llano y libre alrededor de un punto. r en metros. */
 export interface Clearing { ix: number; iz: number; x: number; z: number; r: number }
@@ -87,7 +90,7 @@ export function analyze(t: Terrain, reserved = reservedCells(t)): Topology {
     if (c.fragile < 0) {
       const y = c.type === CellType.Wall ? WALL_TOP : c.type === CellType.Ramp ? 0 : c.level * LEVEL_H;
       SIDES.forEach(([dx, dz], s) => {
-        if (!nb[s]) coasts.push({ ix, iz, side: s, x: ctr.x + dx * (CELL / 2), z: ctr.z + dz * (CELL / 2), nx: dx, nz: dz, y });
+        if (!nb[s]) coasts.push({ ix, iz, side: s, x: ctr.x + dx * (CELL / 2), z: ctr.z + dz * (CELL / 2), nx: dx, nz: dz, y, cx: ctr.x, cz: ctr.z, wall: c.type === CellType.Wall });
       });
     }
 

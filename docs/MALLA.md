@@ -1,8 +1,8 @@
 # Malla irregular: diseño
 
-> Estado: **plan**. Es la referencia de las tareas 10 a 17 de [docs/tareas](tareas/README.md). Reemplaza la nota
-> "quedó afuera a propósito" de [TERRENO.md](TERRENO.md) §6. Cuando la tarea 17 termine, este documento pasa a
-> describir lo que hay.
+> Estado: **plan**, con lo ya hecho anotado en los "Cómo quedó" (tareas 10 a 16). Es la referencia de las tareas 10 a 17 de
+> [docs/tareas](tareas/README.md). Reemplaza la nota "quedó afuera a propósito" de [TERRENO.md](TERRENO.md) §6. Cuando la
+> tarea 17 termine, este documento pasa a describir lo que hay.
 
 ## 1. La idea: dos capas
 
@@ -165,6 +165,38 @@ llegan a la misma malla porque corren la misma comprobación con la misma semill
 Una puerta de la Carrera incluye también las celdas de vacío del plano pegadas a ella: la malla puede asomar hasta
 1 m más allá del borde del plano, y quien pase por ese alero tiene que contar.
 
+### Cómo quedó (tarea 16)
+
+`src/render/support.ts` (`Support`) es el que le pregunta a la malla si en un punto hay de verdad lo que una pieza necesita:
+`wall` (cara de arriba de un muro), `land` (piso o rampa de cualquier nivel), `ground` (piso firme o rampa, sin losas frágiles) y `paint`
+(piso llano del nivel de abajo y firme, donde va la pintura). Todo se mide con `surfaceAt`, así que cuenta lo mismo que cuenta la
+física. Con la malla cuadrada el borde real es el lado de la celda del plano; la lectura del plano (`topology.ts`) no cambió.
+
+- **Borde real que da al vacío** (`edgeAt`). Desde el centro de una celda del plano, que por §2 siempre es piso o muro de su clase, se
+  avanza por la normal del lado que daba al vacío hasta salir de la región (pasos de 5 cm y después se afina a la milésima). Ahí tiene que haber
+  vacío 12 cm más allá, si no se prueba más cerca del medio del lado. De vuelta salen el punto, la altura (la de la celda de la malla que forma
+  el borde) y la normal real (la del lado de esa celda que da al vacío). En la orgánica el borde queda hasta ~1 m del lado del plano.
+- **Piezas de arriba de un muro** (`put` en `ambience.ts`). Se prueba en seco lo que va a armar (`Pieces.base`: los puntos de su base, es decir
+  los vértices a menos de 3 cm de la cara de arriba) y se busca, en este orden, que todos caigan sobre el muro real: la pieza donde iba; corrida
+  hacia el centro de la celda en pasos del 5 % del camino; y así a 0,9, 0,8, 0,7 y 0,6 de su tamaño. Si ninguna entra no se pone. La prueba
+  no gasta números al azar (`Rng.state` guarda y devuelve el estado), así que con la malla cuadrada, donde todo entra a la primera, la
+  decoración sale idéntica.
+- **Pintura sobre el piso.** `Pieces` achica cada calco alrededor de su centro hasta que todos sus vértices y el centro de cada triángulo
+  caen sobre `paint`; bajo el 40 % del tamaño no se pone. Los puentes miden además su ancho real (`span`) para que tablones y rejilla lleguen de
+  borde a borde y lo que cuelga (ménsulas, caños, postes de la guirnalda) quede pegado al borde.
+- **Costa.** Cada pieza se pega al borde real con `edgeAt`, a su propia distancia a lo largo del lado, con la normal real para girarla. Los cristales
+  de la Arena no se alejan más de 15 cm del borde hacia afuera (antes hasta 35) y el cartel de la Carrera se acorta si el borde se curva a sus costados.
+- **Pasto, piedritas, flores y rocas del acantilado.** Siguen saliendo por celda del plano con los mismos números al azar; solo se ponen si el punto
+  cae sobre piso firme (`ground`) y la altura es la de la malla (`Terrain.groundAt`). Las rocas del acantilado se pegan al borde real.
+- **Puertas.** La franja de cada puerta es el piso real de la malla en el grosor de las celdas de la puerta (recortado a ese grosor, con el alero de hasta
+  1 m a los lados), a la altura de cada celda, con el UV de la textura sobre la grilla del plano. Con la cuadrada son las mismas celdas de siempre, pero
+  sin los 8 cm de separación entre una y otra.
+- **Carril de las bolas.** Una cinta de 1,25 m que se angosta donde el piso real es más angosto (y sus dos vértices de cada tramo siempre caen sobre piso);
+  el largo es `GadgetSpawn.len` de la tarea 14.
+- **Resorte, minimapa, conos y neón.** El resorte se dibuja a la altura del piso real del centro de su celda. El minimapa dibuja los polígonos de la malla
+  (un trazo por color). Los conos de abajo de la isla cuelgan de piso real, las tiras de neón del borde de una rampa solo van donde no hay nada más allá de la cuña,
+  y las partículas de una losa frágil que se rompe salen de la caja de la losa.
+
 ## 6. Colisión
 
 Antes el movimiento probaba un eje por vez contra cajas alineadas (`moveAxis` en `src/core/movement.ts`). Con paredes
@@ -258,8 +290,10 @@ dibujo con un solo camino de código. Es solo dibujo: la física no cambió.
   esa losa: cada punto está sobre el contorno de la losa (verificado, a menos de 0,001 mm).
 - **Juntas.** `TerrainLook.joints` (color y ancho). Líneas finas sobre los lados entre dos celdas de la capa, recortadas por las esquinas
   cortadas. Apagadas en las cuatro ambientaciones.
-- **Para la 16.** `TerrainShape.contours`: cada tramo del contorno de cada capa con `h`, qué hay afuera (`out`), si la cara es de la
+- **Contornos.** `TerrainShape.contours`: cada tramo del contorno de cada capa con `h`, qué hay afuera (`out`), si la cara es de la
   capa (`mine`) y los puntos con su normal hacia afuera, ya con las esquinas cortadas. `MeshAdj` y `ShapeContour` salen de `contour.ts` y `terrainShape.ts`.
+  La decoración de la tarea 16 no los usa: mide el borde real directamente sobre la malla (con las esquinas cortadas el dibujo queda unos centímetros
+  dentro del borde real, y las piezas se apoyan en el real).
 - **Medido** (script descartable, diez mapas × cuadrada y orgánica con tres semillas): ningún vértice de una cara de arriba, de una losa o de la
   pintura queda a más de 11,7 cm de piso real de esa altura o más (11,7 cm es el relleno de las esquinas entrantes de la cuadrada; en
   la orgánica, 6,8 cm en las caras y 9,1 cm en la pintura) y el centro de toda celda de la malla queda cubierto por una cara dibujada

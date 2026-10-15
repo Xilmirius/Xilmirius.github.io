@@ -6,13 +6,13 @@
 // y apagado, o pintado, para no confundirse con los trozos ni con las coberturas.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CELL } from '../core/constants';
 import { Rng } from '../core/rng';
 import { CellType, type Cell, type Terrain } from '../core/terrain';
 import { ambienceOf, type Ambience } from './ambience';
 import { faceted, painted, shade } from './geo';
 import type { GroundStyle } from './ground';
 import { Pieces } from './pieces';
+import { Support } from './support';
 import type { ThemeDef } from './themes';
 import { analyze, reservedCells, takeClearings } from './topology';
 import { toonGradient } from './textures';
@@ -86,8 +86,9 @@ export class DecorView {
     const gems = typeof theme.neon === 'number' ? [theme.neon, 0xffffff] : [0x4fd1ff, 0xff4f8b, 0xb070ff];
 
     // Piezas del juego según la forma del mapa. Usa su propia semilla: cambiar una regla no mueve el pasto.
-    const pieces = new Pieces();
-    const ctx = { t, topo: analyze(t, reserved), p: pieces, r: new Rng(t.w * 977 + t.h * 53 + t.def.id.length * 11), theme, look: amb.look, gems, leaf };
+    const sup = new Support(t);
+    const pieces = new Pieces(sup);
+    const ctx = { t, topo: analyze(t, reserved), p: pieces, sup, r: new Rng(t.w * 977 + t.h * 53 + t.def.id.length * 11), theme, look: amb.look, gems, leaf };
     for (const w of ctx.topo.walls) amb.wall(ctx, w);
     for (const b of ctx.topo.bridges) amb.bridge(ctx, b);
     for (const s of ctx.topo.coasts) amb.coast(ctx, s);
@@ -103,11 +104,14 @@ export class DecorView {
       const ctr = t.cellCenter(ix, iz);
       const spot = (spread: number): [number, number] => [ctr.x + r.range(-spread, spread), ctr.z + r.range(-spread, spread)];
 
-      // Rocas asomando del acantilado en los bordes que dan al vacío.
+      // Rocas asomando del acantilado en los bordes que dan al vacío: pegadas al borde real, que con la malla orgánica no es
+      // el lado de la celda del plano.
       for (const [dx, dz] of DIRS) {
         if (this.cell(ix + dx, iz + dz) || !r.chance(0.28)) continue;
         const s = r.range(0.45, 0.95), along = r.range(-0.7, 0.7);
-        boulders.add(ctr.x + dx * (CELL / 2 + 0.1) + dz * along, r.range(-2.5, -0.7), ctr.z + dz * (CELL / 2 + 0.1) + dx * along, r.range(0, TAU), [s, s * r.range(0.6, 1), s], shade(cliff, r.range(-0.07, 0.05)));
+        const e = sup.edgeAt(ctr.x, ctr.z, dx, dz, dx !== 0 ? along : -along, c.type === CellType.Wall);
+        const sy = r.range(-2.5, -0.7), sz = r.range(0, TAU), sh = r.range(0.6, 1), col = shade(cliff, r.range(-0.07, 0.05));
+        if (e) boulders.add(e.x + e.nx * 0.1, sy, e.z + e.nz * 0.1, sz, [s, s * sh, s], col);
       }
 
       // Lo de arriba de los muros lo pone la ambientación del juego.
@@ -124,19 +128,21 @@ export class DecorView {
       }
       for (let k = 0; k < tufts; k++) {
         const [x, z] = spot(0.82);
-        grass.add(x, t.topAt(i, x, z), z, r.range(0, TAU), r.range(0.8, 1.3), shade(r.pick(theme.grass), r.range(-0.05, 0.05)));
+        const rot = r.range(0, TAU), sc = r.range(0.8, 1.3), col = shade(r.pick(theme.grass), r.range(-0.05, 0.05));
+        if (sup.ground(x, z)) grass.add(x, t.groundAt(x, z), z, rot, sc, col);
       }
       if (r.chance(0.28 + road * 0.3)) {
         for (let k = r.int(1, 2); k > 0; k--) {
           const [x, z] = spot(0.82);
-          const s = r.range(0.05, 0.11);
-          pebbles.add(x, t.topAt(i, x, z) + s * 0.3, z, r.range(0, TAU), [s, s * 0.6, s], shade(stone, r.range(-0.06, 0.08)));
+          const s = r.range(0.05, 0.11), rot = r.range(0, TAU), col = shade(stone, r.range(-0.06, 0.08));
+          if (sup.ground(x, z)) pebbles.add(x, t.groundAt(x, z) + s * 0.3, z, rot, [s, s * 0.6, s], col);
         }
       }
       if (!ramp && veg > 0.6 && r.chance(0.22)) {
         for (let k = r.int(1, 2); k > 0; k--) {
           const [x, z] = spot(0.8);
-          flowers.add(x, t.topAt(i, x, z), z, r.range(0, TAU), r.range(0.8, 1.2), new THREE.Color(r.pick(theme.flowers)));
+          const rot = r.range(0, TAU), sc = r.range(0.8, 1.2), col = new THREE.Color(r.pick(theme.flowers));
+          if (sup.ground(x, z)) flowers.add(x, t.groundAt(x, z), z, rot, sc, col);
         }
       }
     }
